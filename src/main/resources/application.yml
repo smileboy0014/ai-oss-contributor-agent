@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: ai-oss-contributor-agent
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:oss-agent;MODE=PostgreSQL;DB_CLOSE_DELAY=-1}
+    username: ${DATABASE_USERNAME:sa}
+    password: ${DATABASE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+agent:
+  execution:
+    max-retries: 3
+    timeout-seconds: 1800

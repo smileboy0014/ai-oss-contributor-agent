@@ -12,6 +12,22 @@ cp .claude/settings.json.example .claude/settings.local.json
 - `.claude/settings.json` 에 토큰 넣기 — 커밋 대상이다
 - 소스·테스트 픽스처에 토큰 하드코딩 — [`secret-scan.sh`](../scripts/secret-scan.sh) 가 커밋을 차단한다
 
+### gh 활성 계정 — 이 저장소는 `smileboy0014` 로 작업한다
+
+저장소 소유자가 `smileboy0014` 다. 다른 계정(회사 계정 등)이 활성 상태면 **push 가
+`403 Permission denied` 로 죽는다.** 작업 전 확인하고 전환한다.
+
+```bash
+gh auth status                       # 활성 계정 확인
+gh auth switch --user smileboy0014   # 전환 후 작업
+```
+
+⚠️ **저장소 한정 우회는 없다.** `git config --local credential.https://github.com.username` 을
+걸어도 gh 크리덴셜 헬퍼가 비활성 계정의 토큰을 내주지 않아 `could not read Password` 로 실패한다.
+전역 `gh auth switch` 가 유일한 방법이고, 전역이므로 **다른 저장소 작업에도 영향**을 준다.
+
+403 을 토큰 스코프 문제로 오진하지 않는다 — 스코프(`repo`)는 멀쩡한데 **계정이 다른 것**이다.
+
 ## 2. 애플리케이션 환경변수
 
 `.env.example` 을 복사해 `.env` 를 만든다. `.env` 는 `.gitignore` 대상이다.

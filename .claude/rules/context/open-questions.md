@@ -82,7 +82,17 @@ PostgreSQL 에서 기동하지 않는다. H2 는 core 에 남아 있어 별도 �
 
 **검증 (2026-09-21)** — H2·PostgreSQL 양쪽에서 V1 적용 + `validate` 통과를 실제 기동으로 확인했다.
 
-### Q-2b. 🟡 「H2 에서 됐다」가 여전히 거짓 신호일 수 있다
+### Q-2b. 🟢 「H2 에서 됐다」의 간극 — **Testcontainers 로 메웠다** (2026-09-22 · #5)
+
+대용량 텍스트를 `TEXT` + `@Column(columnDefinition = "TEXT")` 로 두고 **양쪽에서 실제로 확인**했다.
+H2 는 `./gradlew build`(Flyway 적용 + `validate`), PostgreSQL 은 `SchemaMigrationTest`(Testcontainers).
+벤더 분리도 H2 제거도 하지 않았고, 단일 SQL 한 벌이 양쪽에서 돈다.
+
+⚠️ `@Lob` 은 쓰지 않는다 — PostgreSQL 에서 `oid` 로 매핑돼 라지오브젝트 테이블을 따로 쓰게 된다.
+
+**남은 위험** — 아래 절은 여전히 유효하다. `TEXT` 는 통과했지만 JSONB·파티셔닝은 시도하지 않았다.
+
+### Q-2b-1. 🟡 벤더 고유 문법은 여전히 금지다
 
 위 결정의 잔여 위험이다. [`setup.md`](../../docs/setup.md) 가 「H2 에서 됐다고 PostgreSQL 에서
 된다고 보지 않는다」고 적어 둔 그 위험을 **없애지 않고 안고 가기로** 한 것이다.
@@ -134,10 +144,23 @@ S-6 은 `SELECTED` 전이가 사람의 명시적 행위라고 했는데, PRD §2
 
 ## 🔵 기록해 둘 것
 
-### Q-7. Lombok 도입 여부
+### Q-7. ✅ Lombok — **도입** (2026-09-22 · #5)
 
-기준 프로젝트는 엔티티에 Lombok 을 전제한다. 이 프로젝트는 넣지 않았다(순수 getter).
-엔티티가 늘어나면 다시 판단한다. **지금 넣지 않은 것은 의도**다 — 어노테이션 프로세서 하나로 빌드 문제 표면이 넓어진다.
+엔티티가 1개에서 7개가 되면서 보일러플레이트가 실제 비용이 됐다. 「빌드 문제 표면이 넓어진다」는
+원래 보류 사유는 유효하지만, 어노테이션 프로세서 하나를 감수할 만큼 반복이 커졌다.
+
+**엔티티에서 허용하는 것은 둘뿐이다.**
+
+| 허용 | 금지 | 왜 |
+|---|---|---|
+| `@Getter` | `@Setter` · `@Data` | public setter 가 생기면 **상태머신 불변식이 우회 가능**해진다 (S-6) |
+| `@NoArgsConstructor(access = PROTECTED)` | `@Builder` · `@AllArgsConstructor` | 생성 경로가 늘면 「draft 아닌 PR」 같은 불법 상태를 만들 수 있다 (S-2) |
+| | `@EqualsAndHashCode` | JPA 프록시와 충돌한다 |
+
+### Q-7b. 🔵 Lombok 사용 범위를 엔티티 밖으로 넓힐 것인가
+
+지금은 엔티티에만 쓴다. UseCase·어댑터·DTO 에는 쓰지 않았다 — record 로 충분하다.
+넓히려면 그때 판단한다.
 
 ### Q-8. AI 기여를 금지하는 저장소 판정
 
@@ -147,6 +170,32 @@ S-5 가 요구하는 판정인데, **표준 표기법이 없다.** `AGENTS.md`·
 ### Q-9. 테스트에서 GitHub·LLM 을 무엇으로 대체하나
 
 WireMock · 자체 페이크 · 녹화 응답 중 미정. 대외 호출을 타는 통합 테스트를 CI 에 둘 수는 없다.
+
+> **DB 는 Q-9 의 범위가 아니다.** PostgreSQL 은 Testcontainers 로 간다고
+> [`testing-philosophy.md`](../conventions/testing-philosophy.md) 가 이미 정해 뒀고,
+> #5 에서 실제로 배선했다. 여기 남은 것은 **GitHub·LLM 대역**뿐이다.
+
+### Q-9b. ⚠️ docker-java 가 API 버전을 협상하지 않는다 — 함정 기록 (2026-09-22 · #5)
+
+Testcontainers 를 붙일 때 **Docker 가 정상인데도** 다음 오류로 막힌다.
+
+```
+Could not find a valid Docker environment. Please see logs and check configuration
+```
+
+Docker 가 안 떠 있는 것처럼 읽히지만 **실제 원인은 API 버전 거부**다. docker-java 가
+기본값 v1.32 로 요청하고 최신 엔진이 이를 **400** 으로 돌려보낸다(이 엔진은 v1.41+ 만 받는다).
+
+| 시도 | 결과 |
+|---|---|
+| `DOCKER_HOST` · `DOCKER_API_VERSION` **환경변수** | ❌ 안 먹는다 |
+| `~/.testcontainers.properties` 전략 핀 제거 | ❌ 무관 (별개 문제였다) |
+| **시스템 프로퍼티 `api.version`** | ✅ **해결** |
+
+docker-java 는 환경변수가 아니라 **점 표기 시스템 프로퍼티**를 읽는다.
+`build.gradle.kts` 의 Test 태스크에 `systemProperty("api.version", "1.44")` 로 걸어 뒀다.
+
+진단에 오래 걸리는 자리다. 증상만 보고 「Docker 문제」로 넘기지 않는다.
 
 ### Q-10. CI 부재
 

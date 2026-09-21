@@ -140,6 +140,45 @@ chore(build): Maven → Gradle 전환
 - `--draft` 옵션: `gh pr create --base main --draft`
 - 제목과 본문은 HEREDOC 으로 전달 (개행 안전)
 
+### 8단계: 이슈 메타데이터 승계 (이슈가 있을 때 필수)
+
+**PR 은 이슈의 라벨·마일스톤·프로젝트를 그대로 물려받는다.** 사람이 나중에 붙이는 것에 기대지 않는다.
+
+```bash
+ISSUE=5                      # 브랜치명에서 추출한 번호
+PR=$(gh pr view --json number --jq .number)
+
+LABELS=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+MILESTONE=$(gh issue view "$ISSUE" --json milestone --jq '.milestone.title // empty')
+
+[ -n "$LABELS" ]    && gh pr edit "$PR" --add-label "$LABELS"
+[ -n "$MILESTONE" ] && gh pr edit "$PR" --milestone "$MILESTONE"
+
+# 프로젝트 보드 — 이슈가 올라가 있는 보드에 PR 도 올린다
+gh issue view "$ISSUE" --json projectItems --jq '.projectItems[].title'
+gh project item-add <번호> --owner <소유자> --url "$(gh pr view "$PR" --json url --jq .url)"
+```
+
+**왜 자동인가** — 라벨이 없으면 PR 목록에서 「이게 무슨 작업인지」가 제목에만 남는다.
+마일스톤이 없으면 Phase 진척이 이슈로만 집계되고 실제 산출물인 PR 은 빠진다.
+사람이 매번 붙이는 규칙은 **반드시 빠진다.**
+
+**승계 규칙**
+
+| 항목 | 처리 |
+|---|---|
+| 라벨 | 이슈 것을 **전부** 가져온다. `decision`·`safety` 도 포함 — PR 에서도 같은 무게다 |
+| 마일스톤 | 이슈 것을 그대로 |
+| 프로젝트 | 이슈가 속한 보드에 PR 도 추가 (보드 자동화가 이미 넣었으면 중복 추가하지 않는다) |
+| 이슈가 없는 작업 | 건너뛴다. 근거 1줄을 결과 보고에 남긴다 |
+
+⚠️ **붙였는지 확인까지 한다.** `gh pr edit` 은 라벨이 저장소에 없으면 조용히 실패한다.
+
+```bash
+gh pr view "$PR" --json labels,milestone --jq \
+  '"labels=[\(.labels|map(.name)|join(","))] milestone=\(.milestone.title // "없음")"'
+```
+
 ## 브랜치 이름에서 이슈 번호 추출
 
 ```
@@ -158,6 +197,7 @@ chore/_gradle-migration           → (이슈 없음)
 - 새 환경변수가 있으면 `.env.example` 반영 여부 확인
 - 디렉토리 구조가 바뀌었으면 `README.md` 갱신 여부 확인
 - 도메인 구조·상태머신·스키마가 바뀌었으면 `.claude/codemaps/` 갱신 여부 확인
+- **이슈가 있으면 라벨·마일스톤·프로젝트를 승계하고, 붙었는지 확인까지 한다** (8단계)
 
 ## 연계 커맨드
 

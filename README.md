@@ -9,6 +9,9 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 - 기여 후보 조회 API 경계: `GET /api/candidates`
 - PostgreSQL/Redis 로컬 개발 환경과 H2 기본 프로필
 - `DISCOVERED`부터 `PR_CREATED`까지의 후보 상태 모델
+- **GitHub 읽기 능력**: 저장소 메타데이터·파일 조회(`RepositorySource`), open 이슈 조회(`IssueSource`).
+  타임아웃·재시도를 명시하고, 403을 **권한 오류 / 1차 레이트리밋 / 2차 레이트리밋**으로 구분합니다.
+  쓰기 메서드는 존재하지 않습니다 — 원본 저장소로 가는 경로는 읽기뿐입니다(S-1)
 
 구현 순서는 Issue Scanner → 정책/이슈 분석 → Candidate 영속화 → Sandbox 기반 구현·검증 → 사용자 Fork의 Draft PR 생성입니다. 원본 저장소 직접 push와 자동 merge는 지원하지 않습니다.
 
@@ -43,13 +46,16 @@ curl -X POST http://localhost:8080/api/repositories \
 ├── gradle/libs.versions.toml  의존성 버전 단일 관리
 ├── docker-compose.yml         postgres · redis
 ├── .env.example               환경변수 예시 (실제 값은 커밋 금지)
-├── docs/                      PRD 등 산출물
+├── docs/                      PRD · 구현 계획(plans/) 등 산출물
 ├── .claude/                   Claude Code 하네스 — 규칙 · 스킬 · 에이전트 · 훅
 └── src/main/java/com/ossagent/
-    ├── config/                조립 전용 (Clock 등)
-    ├── support/               도메인 없는 공통 (web 예외 매핑)
-    ├── repository/            대상 저장소 등록 · 기여 규약 분석
-    ├── issue/                 이슈 수집 · 필터            (경계만)
+    ├── config/                조립 전용 (Clock · GitHub 클라이언트)
+    ├── support/               도메인 없는 공통
+    │   ├── web/               HTTP 예외 매핑
+    │   ├── github/            GitHub 읽기 클라이언트 — 토큰 · 레이트리밋 · 403 구분
+    │   └── secret/            토큰 마스킹 (S-4)
+    ├── repository/            대상 저장소 등록 · 메타데이터/파일 조회 · 기여 규약 분석
+    ├── issue/                 이슈 조회 · 필터            (조회 능력만)
     ├── candidate/             기여 후보 · 상태 전이
     ├── agent/                 LLM · 샌드박스 실행         (경계만)
     └── pullrequest/           Fork · Draft PR            (경계만)

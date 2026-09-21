@@ -89,14 +89,32 @@ com.ossagent.{도메인}
 
 기술 이름은 `adapter/out` 에만 둔다. domain 에는 **능력 이름**으로 선언한다 (규율 ③).
 
-| 경계 | domain 의 능력 인터페이스 (제안) | adapter/out 구현체 (제안) | 소유 도메인 |
-|---|---|---|---|
-| GitHub — 저장소·규약 | `RepositorySource` · `PolicySource` | `GitHubRepositorySource` | `repository` |
-| GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` |
-| GitHub — Fork·PR | `ForkRegistry` · `DraftPrPublisher` | `GitHubDraftPrPublisher` | `pullrequest` |
-| LLM | `IssueAnalyst` · `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` | `ClaudeIssueAnalyst` 등 | `agent` |
-| Docker | `CodeSandbox` | `DockerCodeSandbox` | `agent` |
-| PostgreSQL | Spring Data 인터페이스 (완화 ②로 직접 주입) | `adapter/out/persistence` | 각 도메인 |
+| 경계 | domain 의 능력 인터페이스 | adapter/out 구현체 | 소유 도메인 | 상태 |
+|---|---|---|---|---|
+| GitHub — 저장소·파일 | `RepositorySource` | `GitHubRepositorySource` | `repository` | ✅ **존재** (#6) |
+| GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` | ✅ **존재** (#6) |
+| GitHub — 규약 판정 | `PolicySource` (제안) | — | `repository` | ❌ #7 — `RepositorySource.fetchFile` 위에 올린다 |
+| GitHub — Fork·PR | `ForkRegistry` · `DraftPrPublisher` (제안) | `GitHubDraftPrPublisher` | `pullrequest` | ❌ #22 · #23 |
+| LLM | `IssueAnalyst` · `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | `ClaudeIssueAnalyst` 등 | `agent` | ❌ #10 |
+| Docker | `CodeSandbox` (제안) | `DockerCodeSandbox` | `agent` | ❌ #17 |
+| PostgreSQL | Spring Data 인터페이스 (완화 ②로 직접 주입) | `adapter/out/persistence` | 각 도메인 | 부분 |
+
+### GitHub 접근의 읽기/쓰기 분리 — S-1 을 구조로 지킨다
+
+```
+support/github/GitHubApiClient       ← 공개 메서드는 get(...) 하나. 쓰기 동사가 존재하지 않는다
+        │                              RestClient 는 빈으로 노출하지 않는다 (post() 우회 차단)
+        ├── repository/adapter/out/github/GitHubRepositorySource   읽기
+        └── issue/adapter/out/github/GitHubIssueSource             읽기
+
+(#22 · #23 에서 추가될 쓰기 경로는 별도 타입이고, push 직전 Fork owner 어설션을 갖는다)
+```
+
+classic PAT 은 저장소별 권한 제한이 불가능해 토큰 권한으로 원본 write 를 막을 수 없다(Q-1).
+그래서 **코드 표면이 방어선**이다 — 읽기 클라이언트에 쓰기 메서드를 더하지 않는다.
+
+자격증명은 값이 아니라 **공급자**(`GitHubCredentials`)로 주입한다. 다중 사용자 확장 경로인
+GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야 하기 때문이다 — Q-1 「남은 것」.
 
 **대외 호출은 전부 트랜잭션 밖이다.** 샌드박스 실행은 최대 30분(`timeout-seconds: 1800`)이라,
 트랜잭션 안에 들어가면 DB 커넥션이 30분 잡힌다. 상세는 [`../rules/context/external-deps.md`](../rules/context/external-deps.md).
@@ -124,10 +142,13 @@ com.ossagent.{도메인}
 | `candidate` 조회 API | ⚠️ 경계만 | **빈 배열 고정** |
 | HTTP 예외 매핑 | ✅ | `support/web/ApiExceptionHandler` |
 | `Clock` 주입 | ✅ | `config/ClockConfig` |
-| `RepositoryPolicy` 수집 | ❌ | 없음 |
-| `issue` 도메인 | ❌ | `package-info.java` 뿐 |
-| `agent` 도메인 (LLM·샌드박스) | ❌ | 〃 |
-| `pullrequest` 도메인 | ❌ | 〃 |
+| **GitHub 읽기 클라이언트** | ✅ | `support/github` — 타임아웃·재시도 명시 · **403 을 권한/1차/2차 리밋으로 구분** · 레이트리밋 헤더 노출 · 자격증명 공급자 이음매. **쓰기 메서드 없음(S-1)** |
+| **GitHub 능력 인터페이스** | ✅ | `RepositorySource`(repository) · `IssueSource`(issue) + 어댑터 2 + 테스트 페이크 2 |
+| 시크릿 스크럽 | ⚠️ 부분 | `support/secret/TokenRedactor` — 토큰 패턴 치환만. LLM 프롬프트 단위 배제는 #28 |
+| `RepositoryPolicy` 수집 | ❌ | 능력(`fetchFile`)은 있다. 규약 판정 로직이 없다 — #7 |
+| `issue` 수집 UseCase | ❌ | 능력(`IssueSource`)은 있다. 커서·지연·멱등 저장이 없다 — #8 |
+| `agent` 도메인 (LLM·샌드박스) | ❌ | `package-info.java` 뿐 |
+| `pullrequest` 도메인 | ❌ | 〃 — **쓰기 경로는 여기 생긴다** (#22 · #23). 어설션 없는 push 는 반려 |
 | Scheduler | ❌ | 없음 |
 | Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |
 | 스키마 마이그레이션 | ✅ | **Flyway** · `ddl-auto: validate` · `db/migration/V1` (테이블 1개) |

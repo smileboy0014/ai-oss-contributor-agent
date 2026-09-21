@@ -42,6 +42,31 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `GeneratedChange` | AI 가 만든 변경분 — 브랜치 · 커밋 SHA · diff · 테스트 결과 · 리뷰 결과 |
 | `PullRequest` | Fork URL · 브랜치 · PR 번호 · PR URL · 상태 |
 
+## 능력 인터페이스 — domain 이 선언하고 adapter 가 구현한다
+
+「능력 이름」과 「기술 이름」을 바꿔 쓰지 않는다. 기술 이름이 domain 에 나타나면 규율 ③ 위반이다.
+
+| 능력 (domain) | 구현 (adapter/out) | 뜻 |
+|---|---|---|
+| `RepositorySource` | `GitHubRepositorySource` | 대상 저장소의 메타데이터·파일을 **읽는다**. 쓰기 없음 |
+| `IssueSource` | `GitHubIssueSource` | 대상 저장소의 open 이슈를 **읽는다**. 코멘트 경로 없음(S-2) |
+| `GitHubCredentials` | `StaticTokenCredentials` | 호출마다 자격증명을 공급한다. 단수명 토큰으로 갈아끼울 이음매 — Q-1 |
+| `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
+| `IssueSnapshot` | — | 수집 시점의 이슈 원본 **값**. 영속 엔티티 `Issue` 와 다르다 |
+
+## 레이트리밋 — 1차와 2차를 바꿔 쓰지 않는다
+
+둘 다 **403 으로 온다.** 구분하지 못하면 한쪽은 영구 실패가 되고 다른 쪽은 무한 재시도가 된다.
+
+| 용어 | 신호 | 뜻 | 대응 |
+|---|---|---|---|
+| **1차 레이트리밋** | `X-RateLimit-Remaining: 0` | 시간당 할당량 소진 (인증 5,000/h · Search 30/min) | `resetAt` 까지 **지연** |
+| **2차 레이트리밋** | `Retry-After` · 본문의 `secondary`·`abuse` · 429 | abuse detection. 단시간 집중 호출에 걸린다 | `Retry-After` 만큼 **지연** |
+| **권한 오류** | 위 신호가 **하나도 없는** 403 | 토큰 스코프 부족 · 접근 불가 저장소 | 재시도하지 않고 실패 |
+
+⚠️ 「리밋에 걸렸다」를 **실패**라고 쓰지 않는다. 정상 운영 상황이고 대응은 **지연**이다.
+재시도로 다루면 남은 예산을 더 태운다.
+
 ## 상태
 
 | 용어 | 뜻 |

@@ -62,6 +62,18 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | **Maintainer** | 대상 저장소의 관리자. 우리가 만든 Draft PR 을 사람이 제출한 뒤에야 마주한다 |
 | **Sandbox** | 대상 저장소 빌드·테스트를 격리 실행하는 Docker 컨테이너 |
 
+## 토큰 — 이름이 비슷해서 바꿔 끼우기 쉽다
+
+| 용어 | 뜻 | 이 프로젝트에서 |
+|---|---|---|
+| **classic PAT** | 스코프 단위 개인 토큰 (`public_repo` 등) | ✅ **우리가 쓰는 것** (Q-1) |
+| **fine-grained PAT** | 저장소별·권한별 세분화 토큰 | ❌ **쓸 수 없다** — 멤버가 아닌 upstream 에 PR 생성 불가(403) |
+| **설치 토큰** (installation token) | GitHub App 이 설치된 저장소에서 쓰는 토큰 | ❌ upstream 에 설치될 리 없다 |
+| **사용자 대행 토큰** (user-to-server) | GitHub App 이 OAuth 로 사용자를 대행 | 다중 사용자 확장 시의 경로 |
+
+⚠️ 「fine-grained 가 더 안전하니 바꾸자」는 판단이 반복해서 나올 자리다.
+바꾸면 **PR 생성이 403 으로 죽는다.** 근거는 [`open-questions.md`](./open-questions.md) Q-1.
+
 ## 혼동 주의
 
 | 쓰지 말 것 | 쓸 것 | 왜 |

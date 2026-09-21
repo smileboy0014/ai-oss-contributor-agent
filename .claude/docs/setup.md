@@ -27,8 +27,14 @@ cp .env.example .env
 | `ANTHROPIC_API_KEY` | LLM 호출 불가 (아직 미구현) |
 | `SANDBOX_*` | 샌드박스 실행 불가 (아직 미구현) |
 
-⚠️ `GITHUB_TOKEN` 에 **원본 저장소 write 권한을 주지 않는다** — [S-1](../rules/context/safety-boundaries.md).
-권한을 처음부터 주지 않는 것이 코드로 막는 것보다 확실하다.
+⚠️ `GITHUB_TOKEN` 은 **classic PAT · 스코프 `public_repo`** 다 (Q-1 확정).
+
+**fine-grained PAT 으로 바꾸지 않는다.** 더 안전해 보이지만, 우리가 멤버가 아닌 upstream 에
+PR 을 만들지 못해 **PR 생성이 403 으로 죽는다** — [Q-1](../rules/context/open-questions.md).
+
+classic PAT 은 저장소별 권한 제한이 불가능하다. 즉 **원본 write 를 권한으로 막을 수 없고,
+push 직전 owner 어설션이 유일한 방어**다 — [S-1](../rules/context/safety-boundaries.md).
+`GITHUB_FORK_OWNER` 를 반드시 채운다. 비어 있으면 어설션이 무력해진다.
 
 **새 환경변수를 코드에 추가하면 `.env.example` 에 같은 커밋으로 반영한다.**
 

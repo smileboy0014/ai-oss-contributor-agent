@@ -22,9 +22,29 @@ git.push().setRemote(repository.getUrl()).call();
 git.push().setRemote(fork.getPushUrl()).call();   // fork.owner == GITHUB_FORK_OWNER
 ```
 
-- 토큰 권한부터 막는다 — 원본 저장소 write 스코프를 가진 토큰을 주입하지 않는다
-- push 직전 **원격 URL 의 owner 가 Fork owner 와 일치하는지 단언**한다. 어설션 없는 push 경로는 반려
+- 🔴 push 직전 **원격 URL 의 owner 가 Fork owner 와 일치하는지 단언**한다. 어설션 없는 push 경로는 반려
 - 브랜치 삭제·force push 도 Fork 안에서만
+
+### ⚠️ 권한으로는 막을 수 없다 — 어설션이 유일한 방어다 (2026-09-21 개정)
+
+이 문서는 원래 「토큰 권한부터 막는다」를 1차 방어로 적어 두었다. **그 방어는 실현 불가능하다.**
+
+Q-1 결론(#2)에 따라 인증은 **classic PAT** 이다. 다른 선택지가 없다 — fine-grained PAT 과
+GitHub App 설치 토큰은 **우리가 멤버가 아닌 upstream 에 PR 을 만들지 못한다.**
+그런데 classic PAT 의 `public_repo` 스코프는 **저장소별 권한 제한이 불가능**하다.
+「원본에는 write 를 주지 않는 토큰」이라는 것이 GitHub 에 존재하지 않는다.
+
+| 방어 | 상태 |
+|---|---|
+| ~~토큰 권한 미부여~~ | ❌ **불가능** — classic PAT 은 all-or-nothing |
+| **push 직전 owner 어설션** | ✅ **유일한 방어** |
+
+**잔여 위험** — 사용자가 **collaborator 인 공개 저장소**를 대상으로 등록하면, 토큰은 그 저장소에
+실제로 write 권한을 갖는다. 이때 어설션이 없으면 **진짜로 upstream 에 push 된다.**
+대부분의 대상(`spring-projects/*` 등)은 collaborator 가 아니라 권한이 없지만, **없는 권한에 기대지 않는다.**
+
+그래서 어설션은 「있으면 좋은 것」이 아니라 **없으면 반려**다. 테스트 커버리지 100% 대상이고,
+`push_대상이_Fork가_아니면_중단한다_S1()` 이 그 증거다.
 
 **어기면** — 남의 저장소 히스토리를 오염시킨다. 권한이 있었다면 되돌릴 수 없는 사고고, 없었다면 인증 실패 로그가 상대 감사 로그에 남는다.
 

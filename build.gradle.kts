@@ -24,6 +24,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 
+    // 스키마 정본은 db/migration 의 SQL 이다. ddl-auto 는 validate 로만 쓴다 — Q-2
+    implementation("org.flywaydb:flyway-core")
+    // Flyway 10 부터 DB 별 지원이 모듈로 분리됐다. 이게 없으면 PostgreSQL 에서 기동하지 않는다.
+    // H2 는 core 에 남아 있어 별도 모듈이 없다(flyway-database-h2 는 존재하지 않는다)
+    runtimeOnly("org.flywaydb:flyway-database-postgresql")
+
     runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("com.h2database:h2")
 

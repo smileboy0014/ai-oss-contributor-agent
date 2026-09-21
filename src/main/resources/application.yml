@@ -5,9 +5,18 @@ spring:
     url: ${DATABASE_URL:jdbc:h2:mem:oss-agent;MODE=PostgreSQL;DB_CLOSE_DELAY=-1}
     username: ${DATABASE_USERNAME:sa}
     password: ${DATABASE_PASSWORD:}
+  # 스키마 정본은 db/migration 의 SQL 이다 — Q-2 확정 (2026-09-21)
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    # baseline-on-migrate 를 켜지 않는다. 켜면 「이미 있는 스키마」를 조용히 인정해
+    # 마이그레이션 누락이 드러나지 않는다. 빈 DB 에서 V1 부터 쌓는다
+    baseline-on-migrate: false
   jpa:
     hibernate:
-      ddl-auto: update
+      # ⚠ update 로 되돌리지 않는다. 엔티티가 스키마를 만들기 시작하면
+      #   마이그레이션과 실제 스키마가 갈라지고, 그 사실이 운영에서야 드러난다
+      ddl-auto: validate
     open-in-view: false
 
 management:

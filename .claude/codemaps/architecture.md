@@ -130,7 +130,7 @@ com.ossagent.{도메인}
 | `pullrequest` 도메인 | ❌ | 〃 |
 | Scheduler | ❌ | 없음 |
 | Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |
-| 스키마 마이그레이션 | ❌ | `ddl-auto: update` — **Q-2** |
+| 스키마 마이그레이션 | ✅ | **Flyway** · `ddl-auto: validate` · `db/migration/V1` (테이블 1개) |
 | CI | ❌ | 유일한 게이트는 로컬 `./gradlew build` — **Q-10** |
 
 **「경계만」을 「구현됨」으로 읽지 않는다.** 스캔 API 가 200 을 돌려준다고 이슈가 수집된 것이 아니다.

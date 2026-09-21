@@ -58,15 +58,14 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 
-    // Testcontainers 가 물고 오는 docker-java 의 기본 협상 버전이 낮아, 최신 Docker 엔진이
-    // /v1.32/info 를 400 으로 거부한다. 증상은 「Could not find a valid Docker environment」라
-    // Docker 가 안 떠 있는 것처럼 보이지만, 실제로는 API 버전 거부다 (엔진은 v1.41+ 만 받는다).
+    // Testcontainers 가 물고 오는 docker-java 는 API 버전을 협상하지 않고 기본값(v1.32)으로
+    // 요청하는데, 최신 Docker 엔진이 이를 400 으로 거부한다. 증상이
+    // 「Could not find a valid Docker environment」라 Docker 가 안 떠 있는 것처럼 보이지만
+    // 실제로는 API 버전 거부다 (이 엔진은 v1.41+ 만 받는다).
     //
-    // DOCKER_HOST 도 함께 준다 — 이게 있어야 EnvironmentAndSystemPropertyClientProviderStrategy 가
-    // 활성화되고, 그 전략만이 DOCKER_API_VERSION 을 읽는다. 소켓 전략들은 자체 설정을 만들어
-    // 버전 지정을 무시한다. 이미 설정된 환경변수가 있으면 그것을 존중한다.
-    environment("DOCKER_HOST", System.getenv("DOCKER_HOST") ?: "unix:///var/run/docker.sock")
-    environment("DOCKER_API_VERSION", System.getenv("DOCKER_API_VERSION") ?: "1.44")
+    // ⚠ DOCKER_API_VERSION 환경변수로는 고쳐지지 않는다. docker-java 는 시스템 프로퍼티의
+    //   점 표기(api.version)를 읽는다. 환경변수만 주면 전략이 전부 400 으로 떨어진다
+    systemProperty("api.version", "1.44")
 
     // 기본 출력은 예외 클래스와 발생 위치만 남기고 메시지를 버린다.
     // 컨텍스트 로딩 실패처럼 원인이 중첩된 경우 무엇이 틀렸는지 알 수 없어 전문을 남긴다.

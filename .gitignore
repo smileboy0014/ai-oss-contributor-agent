@@ -22,6 +22,9 @@ secrets/
 # Claude Code 로컬 설정 (크리덴셜 포함)
 .claude/settings.local.json
 
+# /work 작업 격리용 worktree — 커밋 대상 아님
+.claude/worktrees/
+
 # 런타임
 logs/
 *.log

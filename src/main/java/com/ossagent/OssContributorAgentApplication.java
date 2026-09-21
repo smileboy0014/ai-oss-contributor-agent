@@ -1,4 +1,4 @@
-package io.github.smileboy0014.ossagent;
+package com.ossagent;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

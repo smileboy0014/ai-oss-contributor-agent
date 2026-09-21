@@ -1,5 +1,6 @@
-package io.github.smileboy0014.ossagent.candidate;
+package com.ossagent.candidate.adapter.in.web;
 
+import com.ossagent.candidate.adapter.in.web.dto.CandidateSummary;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -12,8 +13,5 @@ public class CandidateController {
     @GetMapping
     public List<CandidateSummary> list() {
         return List.of();
-    }
-
-    public record CandidateSummary(Long id, Long issueId, CandidateStatus status, double confidence) {
     }
 }

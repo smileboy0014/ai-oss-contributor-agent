@@ -177,6 +177,22 @@ class GitHubRepositorySourceTest {
     }
 
     @Test
+    @DisplayName("size 가 빠져도 encoding 이 base64 가 아니면 예외다 — size 에만 기대지 않는다")
+    void size가_없어도_encoding으로_읽지_못함을_알아낸다_S5() {
+        // GitHub 이 1MB 초과에 쓰는 실제 표식은 encoding:"none" 이다.
+        // size 에만 판정을 걸면 size 가 빠진 응답에서 「읽지 못함」이 「빈 파일」로 샌다
+        server.expect(once(),
+                requestTo(BASE_URL + "/repos/spring-projects/spring-kafka/contents/CONTRIBUTING.md"))
+                .andRespond(withSuccess("{\"type\":\"file\",\"encoding\":\"none\",\"content\":\"\"}",
+                        MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> source.fetchFile(KAFKA, "CONTRIBUTING.md", null))
+                .as("「읽지 못했다」가 「규약이 없다」로 번역되면 규약 위반 PR 이 나간다 — S-5")
+                .isInstanceOf(GitHubUnreadableContentException.class)
+                .hasMessageContaining("blob/raw");
+    }
+
+    @Test
     @DisplayName("빈 파일은 정상이다 — 크기 0 이면 내용도 비어 있는 게 맞다")
     void 진짜_빈_파일은_정상이다() {
         server.expect(once(), requestTo(BASE_URL + "/repos/spring-projects/spring-kafka/contents/EMPTY"))

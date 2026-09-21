@@ -15,6 +15,9 @@ import org.junit.jupiter.api.Test;
  */
 class GitHubRetryPolicyTest {
 
+    /** 고정값을 쓴다 — 시각에 의존하는 판정이 없음을 드러내기 위해서다. */
+    private static final Instant RESET_AT = Instant.parse("2026-09-22T10:00:00Z");
+
     private final GitHubRetryPolicy policy = new GitHubRetryPolicy(2, Duration.ofMillis(500));
 
     @Test
@@ -27,7 +30,7 @@ class GitHubRetryPolicyTest {
     @DisplayName("레이트리밋은 재시도하지 않는다 — 재시도가 아니라 지연이다")
     void 레이트리밋은_재시도하지_않는다() {
         GitHubRateLimitException limit = new GitHubRateLimitException(403,
-                GitHubRateLimitException.Scope.PRIMARY, Instant.now(), null, "소진");
+                GitHubRateLimitException.Scope.PRIMARY, RESET_AT, null, "소진");
 
         assertThat(policy.shouldRetry(limit, 0))
                 .as("즉시 다시 걸면 남은 예산만 더 태우고 2차 리밋에서는 차단이 길어진다")

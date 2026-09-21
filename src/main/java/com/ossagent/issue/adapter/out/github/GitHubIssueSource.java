@@ -72,9 +72,13 @@ public class GitHubIssueSource implements IssueSource {
         }
         boolean hasNext = hasNextLink(response.linkHeader());
 
-        log.debug("대상 저장소 이슈 조회 repo={} page={} 건수={} PR제외={} hasNext={}",
-                query.coordinates().fullName(), query.page(), issues.size(),
-                issues.stream().filter(IssueSnapshot::isIssue).count(), hasNext);
+        if (log.isDebugEnabled()) {
+            // 인자는 레벨과 무관하게 먼저 평가된다. 스캔의 모든 페이지에서 도는 자리라
+            // 집계 스트림을 조건 안으로 넣는다
+            log.debug("대상 저장소 이슈 조회 repo={} page={} 건수={} 이슈만={} hasNext={}",
+                    query.coordinates().fullName(), query.page(), issues.size(),
+                    issues.stream().filter(IssueSnapshot::isIssue).count(), hasNext);
+        }
         return new IssuePage(issues, response.etag(), false, hasNext);
     }
 

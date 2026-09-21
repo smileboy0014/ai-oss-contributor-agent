@@ -12,31 +12,72 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 
 구현 순서는 Issue Scanner → 정책/이슈 분석 → Candidate 영속화 → Sandbox 기반 구현·검증 → 사용자 Fork의 Draft PR 생성입니다. 원본 저장소 직접 push와 자동 merge는 지원하지 않습니다.
 
+> ⚠️ 이슈 수집·LLM 호출·샌드박스 실행·PR 생성은 **아직 구현되지 않았습니다.** `scan`은 요청 사실만 기록하고 `GET /api/candidates`는 빈 배열을 반환합니다.
+
 ## 시작하기
 
 ```bash
 docker compose up -d
-DATABASE_URL=jdbc:postgresql://localhost:5432/oss_agent \\
-DATABASE_USERNAME=oss_agent DATABASE_PASSWORD=oss_agent \\
-./mvnw spring-boot:run
+
+DATABASE_URL=jdbc:postgresql://localhost:5432/oss_agent \
+DATABASE_USERNAME=oss_agent DATABASE_PASSWORD=oss_agent \
+./gradlew bootRun
 ```
 
-Maven Wrapper를 아직 포함하지 않았다면, Maven 설치 후 `mvn spring-boot:run`을 사용합니다. 기본값은 외부 서비스 없이 실행되는 H2 in-memory 데이터베이스입니다.
+환경변수를 주지 않으면 외부 서비스 없이 H2 in-memory로 기동합니다. Gradle은 별도 설치가 필요 없고 `./gradlew` 래퍼를 사용합니다 (JDK 21 필요).
 
 ```bash
-mvn test
-curl -X POST http://localhost:8080/api/repositories \\
-  -H 'Content-Type: application/json' \\
+./gradlew build     # 컴파일 + 테스트 + 패키징
+./gradlew test      # 테스트만
+
+curl -X POST http://localhost:8080/api/repositories \
+  -H 'Content-Type: application/json' \
   -d '{"owner":"spring-projects","name":"spring-kafka","url":"https://github.com/spring-projects/spring-kafka"}'
 ```
 
 ## 구조
 
 ```text
-repository/  등록 저장소와 scan 진입점
-issue/       GitHub 이슈 수집·정규화 (다음 단계)
-candidate/   기여 후보와 상태 전이
-job/         재시도 가능한 비동기 작업
+├── build.gradle.kts           단일 Gradle 프로젝트
+├── settings.gradle.kts
+├── gradle/libs.versions.toml  의존성 버전 단일 관리
+├── docker-compose.yml         postgres · redis
+├── .env.example               환경변수 예시 (실제 값은 커밋 금지)
+├── docs/                      PRD 등 산출물
+├── .claude/                   Claude Code 하네스 — 규칙 · 스킬 · 에이전트 · 훅
+└── src/main/java/com/ossagent/
+    ├── config/                조립 전용 (Clock 등)
+    ├── support/               도메인 없는 공통 (web 예외 매핑)
+    ├── repository/            대상 저장소 등록 · 기여 규약 분석
+    ├── issue/                 이슈 수집 · 필터            (경계만)
+    ├── candidate/             기여 후보 · 상태 전이
+    ├── agent/                 LLM · 샌드박스 실행         (경계만)
+    └── pullrequest/           Fork · Draft PR            (경계만)
 ```
 
-GitHub App 권한, LLM 키, sandbox 실행 권한은 애플리케이션 설정과 분리해 Secret Manager 또는 CI/CD 환경변수로 주입합니다.
+각 도메인 내부는 **헥사고날 라이트**로 `domain / application / adapter{in,out}` 3계층을 갖습니다. 상세는 [`.claude/docs/structure.md`](.claude/docs/structure.md).
+
+## 안전 경계
+
+이 프로젝트의 사고는 외부 OSS 커뮤니티로 직접 나갑니다. 아래 6가지는 예외 없이 지킵니다 — 상세는 [`.claude/rules/context/safety-boundaries.md`](.claude/rules/context/safety-boundaries.md).
+
+| # | 규칙 |
+|---|---|
+| S-1 | 쓰기 대상은 **사용자 Fork 뿐**. 원본 저장소는 읽기만 |
+| S-2 | PR은 **항상 draft**. 자동 머지·ready 전환·리뷰어 지정 금지 |
+| S-3 | 대상 저장소 코드는 **샌드박스 밖에서 실행하지 않음** |
+| S-4 | 시크릿은 코드·로그·**LLM 프롬프트** 어디에도 넣지 않음 |
+| S-5 | 대상 저장소의 기여 규약이 우리 규약보다 우선 |
+| S-6 | 사람의 승인 지점을 코드로 우회하지 않음 |
+
+GitHub App 권한, LLM 키, sandbox 실행 권한은 애플리케이션 설정과 분리해 Secret Manager 또는 CI/CD 환경변수로 주입합니다. `.env`는 커밋 대상이 아니며, `git commit` 시 시크릿 패턴과 안전 경계 위반을 훅이 차단합니다.
+
+## 개발 규칙
+
+| 문서 | 내용 |
+|---|---|
+| [`.claude/README.md`](.claude/README.md) | 하네스 전체 인덱스 |
+| [`.claude/docs/setup.md`](.claude/docs/setup.md) | 초기 셋업 |
+| [`.claude/docs/rules.md`](.claude/docs/rules.md) | 컨텍스트·컨벤션·코드맵 읽는 순서 |
+| [`.claude/rules/context/open-questions.md`](.claude/rules/context/open-questions.md) | 미결 대장 — **착수 전 확인** |
+| [`docs/ai-oss-contributor-agent-prd.md`](docs/ai-oss-contributor-agent-prd.md) | PRD v1.1 (Draft) |

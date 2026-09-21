@@ -1,0 +1,8 @@
+# 의존성 버전 단일 관리 — 버전은 반드시 여기서만 올린다
+[versions]
+springBoot = "3.5.0"
+springDependencyManagement = "1.1.7"
+
+[plugins]
+spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }
+spring-dependency-management = { id = "io.spring.dependency-management", version.ref = "springDependencyManagement" }

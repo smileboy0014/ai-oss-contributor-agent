@@ -1,0 +1,183 @@
+# 데이터 모델 코드맵
+
+> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §22 Database ERD (v1.1 Draft).
+> ⚠️ **실제 존재하는 테이블은 `oss_repositories` 하나뿐이다.** 아래 7개 중 나머지 6개는 **설계일 뿐 코드에 없다.**
+> ⚠️ **스키마 관리가 `ddl-auto: update` 다.** 운영에 쓸 수 없고, 컬럼을 지우거나 타입을 바꾸면 반영되지 않는다.
+> 엔티티를 더 만들기 전에 마이그레이션 도구를 정한다 → [`../rules/context/open-questions.md`](../rules/context/open-questions.md) **Q-2**.
+
+## 네이밍 컨벤션
+
+- 테이블·컬럼은 **snake_case**. 테이블명은 복수형 (`oss_repositories`)
+- PK 는 **`id`** (BIGINT AUTO_INCREMENT). FK 는 `{대상단수}_id` — `repository_id` · `candidate_id`
+- 시각은 **`~_at`** (TIMESTAMP) — `created_at` · `updated_at` · `last_scanned_at` · `started_at` · `finished_at`
+- BOOLEAN 은 **`is_~`** 또는 서술형 — `enabled` · `tests_required` · `breaking_change`
+- 개수·크기는 **`~_count`**, 토큰은 `input_tokens` · `output_tokens`
+
+PRD ERD 는 `created_at`/`updated_at` 를 `ISSUE` 에만 그렸지만, **모든 테이블에 둔다.** 파이프라인 지연을 추적할 수 없으면 병목을 못 찾는다.
+
+## 설계 원칙
+
+| 원칙 | 이유 |
+|---|---|
+| **시크릿은 어떤 컬럼에도 넣지 않는다** | `contribution_rules` · `diff` · `error_message` · `analysis` 는 전부 외부에서 온 텍스트다. 토큰이 섞여 들어오면 DB 덤프·로그로 유출된다 — [S-4](../rules/context/safety-boundaries.md). 적재 전 스크럽한다 |
+| **대용량 텍스트는 별도 테이블에 격리** | `diff` · `analysis` · `contribution_rules` 는 수십 KB 다. 후보 목록 조회에 딸려 오면 `GET /api/candidates` 가 메가바이트를 뱉는다. 목록 쿼리에서 반드시 제외한다 |
+| **LLM 원문 응답을 그대로 컬럼에 담지 않는다** | 파싱 결과를 구조화 컬럼으로 저장하고 원문은 필요분만. 원문이 정본이 되면 도메인이 모델 출력 포맷에 묶인다 |
+| **토큰·비용은 실행 단위로 남긴다** | `agent_run` 에 `input_tokens`·`output_tokens`. 집계가 없으면 재시도 루프가 조용히 돈을 태운다 |
+| **외부 식별자에 UNIQUE** | GitHub 이슈 번호·PR 번호는 재실행 멱등성의 유일한 근거다 |
+| **후보는 이슈당 1건** | 같은 이슈로 후보가 둘 생기면 같은 작업을 두 번 하고 PR 도 두 개 난다 |
+| **종단 상태를 지우지 않는다** | `REJECTED`·`FAILED` 행을 삭제하면 같은 이슈를 다음 스캔에서 또 분석한다. LLM 비용이 반복된다 |
+
+---
+
+## 테이블 7개
+
+```
+oss_repositories ──1:1──▶ repository_policies
+       │
+       └──1:N──▶ issues ──1:0..1──▶ contribution_candidates
+                                          │
+                                          ├──1:N──▶ agent_runs
+                                          ├──1:N──▶ generated_changes
+                                          └──1:0..1──▶ pull_requests
+```
+
+### `oss_repositories` ✅ **유일하게 실재**
+
+대상 저장소 등록 정보. 이 프로젝트 자신이 아니라 **기여 대상**이다.
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `owner` | VARCHAR NOT NULL | `spring-projects` |
+| `name` | VARCHAR NOT NULL | `spring-kafka` |
+| `url` | VARCHAR NOT NULL **UNIQUE** | 중복 등록 차단의 근거 |
+| `enabled` | BOOLEAN NOT NULL | 스캔 대상 여부 |
+| `last_scanned_at` | TIMESTAMP NULL | 스캔 커서 |
+| `default_branch` | VARCHAR | **설계만** — 코드에 없다 |
+| `language` | VARCHAR | 〃 |
+| `build_tool` | VARCHAR | 〃 `gradle` / `maven` |
+| `build_command` | VARCHAR | 〃 |
+
+인덱스 후보 — `UNIQUE(url)` (있음) · `INDEX(enabled, last_scanned_at)` 스캔 대상 선별용.
+
+### `repository_policies` ❌ 설계만
+
+대상 저장소의 **기여 규약**. 없으면 구현 단계로 넘어가지 않는다 — [S-5](../rules/context/safety-boundaries.md).
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `repository_id` | BIGINT FK | 1:1 |
+| `java_version` | VARCHAR | 샌드박스 이미지 선택 근거 |
+| `build_command` · `test_command` | VARCHAR | 〃 실행 명령 |
+| `issue_reference_required` | BOOLEAN | 커밋/PR 에 이슈 참조 필수 |
+| `signoff_required` | BOOLEAN | DCO sign-off 필수 |
+| `tests_required` | BOOLEAN | 테스트 동반 필수 |
+| `ai_contribution_allowed` | BOOLEAN NULL | **PRD 에 없지만 추가해야 한다.** NULL = 판정 실패 = **보류**(허용 아님) — Q-8 |
+| `contribution_rules` | TEXT | 원문 요약. **대용량 · 스크럽 대상** |
+| `analyzed_at` | TIMESTAMP | 규약은 바뀐다. 재분석 주기 판단 근거 |
+
+**`ai_contribution_allowed` 를 NOT NULL DEFAULT true 로 두지 않는다.** 기본 허용은 S-5 위반을 기본값으로 만드는 것이다.
+
+### `issues` ❌ 설계만
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `repository_id` | BIGINT FK | |
+| `github_issue_number` | INT NOT NULL | |
+| `title` | VARCHAR | |
+| `body` | TEXT | **대용량** — 목록 조회에서 제외 |
+| `state` | VARCHAR | `OPEN` / `CLOSED` |
+| `url` | VARCHAR | |
+| `labels` | VARCHAR | PRD 에 없지만 필터에 필요 (`good first issue` 등) |
+| `filter_result` · `filter_reason` | VARCHAR · TEXT | 왜 배제됐는지. 없으면 같은 이슈를 매번 다시 판정한다 |
+| `created_at` · `updated_at` | TIMESTAMP | **`updated_at` 이 증분 수집 커서다** |
+
+멱등키 — **`UNIQUE(repository_id, github_issue_number)`**.
+없으면 재스캔마다 같은 이슈가 중복 적재되고, 후보도 중복 생성된다.
+
+인덱스 후보 — `INDEX(repository_id, updated_at)` 증분 수집 · `INDEX(state, filter_result)` 후보 선별.
+
+### `contribution_candidates` ❌ 설계만 (enum 만 존재)
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `issue_id` | BIGINT FK **UNIQUE** | **이슈당 후보 1건** |
+| `category` | VARCHAR | `bug` / `enhancement` / `documentation` |
+| `difficulty` | VARCHAR | `EASY` / `MEDIUM` / `HARD` |
+| `estimated_files` · `estimated_loc` | INT | |
+| `implementation_feasible` | BOOLEAN | |
+| `breaking_change` | BOOLEAN | true 면 후보 배제 대상 |
+| `confidence` | DECIMAL(3,2) | 0.00 ~ 1.00 |
+| `analysis` | TEXT | **대용량 · 스크럽 대상** |
+| `status` | VARCHAR NOT NULL | `CandidateStatus` 11종 — [`domain.md`](./domain.md) |
+| `selected_at` | TIMESTAMP NULL | **사람이 고른 시각.** NULL 이면 구현 단계로 못 간다 (S-6) |
+
+멱등키 — **`UNIQUE(issue_id)`**.
+인덱스 후보 — `INDEX(status)` 대시보드 · `INDEX(status, confidence DESC)` 추천 정렬.
+
+### `agent_runs` ❌ 설계만
+
+파이프라인 한 단계의 **1회 실행 기록**. 비용·재시도의 유일한 근거다.
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `candidate_id` | BIGINT FK | |
+| `stage` | VARCHAR | `ANALYZE` / `PLAN` / `CODE` / `VERIFY` / `REVIEW` |
+| `attempt` | INT | **의미가 미정이다** — 단계별 독립 카운터인지 후보 통합인지 → Q-6 |
+| `input_tokens` · `output_tokens` | INT | 비용 집계 |
+| `status` | VARCHAR | `RUNNING` / `SUCCEEDED` / `FAILED` |
+| `error_message` | TEXT | **스크럽 대상** — 스택트레이스에 토큰이 섞인다 |
+| `started_at` · `finished_at` | TIMESTAMP | 단계별 소요 시간 |
+
+인덱스 후보 — `INDEX(candidate_id, stage, attempt)`.
+
+### `generated_changes` ❌ 설계만
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `candidate_id` | BIGINT FK | |
+| `branch_name` | VARCHAR | `oss-agent/issue-{n}-{slug}` |
+| `commit_sha` | VARCHAR | |
+| `diff` | TEXT/LONGTEXT | **가장 큰 컬럼 · 스크럽 대상.** 목록 조회에서 반드시 제외 |
+| `test_result` · `review_result` | TEXT | **대용량** |
+| `created_at` | TIMESTAMP | 재시도 이력이 쌓이므로 정렬 기준 필요 |
+
+후보당 N 행이다. 재시도할 때마다 새 행을 남기고 **덮어쓰지 않는다** — 무엇이 어떻게 바뀌었는지 추적이 사라진다.
+
+### `pull_requests` ❌ 설계만
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `id` | BIGINT PK | |
+| `candidate_id` | BIGINT FK **UNIQUE** | 후보당 PR 1건 |
+| `fork_url` | VARCHAR NOT NULL | **쓰기 대상은 Fork 뿐** — S-1 |
+| `branch_name` | VARCHAR | |
+| `github_pr_number` | INT | |
+| `pr_url` | VARCHAR | |
+| `status` | VARCHAR | `DRAFT` 로 생성. **`draft` 아닌 상태로 만드는 경로를 두지 않는다** — S-2 |
+| `created_at` | TIMESTAMP | |
+
+멱등키 — **`UNIQUE(candidate_id)`** · 보조로 `UNIQUE(fork_url, branch_name)`.
+없으면 재시도 시 같은 후보로 PR 이 두 개 열린다. **남의 저장소에 중복 PR 을 여는 것은 스팸으로 취급된다.**
+
+---
+
+## 멱등키 요약
+
+| 경로 | 키 | 없으면 |
+|---|---|---|
+| 저장소 등록 | `UNIQUE(url)` | 같은 저장소 중복 등록 |
+| 이슈 재수집 | `UNIQUE(repository_id, github_issue_number)` | 이슈 중복 적재 |
+| 후보 생성 | `UNIQUE(issue_id)` | 같은 작업 이중 실행 |
+| PR 생성 | `UNIQUE(candidate_id)` | **대상 저장소에 중복 PR** |
+
+## 변경 이력
+
+| 일자 | 작성자 | 변경 내용 |
+|------|--------|----------|
+| 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 §22 ERD 기준 · 멱등키·스크럽 대상 컬럼 지정 |

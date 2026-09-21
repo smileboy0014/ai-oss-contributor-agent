@@ -226,19 +226,20 @@ env 를 하나 더 늘리면 `.env.example` 관리 표면만 넓어진다.
 | 4 | 조립 — `GitHubClientConfig` · `application.yml` | 1~3 |
 | 5 | 테스트 — 페이크 2 + 테스트 클래스 8 | 1~4 |
 
-## 6. 테스트 계획 — 실행 결과 **74건 · 실패 0**
+## 6. 테스트 계획 — 실행 결과 **92건 · 실패 0**
 
 | 클래스 | 건수 | 무엇을 지키는가 |
 |---|---|---|
 | `GitHubErrorTranslatorTest` | 13 | **403 구분** — 1차(Remaining 0) / 2차(Retry-After) / 2차(본문 문구) / 429 / 권한. 401·404·5xx. HTTP-date `Retry-After`. 본문 토큰 스크럽. 깨진 헤더 |
-| `GitHubApiClientTest` | 15 | **S-1** 공개 메서드 `get` 뿐 · 실제 동사 GET. **S-4** 헤더 인증·URL 무토큰·예외 사슬·**로그**. 레이트리밋 노출·임박 경고·「모름」. 304. 재시도/미재시도 4종 |
-| `GitHubRepositorySourceTest` | 10 | 메타데이터 매핑 · 보관 저장소 · base64 · `ref`. **S-5** 404만 빈 값 / 403·1MB초과·디렉터리·symlink 는 예외 |
+| `GitHubApiClientTest` | 17 | **S-1** 공개 메서드 `get` 뿐 · 실제 동사 GET. **S-4** 헤더 인증·URL 무토큰·예외 사슬·**로그**. 레이트리밋 노출·임박 경고·「모름」. 304. 재시도/미재시도 4종 |
+| `GitHubRepositorySourceTest` | 12 | 메타데이터 매핑 · 보관 저장소 · base64 · `ref`. **S-5** 404만 빈 값 / 403·1MB초과·디렉터리·symlink 는 예외 |
 | `GitHubIssueSourceTest` | 8 | **PR 을 이슈로 취급하지 않음** · `Link` → hasNext · 304 ≠ 빈 결과 · 증분 쿼리 · 라벨 두 형식 |
 | `GitHubRetryPolicyTest` | 8 | 일시적 실패만 재시도 · 레이트리밋 제외 · 상한 소진 · 선형 백오프 |
 | `TokenRedactorTest` | 6 | **S-4** 토큰 5종 + Authorization 헤더 · 정상 메시지 무훼손 |
 | `GitHubPropertiesTest` | 5 | **S-4** `toString` 마스킹 2종 · 기본값 · 불가능한 설정 거부 |
 | `GitHubClientConfigTest` | 4 | 연결 타임아웃 명시 · **S-1** `RestClient` 빈 미노출 · 기본값 고정 |
 | `GitHubCapabilityFakeTest` | 4 | 능력이 **실제로 페이크로 대체 가능한가**(규율 ③ 의 값어치) |
+| `RepositoryCoordinatesTest` | 14 | **좌표가 요청 경로를 벗어나지 못한다** — `?`·`#`·`/`·`..` 거부 |
 | `OssContributorAgentApplicationTests` | 1 | 토큰 없이도 컨텍스트가 뜬다(회귀 방지) |
 
 **대외 호출 대체** — 능력 소비자 관점은 자체 페이크, HTTP 계층은 `MockRestServiceServer`.
@@ -249,6 +250,7 @@ env 를 하나 더 늘리면 `.env.example` 관리 표면만 넓어진다.
 
 | 항목 | 상태 |
 |---|---|
+| **리다이렉트 시 `Authorization` 전달** | ✅ **해소** — 검증 대신 **제거**했다. `Redirect.NEVER` + 3xx 명시 실패. 「JDK 가 아마 헤더를 지울 것」이라는 전제에 토큰을 걸지 않는다 |
 | **읽기 타임아웃 실동작** | ❌ 미검증. `JdkClientHttpRequestFactory` 가 값을 되읽을 수단을 주지 않는다. 내부 필드 리플렉션은 「구현 내부 필드에 의존」 금지에 걸려 하지 않았다. 연결 타임아웃만 `HttpClient.connectTimeout()` 으로 확인 |
 | **`MockRestServiceServer` 는 요청 팩토리를 교체한다** | 그래서 어댑터 테스트는 실제 타임아웃 설정을 타지 않는다. 설정 전달은 코드로 보장, 실동작은 수동 검증 몫 |
 

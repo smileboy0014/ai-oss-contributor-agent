@@ -71,10 +71,21 @@ public class GitHubClientConfig {
         return factory;
     }
 
+    /**
+     * 🔴 <b>리다이렉트를 따라가지 않는다 — S-4.</b>
+     *
+     * <p>리다이렉트를 켜면 클라이언트가 {@code Location} 이 가리키는 곳으로 요청을 다시 보내는데,
+     * 그때 {@code Authorization} 헤더가 따라가는지는 <b>우리가 통제하지 않는 JDK 동작</b>이다.
+     * 따라간다면 GitHub 이 준 주소로 토큰이 나간다. 「아마 안 따라갈 것」에 시크릿을 걸지 않는다.
+     *
+     * <p>대가는 작다. GitHub API 가 리다이렉트를 주는 경우는 저장소 이름 변경(301) 정도이고,
+     * 그때는 <b>조용히 따라가는 것보다 드러나는 편이 낫다</b> — 등록된 좌표가 낡았다는 신호다.
+     * {@code GitHubApiClient} 가 3xx 를 명시적 실패로 번역한다.
+     */
     static HttpClient httpClient(GitHubProperties properties) {
         return HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())
-                .followRedirects(HttpClient.Redirect.NORMAL)
+                .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
 }

@@ -193,6 +193,21 @@ class GitHubRepositorySourceTest {
     }
 
     @Test
+    @DisplayName("encoding 필드가 아예 없어도 「읽지 못함」이다 — 필드의 부재를 신뢰하지 않는다")
+    void encoding이_없으면_읽지_못한_것이다_S5() {
+        // 「읽었다」는 base64 로 긍정적으로 증명될 때만 참이다.
+        // encoding·content·size 가 모두 빠진 200 응답이 빈 파일로 귀결되면
+        // 「CONTRIBUTING.md 가 있는데 비었다」가 되고, #7 이 「규약 없음 → 허용」으로 읽는다
+        server.expect(once(),
+                requestTo(BASE_URL + "/repos/spring-projects/spring-kafka/contents/CONTRIBUTING.md"))
+                .andRespond(withSuccess("{\"type\":\"file\"}", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> source.fetchFile(KAFKA, "CONTRIBUTING.md", null))
+                .as("판정 세 개를 모두 빠져나가는 조합이 남아 있으면 S-5 가 뚫린다")
+                .isInstanceOf(GitHubUnreadableContentException.class);
+    }
+
+    @Test
     @DisplayName("빈 파일은 정상이다 — 크기 0 이면 내용도 비어 있는 게 맞다")
     void 진짜_빈_파일은_정상이다() {
         server.expect(once(), requestTo(BASE_URL + "/repos/spring-projects/spring-kafka/contents/EMPTY"))

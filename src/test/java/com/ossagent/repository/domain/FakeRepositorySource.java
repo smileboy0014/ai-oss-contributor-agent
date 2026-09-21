@@ -47,13 +47,22 @@ public class FakeRepositorySource implements RepositorySource {
         return List.copyOf(fetchedPaths);
     }
 
+    /**
+     * ⚠️ 미등록 저장소에서 던지는 {@link IllegalStateException} 은 <b>「저장소가 없다」가 아니라
+     * 「테스트 셋업이 빠졌다」</b>는 뜻이다. 실제 구현은 그 경우 다른 예외를 던진다.
+     *
+     * <p>일부러 타입을 다르게 둔다. 페이크가 실제와 같은 예외를 던지면 <b>등록을 깜빡한 테스트가
+     * 「저장소 없음 시나리오를 검증한 테스트」로 통과</b>해 버린다.
+     * 「없음」·레이트리밋·권한 시나리오를 검증하려면 {@link #failWith(RuntimeException)} 으로
+     * 실제 예외를 주입한다.
+     */
     @Override
     public RepositoryMetadata fetchMetadata(RepositoryCoordinates coordinates) {
         throwIfFailing();
         RepositoryMetadata found = metadata.get(coordinates.fullName());
         if (found == null) {
             throw new IllegalStateException(
-                    "페이크에 등록되지 않은 저장소입니다: " + coordinates.fullName());
+                    "페이크에 등록되지 않은 저장소입니다(테스트 셋업 오류): " + coordinates.fullName());
         }
         return found;
     }

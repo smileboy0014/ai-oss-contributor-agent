@@ -138,6 +138,15 @@ public class GitHubApiClient {
         if (status.value() == HttpStatus.NOT_MODIFIED.value()) {
             return GitHubResponse.notModified(etag, rateLimit);
         }
+        // 🔴 리다이렉트를 따라가지 않으므로(S-4 · GitHubClientConfig 참조) 3xx 가 여기 온다.
+        //    3xx 는 isError() 가 false 라, 잡지 않으면 「Moved Permanently」 본문이
+        //    정상 응답으로 둔갑해 어댑터가 빈 메타데이터를 만든다
+        if (status.is3xxRedirection()) {
+            throw new GitHubApiException(status.value(),
+                    "GitHub 이 리다이렉트를 돌려줬습니다 — 대상 저장소가 이동·이름변경됐을 수 있습니다. "
+                            + "path=" + request.path() + " location="
+                            + headers.getFirst(HttpHeaders.LOCATION));
+        }
         if (status.isError()) {
             throw errorTranslator.translate(status.value(), headers, readBody(response), request.path());
         }

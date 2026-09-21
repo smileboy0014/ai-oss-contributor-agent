@@ -105,7 +105,12 @@ public class GitHubRepositorySource implements RepositorySource {
         //    판정을 size 에만 걸지 않는다. size 가 빠졌거나 0 으로 오는 응답에서
         //    「읽지 못함」이 조용히 「빈 파일」로 새기 때문이다. GitHub 이 쓰는 실제 표식인
         //    encoding 을 먼저 본다 — base64 가 아니면 우리가 읽을 수 있는 내용이 아니다.
-        if (encoding != null && !"base64".equals(encoding)) {
+        //
+        //    ⚠ encoding 이 null(필드 자체가 없음)인 경우도 「읽지 못함」이다.
+        //    「읽었다」는 base64 로 <b>긍정적으로 증명</b>될 때만 참이다. 필드의 부재를
+        //    신뢰 가능한 상태로 취급하면 {"type":"file"} 뿐인 응답이 빈 파일로 귀결된다.
+        //    진짜 빈 파일도 GitHub 은 encoding:"base64" + content:"" 로 준다.
+        if (!"base64".equals(encoding)) {
             throw new GitHubUnreadableContentException(
                     ("파일 내용을 받지 못했습니다 — Contents API 인라인 한계(%d bytes)를 넘었을 수 있습니다. "
                             + "blob/raw API 가 필요합니다 repo=%s path=%s encoding=%s size=%d")
@@ -126,15 +131,10 @@ public class GitHubRepositorySource implements RepositorySource {
 
     private static String decode(String encoded, String encoding, RepositoryCoordinates coordinates,
             String path) {
-        // 인코딩 검사는 호출자가 이미 끝냈다(여기 도달하면 encoding 은 null 이거나 base64 다).
-        // 빈 내용을 인코딩 검사보다 먼저 통과시키면 「읽지 못함」이 「빈 파일」로 샌다 — S-5
+        // 여기 도달하면 encoding 은 반드시 base64 다 — 호출자가 그 밖을 전부 걷어냈다.
+        // 빈 내용은 「진짜 빈 파일」이다(GitHub 은 빈 파일도 base64 로 표시한다).
         if (encoded == null || encoded.isBlank()) {
             return "";
-        }
-        if (encoding != null && !"base64".equals(encoding)) {
-            throw new GitHubUnreadableContentException(
-                    "알 수 없는 파일 인코딩입니다 repo=%s path=%s encoding=%s"
-                            .formatted(coordinates.fullName(), path, encoding));
         }
         try {
             // GitHub 은 base64 를 줄바꿈으로 접어서 준다 — MIME 디코더를 쓴다

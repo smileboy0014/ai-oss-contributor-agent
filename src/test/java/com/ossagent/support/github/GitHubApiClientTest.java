@@ -10,6 +10,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.ossagent.support.secret.TokenRedactor;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -138,6 +139,29 @@ class GitHubApiClientTest {
                     .as("예외 메시지는 로그·AgentRun.errorMessage·에러 응답으로 번진다")
                     .doesNotContain(FAKE_TOKEN);
         }
+    }
+
+    @Test
+    @DisplayName("응답 본문에 실려 온 토큰이 예외로 나가지 않는다 — 스크럽 배선을 고정한다")
+    void 응답_본문의_토큰이_예외로_새지_않는다_S4() {
+        // 앞의 두 테스트만으로는 부족하다. 403 본문에 토큰이 없으면
+        // TokenRedactor 를 통째로 지워도 통과한다. 토큰이 실제로 메시지에 들어가는
+        // 입력을 줘서 「본문 → 발췌 → 예외 생성자」 배선 전체를 고정한다
+        // 422 를 쓰는 이유 — 5xx 는 재시도 대상이라 기대를 3번 걸어야 한다.
+        // 여기서 보려는 것은 재시도가 아니라 스크럽이다
+        String leaked = "ghp_" + "w".repeat(30);
+        server.expect(once(), requestTo(BASE_URL + "/repos/o/n"))
+                .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+                        .body("upstream said: " + leaked));
+
+        Throwable thrown = org.assertj.core.api.Assertions
+                .catchThrowable(() -> client.get(GitHubRequest.of("/repos/o/n")));
+
+        assertThat(thrown).isInstanceOf(GitHubApiException.class);
+        assertThat(thrown.getMessage())
+                .as("대상 저장소·GitHub 이 준 본문에 시크릿이 섞여 있을 수 있다")
+                .doesNotContain(leaked)
+                .contains(TokenRedactor.MASK);
     }
 
     @Test
@@ -296,6 +320,23 @@ class GitHubApiClientTest {
                 .isInstanceOf(GitHubPermissionException.class);
 
         server.verify();
+    }
+
+    @Test
+    @DisplayName("리다이렉트를 따라가지 않고 명시적 실패로 만든다")
+    void 리다이렉트를_따라가지_않는다_S4() {
+        // 리다이렉트를 켜면 Authorization 헤더가 Location 으로 따라가는지가
+        // 우리가 통제하지 않는 JDK 동작이 된다. 「아마 안 따라갈 것」에 토큰을 걸지 않는다.
+        // 3xx 는 isError() 가 false 라 잡지 않으면 정상 응답으로 둔갑한다
+        server.expect(once(), requestTo(BASE_URL + "/repos/o/n"))
+                .andRespond(withStatus(HttpStatus.MOVED_PERMANENTLY)
+                        .header(HttpHeaders.LOCATION, BASE_URL + "/repos/o/renamed")
+                        .body("{\"message\":\"Moved Permanently\"}"));
+
+        assertThatThrownBy(() -> client.get(GitHubRequest.of("/repos/o/n")))
+                .as("「Moved Permanently」 본문이 저장소 메타데이터로 매핑되면 안 된다")
+                .isInstanceOf(GitHubApiException.class)
+                .hasMessageContaining("리다이렉트");
     }
 
     @Test

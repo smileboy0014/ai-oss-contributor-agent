@@ -131,6 +131,14 @@ description: 요구사항을 분석하여 구현 계획을 수립합니다.
 계획서를 `docs/plans/PLAN-{issue}.md` 에 저장합니다. 이슈가 없으면 `docs/plans/PLAN-{slug}.md`.
 템플릿은 [`references/template.md`](./references/template.md) 참조.
 
+**계획서는 저장소에 커밋한다** — PR 본문·`/handoff`·`/work` 재진입 감지가 이 파일을 참조하므로,
+커밋되지 않으면 죽은 링크가 되고 세션과 함께 사라진다.
+
+| 호출 경로 | 커밋 주체 |
+|---|---|
+| `/work` 안에서 호출 | **work 가 Phase 1-6 에서 커밋·push 한다** (`docs(docs): PLAN-{issue} 구현 계획 추가`) |
+| 단독 호출 | 계획 확정 후 같은 형식으로 커밋할지 사용자에게 확인한다 |
+
 ## PRD 연계
 
 PRD 가 있는 경우 (`docs/prd/PRD-{issue}.md` 또는 루트 [`docs/ai-oss-contributor-agent-prd.md`](../../../docs/ai-oss-contributor-agent-prd.md)):

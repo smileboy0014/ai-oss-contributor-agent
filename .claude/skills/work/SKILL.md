@@ -36,6 +36,24 @@ description: GitHub 이슈 작업의 단일 진입점 — type(feature/fix/refac
 
 **`main` 직접 커밋은 하지 않는다.** 히스토리에 직접 커밋 2건이 있지만 여기서부터는 PR 로만 간다.
 
+## 작업 격리 — worktree 필수 🔴
+
+**모든 `/work` 실행은 전용 git worktree 안에서 한다.** 메인 체크아웃에서 브랜치를 절단해 작업하지 않는다.
+「충돌이 우려되면」이 아니라 **예외 없이 항상**이다.
+
+체크아웃이 하나뿐이면 동시에 들어온 두 작업이 서로를 덮어쓴다 — 한쪽의 `git checkout` 이 다른 쪽의
+미커밋 변경을 끌고 다니고, `./gradlew build` 는 같은 `build/` 를 두 세션이 나눠 쓴다.
+빌드 결과가 누구 것인지 알 수 없으면 **로컬 build 가 유일한 게이트**(Q-10)라는 전제가 무너진다.
+
+| 항목 | 값 |
+|---|---|
+| 위치 | `.claude/worktrees/{prefix}/{issue}_{slug}` — 작업 1건 = 디렉토리 1개 |
+| 베이스 | `origin/main` (fetch 후 절단) |
+| 수명 | 이슈 1건 = worktree 1개. **머지 후 Phase 6 에서 회수** |
+| 메인 체크아웃 | `main` 에 둔 채 건드리지 않는다 — 작업물을 남기지 않는다 |
+
+⚠️ `.claude/worktrees/` 는 `.gitignore` 대상이다. worktree 디렉토리가 스테이징되면 반려.
+
 ## 타입 프로필
 
 | type | Phase 1 (계획) | 브랜치 | 특이사항 |
@@ -59,7 +77,8 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
 ```
 [Phase 0] 타입 결정 + 재진입 감지
   1. 인자 파싱 (이슈 미지정 시 브랜치명에서 추출)
-  1.5 재진입 감지 — 처음부터 다시 돌지 않는다:
+  1.5 재진입 감지 — 처음부터 다시 돌지 않는다 (git worktree list 를 먼저 본다):
+      ├─ 이슈 worktree 존재 → 그 worktree 로 들어가 이어서 (새로 만들지 않는다)
       ├─ PR 머지됨 → Phase 6 직행
       ├─ PR open → 리뷰 코멘트 있으면 [리뷰 코멘트 대응] / 빌드 적색이면 Phase 2 회귀
       ├─ 브랜치·커밋 존재 → 기존 산출물 입력으로 Phase 2 이어서
@@ -67,6 +86,44 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
   2. type 미지정 → gh issue view 후 추정 → ⚠ AskUserQuestion 강제
      (추정 type 첫 옵션 + Recommended + 근거)
   3. TodoWrite 로 해당 type 의 phase 들을 진행 추적 등록
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[Phase 0.5] 작업 격리 — worktree 분기   (전 타입 필수 · 예외 없음)
+  ⚠ 여기를 건너뛰고 메인 체크아웃에서 브랜치를 절단하면 동시 작업이 서로를 덮어쓴다.
+
+  1. 기존 worktree 확인 — 재진입이면 새로 만들지 않는다:
+       git worktree list
+     ├─ {prefix}/{issue}_{slug} 가 이미 있다 → 그 경로로 들어가 이어서 작업
+     └─ 없다 → 2 로
+
+  2. 분기 (둘 중 하나 · 결과는 같다 — origin/main 기준 새 브랜치 + 전용 디렉토리):
+     · EnterWorktree 툴이 있으면 → EnterWorktree(name: "{prefix}/{issue}_{slug}")
+       `.claude/worktrees/{prefix}/{issue}_{slug}` 생성 + 세션 작업 디렉토리 전환
+       재진입은 EnterWorktree(path: "<git worktree list 가 보여준 경로>")
+     · 툴이 없으면(서브에이전트·CLI) 수동:
+
+       git fetch origin main
+       git worktree add -b {prefix}/{issue}_{slug} \
+           .claude/worktrees/{prefix}/{issue}_{slug} origin/main
+       cd .claude/worktrees/{prefix}/{issue}_{slug}
+
+  3. ⚠ 위치 단언 (필수) — 이후 모든 명령은 worktree 안에서 돈다:
+
+       pwd; git rev-parse --show-toplevel; git branch --show-current
+
+     toplevel 이 메인 체크아웃 경로면 **즉시 중단**하고 1 로 돌아간다.
+     구현·빌드·커밋·PR·리뷰 반영까지 전부 여기서 한다 — 중간에 메인 체크아웃으로 나가지 않는다
+
+  4. worktree 에는 **추적되는 파일만** 온다. `.env` · `.claude/settings.local.json` 같은
+     로컬 전용 파일은 따라오지 않으므로 필요하면 메인 체크아웃에서 복사한다.
+     커밋 훅 3개는 `.claude/scripts/` 가 추적 대상이라 그대로 돈다
+
+  ※ 같은 브랜치를 worktree 두 곳에 체크아웃할 수 없다 — git 이 거부한다.
+     거부당했다는 것은 **다른 세션이 이미 그 이슈를 잡고 있다**는 신호다.
+     이름을 바꿔 새로 만들지 말고 그 worktree 로 들어간다
+
+  ※ 계획보다 **먼저** 분기하는 이유 — worktree 는 미커밋 파일을 데려가지 않는다.
+     여기서 분기해야 docs/plans/PLAN-{issue}.md 부터 worktree 안에서 쓰인다
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [Phase 1] 계획   (feature·refactor·fix — chore·quick 은 1줄 메모 후 skip)
@@ -95,13 +152,20 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      이슈 본문 대비 검토: 빠진 요구 / 이슈에 없는 창작 / 미결 임의 확정 / 안전 경계 누락.
      지적 반영 후 재검토 · 최대 3회 · 같은 중대 지적 잔존 시 선택 게이트
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-[브랜치 분기]
-  git fetch origin main
-  git checkout -b {prefix}/{issue}_{slug} origin/main
-  ※ 동일 브랜치 존재 = 재진입 — 이어서 작업. 다른 세션과 충돌 우려 시 git worktree 수동 분기
+  6. ⚠ 계획 커밋 + push (계획서를 만들었으면 **필수** · 구현 커밋과 섞지 않는다):
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       git add docs/plans/PLAN-{issue}.md
+       /commit   →  docs(docs): PLAN-{issue} 구현 계획 추가
+       git push -u origin {prefix}/{issue}_{slug}
+
+     여기서 커밋·push 하는 이유 4가지 — 하나라도 놓치면 뒤에서 깨진다:
+     · PR 본문이 `Plan: docs/plans/PLAN-{issue}.md` 를 링크한다 — 커밋 안 하면 **죽은 링크**다
+     · Phase 6 의 worktree 회수가 **추적되지 않는 파일 때문에 거부**된다. force 로 밀면 계획서가 사라진다
+     · 원격에 브랜치가 생겨야 다른 세션이 「이 이슈는 이미 누가 잡았다」를 본다 — 중복 작업 방지
+     · Phase 0 재진입 감지와 /handoff 가 읽는 것이 이 파일이다. 커밋 안 된 계획은 세션과 함께 증발한다
+
+     ※ chore·quick 은 계획서를 만들지 않으므로 해당 없음
+
 [Phase 2] 구현 + 테스트
   - [architecture.md](../../rules/conventions/architecture.md) 규율 4줄 준수:
     ① 의존은 안쪽으로 (domain 에 Spring·HTTP·GitHub·LLM import 금지)
@@ -116,9 +180,11 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
   ⚠ 빌드 판정 (필수) — 파이프로 자른 출력만 보고 성공 판정 금지
      (파이프 종료 코드는 마지막 명령이 덮어쓴다):
 
-     ./gradlew build > /tmp/build.log 2>&1; echo "exit=$?"; grep -c '^BUILD SUCCESSFUL' /tmp/build.log
+     mkdir -p build && ./gradlew build > build/work-build.log 2>&1; echo "exit=$?"; \
+       grep -c '^BUILD SUCCESSFUL' build/work-build.log
 
      exit=0 과 grep 결과 1 이 **둘 다** 나와야 통과다. 하나라도 어긋나면 실패로 취급한다
+     ⚠ 로그는 worktree 안(`build/`)에 쓴다. `/tmp/build.log` 같은 공용 경로는 **동시 작업이 서로 덮어쓴다**
 
   - 커밋: /commit (scope = repository·issue·candidate·agent·pr·support·build·infra·docs·claude ·
     한 커밋에 여러 도메인 금지 · 커밋 시 훅 3개가 돈다 — secret-scan · safety-boundary-check ·
@@ -140,6 +206,7 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
     | 상태·전이·재시도·필터 규칙 | codemaps/domain.md |
     | 새 환경변수 | .env.example |
     | 새 용어 | rules/context/glossary.md |
+    | 구현 중 계획이 바뀜 (범위·설계 변경) | docs/plans/PLAN-{issue}.md — 갱신 후 커밋 |
     | 미결이 닫힘 | rules/context/open-questions.md |
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -181,14 +248,40 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
   미해결 스레드 수집 → 타당 = 수정+push / 반려 = 근거 답글 → 답글 후 완결 건만 resolve
   → 설계 결정·안전 경계 해석이 필요한 건은 선택 게이트
 
-[Phase 6] (머지 후) 후속
+[Phase 6] (머지 후) 후속 — 정리까지 해야 끝이다. worktree·브랜치를 남기지 않는다
+  0. ⚠ 머지 확인이 선행 조건 — 이것 없이는 아무것도 지우지 않는다:
+       gh pr view {pr} --json state,mergedAt,headRefName
+
   ├─ 이슈 닫기 — gh issue close {issue} --comment "PR #{pr} 머지" (이슈가 있을 때만)
-  ├─ 원격 브랜치 삭제 — gh pr 머지 시 자동 삭제되지 않았으면 수동
-  └─ 로컬 정리 — git checkout main && git pull && git branch -d {branch}
+  ├─ 원격 브랜치 삭제 — 머지 시 자동 삭제되지 않았으면 수동:
+  │       git push origin --delete {branch}
+  ├─ worktree 회수 — 잔존 변경부터 확인한다 (worktree 안에서 git status --porcelain):
+  │    ⚠ 여기서 나오는 **추적되지 않는 계획서·문서는 Phase 1-6 을 건너뛴 증거**다.
+  │      지우지 말고 커밋·push 한 뒤 회수한다 (계획서는 main 에 남는다 — 삭제 대상이 아니다)
+  │    · EnterWorktree 로 들어왔으면 → ExitWorktree(action: "remove")
+  │        ↳ 디렉토리와 **브랜치를 함께 지운다.** 아래 로컬 브랜치 삭제는 건너뛴다
+  │        ↳ squash 머지 탓에 「원본 브랜치에 없는 커밋」으로 보여 거부될 수 있다.
+  │          0 에서 머지를 확인했으면 discard_changes: true 로 재호출
+  │    · 수동 분기였으면 → 메인 체크아웃에서:
+  │        git worktree remove .claude/worktrees/{prefix}/{issue}_{slug}
+  │        git worktree prune
+  │    ⚠ 미커밋 변경이 남아 있으면 지우지 않는다 — 목록을 제시하고 선택 게이트.
+  │      --force · discard_changes 로 밀어버리지 않는다
+  └─ 로컬 브랜치 삭제 (메인 체크아웃 · **worktree 회수 후에만 가능**):
+         git pull --ff-only origin main
+         git branch -d {branch}
+       ↳ **Squash Merge 라 `-d` 가 "not fully merged" 로 거부하는 것이 정상이다** —
+         squash 는 새 커밋을 만들어 브랜치 커밋이 main 에 그대로 남지 않는다.
+         0 에서 머지를 확인했으면 git branch -D {branch} 로 지운다
+       ↳ ExitWorktree(remove) 로 회수했으면 브랜치는 이미 없다 —
+         git branch --list {branch} 가 비어 있으면 skip
+
+  정리 결과(worktree 제거 · 로컬/원격 브랜치 삭제)를 결과 보고에 남긴다.
+  하나라도 남겼으면 **남긴 이유와 경로**를 적는다 — 조용히 쌓이면 다음 /work 가 재진입으로 오판한다
 
 [결과 보고]
   PR 링크 · 안전 경계 판정 · 미결 대조 결과 · 리뷰 결과(반영/코멘트/스킵 사유)
-  · 문서 동기화 · 다음 단계
+  · 문서 동기화 · **정리 결과(worktree·브랜치)** · 다음 단계
 ```
 
 ## 실패 처리
@@ -196,6 +289,12 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
 | 상황 | 동작 |
 |------|------|
 | 이슈 식별 실패 | 에러 + `/work <issue> <type>` 안내 · 슬러그 진행 여부 확인 |
+| **메인 체크아웃에서 작업 중임을 발견** | 즉시 중단 — 변경분을 커밋·stash 로 옮겨 worktree 에서 재개. 메인 체크아웃에 작업물을 남기지 않는다 |
+| 브랜치가 이미 다른 worktree 에 체크아웃 (git 거부) | **중복 작업 신호** — 새로 만들지 않고 그 worktree 로 들어가 재진입 처리 |
+| worktree 제거 실패 (미커밋 변경 잔존) | 강제 삭제 금지 — 잔존 목록 제시 후 선택 게이트 |
+| `git branch -d` 가 "not fully merged" 로 거부 | **Squash Merge 의 정상 동작.** `gh pr view` 로 머지를 확인한 뒤에만 `-D`. 확인 전에는 지우지 않는다 |
+| 계획서가 커밋되지 않은 채 남아 있음 | Phase 1-6 누락 — worktree 회수가 거부되거나 계획서가 유실된다. 커밋·push 후 진행 |
+| worktree 는 지웠는데 브랜치가 남음 | `git worktree prune` 후 `git branch -d`(필요 시 `-D`). 남은 브랜치는 다음 /work 를 재진입으로 오판하게 만든다 |
 | type 미지정 + 컨펌 응답 없음 | 진행 불가 — 추정만으로 진행 X |
 | **안전 경계(S-1~S-6) 접촉** | 계획서에 조항·준수 방법 명시 없이 Phase 2 로 넘어가지 않는다 |
 | 미결(open-questions) 접촉 | 추측 금지 — 선택 게이트 (가정 명시 진행 / 확인 대기 / 중단) |
@@ -215,11 +314,14 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
 
 이슈: #{issue} — {title}
 브랜치: {prefix}/{issue}_{slug} → main
+worktree: .claude/worktrees/{prefix}/{issue}_{slug}
+PLAN: docs/plans/PLAN-{issue}.md (커밋됨) / 없음(chore·quick)
 PR: {URL}
 
 | 단계 | 상태 |
 |------|------|
-| 1 계획 (+안전 경계·미결 대조) | ✅ / skip |
+| 0.5 worktree 격리 | ✅ |
+| 1 계획 (+안전 경계·미결 대조 · PLAN 커밋) | ✅ / skip |
 | 2 구현·테스트 (gradlew build) | ✅ |
 | 3 자가 점검 | ✅ |
 | 4 문서 동기화 | ✅ / skip (근거) |

@@ -70,7 +70,7 @@ MVP 라 **인스턴스 하나**로 간다. 안에서 도메인을 갈라 나중�
 - 이슈 수집(GitHub API 호출) · LLM 호출 · 샌드박스 실행 · PR 생성 — **구현 0**
 - `POST /api/repositories/{id}/scan` 은 **요청 사실만 기록**하고 실제 스캔을 하지 않는다
 - `GET /api/candidates` 는 **빈 배열 고정**
-- ERD 6테이블 중 `oss_repositories` 하나만 존재. 마이그레이션 도구 미도입(`ddl-auto: update`)
+- ERD 7테이블 중 `oss_repositories` 하나만 존재. 마이그레이션은 Flyway 로 배선됨(`V1`) — 나머지 6개는 #5
 - Redis 는 `docker-compose` 에만 있고 애플리케이션이 쓰지 않는다
 
 ## 성공 지표

@@ -67,8 +67,18 @@ DATABASE_USERNAME=oss_agent DATABASE_PASSWORD=oss_agent \
 ./gradlew bootRun
 ```
 
-붙이지 않으면 H2 로 뜬다. 두 경우 스키마 생성 방식이 다르므로
-(`ddl-auto: update`, [Q-2](../rules/context/open-questions.md)) **H2 에서 됐다고 PostgreSQL 에서 된다고 보지 않는다.**
+붙이지 않으면 H2 로 뜬다. 스키마는 양쪽 다 **Flyway 마이그레이션**(`db/migration`)이 만들고
+`ddl-auto` 는 `validate` 다 — 같은 SQL 한 벌이 양쪽에서 돈다 ([Q-2](../rules/context/open-questions.md)).
+
+⚠️ 그래도 **H2 에서 됐다고 PostgreSQL 에서 된다고 보지 않는다.** 같은 SQL 을 쓰더라도 H2 는
+PostgreSQL 모드 흉내일 뿐이다. 마이그레이션을 추가했으면 **양쪽에서 한 번씩 띄워 본다** ([Q-2b](../rules/context/open-questions.md)).
+
+```bash
+./gradlew build                       # H2 로 검증 (테스트가 Flyway 를 돌린다)
+docker compose up -d                  # PostgreSQL 로 검증
+DATABASE_URL=jdbc:postgresql://localhost:5432/oss_agent \
+DATABASE_USERNAME=oss_agent DATABASE_PASSWORD=oss_agent ./gradlew bootRun
+```
 
 Redis 는 `docker-compose.yml` 에만 있고 애플리케이션이 아직 쓰지 않는다.
 

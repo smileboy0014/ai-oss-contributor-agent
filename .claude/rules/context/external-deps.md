@@ -61,7 +61,11 @@ upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md
 | 로컬 | `docker compose up -d` (`postgres:17-alpine`) |
 | 기본값 | **미설정 시 H2 in-memory** — `application.yml` 이 그렇게 되어 있다 |
 
-⚠️ 지금 스키마 관리는 `ddl-auto: update` 다. 운영에 쓸 수 없다 — 마이그레이션 도구 도입은 Q-2.
+스키마 정본은 **Flyway 마이그레이션**(`db/migration`)이고 `ddl-auto` 는 `validate` 다 — Q-2 확정.
+
+⚠️ 마이그레이션 SQL 은 **H2 와 PostgreSQL 양쪽에서 같은 한 벌**이 돌아야 한다.
+벤더 고유 문법(JSONB · 파티셔닝 · TEXT 계열 차이)을 쓰지 않는다.
+`flyway-database-postgresql` 모듈이 빠지면 PostgreSQL 에서 기동하지 않는다.
 
 ## Redis
 

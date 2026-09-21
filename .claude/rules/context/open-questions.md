@@ -48,16 +48,46 @@ GitHub App 은 권한이 **설치 단위**라 설치되지 않은 upstream 에�
 - 다중 사용자로 확장할 때의 경로는 **GitHub App + user-to-server OAuth** 다. 능력 인터페이스를
   그쪽으로 갈아끼울 수 있게 설계한다 (#6)
 
-### Q-2. 스키마 마이그레이션 도구
+### Q-2. ✅ 스키마 마이그레이션 도구 — **Flyway 로 확정** (2026-09-21 · #3)
 
-지금 `ddl-auto: update` 다. 운영에 쓸 수 없고, ERD 6테이블을 손으로 만들 수도 없다.
+SQL 을 그대로 쓴다. 기준 프로젝트(`torder-membership-crm`)와 같아 두 저장소를 오가는 비용이 없다.
 
-| 선택지 | 비고 |
+| 항목 | 값 |
 |---|---|
-| Flyway | 기준 프로젝트(`torder-membership-crm`)가 쓰는 것 |
-| Liquibase | — |
+| 도구 | **Flyway** (Boot 3.5.0 BOM 이 11.7.2 관리 — 버전 선언 불필요) |
+| 아티팩트 | `flyway-core` + **`flyway-database-postgresql`** |
+| 경로 | `src/main/resources/db/migration` (Flyway 기본값) |
+| `ddl-auto` | **`validate`** — `update` 로 되돌리지 않는다 |
+| `baseline-on-migrate` | **`false`** |
 
-**걸리는 것** — 엔티티를 더 만들기 전에 정해야 한다. 나중에 도입하면 이미 만들어진 스키마를 baseline 으로 잡는 작업이 붙는다.
+⚠️ **Flyway 10 부터 DB 별 지원이 모듈로 분리됐다.** `flyway-database-postgresql` 이 없으면
+PostgreSQL 에서 기동하지 않는다. H2 는 core 에 남아 있어 별도 모듈이 없다
+(`flyway-database-h2` 아티팩트는 **존재하지 않는다** — 찾지 말 것).
+
+`baseline-on-migrate` 를 켜지 않는 이유 — 켜면 「이미 있는 스키마」를 조용히 인정해
+**마이그레이션 누락이 드러나지 않는다.** 빈 DB 에서 V1 부터 쌓는다.
+
+#### 딸려 나온 결정 — H2 를 어떻게 하나
+
+`ddl-auto: validate` 로 바꾸면 마이그레이션 SQL 이 **H2(로컬 기본값)와 PostgreSQL 양쪽에서** 돌아야 한다.
+
+**단일 SQL 한 벌로 간다.** 벤더별 분리(`{vendor}` 플레이스홀더)도, H2 제거도 하지 않았다.
+지금 규모에서는 공통 문법으로 충분하고, 변경이 가장 작다.
+
+**대신 제약이 생긴다** — 마이그레이션에 **벤더 고유 문법을 쓰지 않는다**(JSONB · 파티셔닝 · TEXT 계열 차이).
+
+🟡 **#5 에서 재검토한다.** [`data.md`](../../codemaps/data.md) 의 ERD 에는 `diff`·`analysis`·
+`contribution_rules` 같은 **대용량 텍스트 컬럼**이 있다. 여기서 양쪽이 갈라지면 그때 정한다 —
+벤더별 분리로 갈지, H2 를 버리고 Testcontainers PostgreSQL 단일로 갈지(Q-9 와 함께).
+
+**검증 (2026-09-21)** — H2·PostgreSQL 양쪽에서 V1 적용 + `validate` 통과를 실제 기동으로 확인했다.
+
+### Q-2b. 🟡 「H2 에서 됐다」가 여전히 거짓 신호일 수 있다
+
+위 결정의 잔여 위험이다. [`setup.md`](../../docs/setup.md) 가 「H2 에서 됐다고 PostgreSQL 에서
+된다고 보지 않는다」고 적어 둔 그 위험을 **없애지 않고 안고 가기로** 한 것이다.
+
+지금은 사람이 수동으로 양쪽을 돌려 확인한다. CI(Q-10)가 생기면 **양쪽 검증을 자동화**한다.
 
 ---
 

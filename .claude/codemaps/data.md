@@ -2,8 +2,27 @@
 
 > 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §22 Database ERD (v1.1 Draft).
 > ⚠️ **실제 존재하는 테이블은 `oss_repositories` 하나뿐이다.** 아래 7개 중 나머지 6개는 **설계일 뿐 코드에 없다.**
-> ⚠️ **스키마 관리가 `ddl-auto: update` 다.** 운영에 쓸 수 없고, 컬럼을 지우거나 타입을 바꾸면 반영되지 않는다.
-> 엔티티를 더 만들기 전에 마이그레이션 도구를 정한다 → [`../rules/context/open-questions.md`](../rules/context/open-questions.md) **Q-2**.
+> 나머지는 #5 에서 만든다.
+
+## 스키마는 마이그레이션이 정본이다 (2026-09-21 · Q-2 확정)
+
+**Flyway** 를 쓴다. `ddl-auto` 는 **`validate`** 이고, 엔티티가 스키마를 만들지 않는다.
+
+```
+src/main/resources/db/migration/
+└── V1__create_oss_repositories.sql
+```
+
+| 규칙 | 이유 |
+|---|---|
+| 스키마 변경은 **새 마이그레이션 파일**로만 | 적용된 파일을 고치면 체크섬이 깨져 기동이 실패한다 |
+| `ddl-auto` 를 **`update` 로 되돌리지 않는다** | 엔티티가 스키마를 만들기 시작하면 마이그레이션과 실제 스키마가 갈라지고, 그 사실이 운영에서야 드러난다 |
+| **벤더 고유 문법 금지** — JSONB · 파티셔닝 · TEXT 계열 차이 | 같은 SQL 한 벌이 **H2(로컬 기본값)와 PostgreSQL 양쪽**에서 돌아야 한다 |
+| 엔티티를 바꾸면 **같은 커밋에 마이그레이션**을 넣는다 | `validate` 가 기동 시점에 잡아내지만, 그때는 이미 늦다 |
+
+🟡 **대용량 텍스트 컬럼(`diff` · `analysis` · `contribution_rules`)이 들어올 때 재검토한다.**
+여기서 H2 와 PostgreSQL 이 갈라질 가능성이 높다 —
+[`open-questions.md`](../rules/context/open-questions.md) **Q-2 · Q-2b**.
 
 ## 네이밍 컨벤션
 

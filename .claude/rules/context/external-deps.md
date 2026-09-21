@@ -7,10 +7,17 @@
 | 항목 | 내용 |
 |---|---|
 | 용도 | 저장소 메타데이터 · open 이슈 조회 · 기여 규약 파일 조회 · Fork 생성 · push · Draft PR 생성 |
-| 인증 | `GITHUB_TOKEN` (PAT) 또는 GitHub App 설치 토큰 |
+| 인증 | **classic PAT** (`GITHUB_TOKEN`) · 스코프 `public_repo` — Q-1 확정 (2026-09-21) |
+| 클라이언트 | **Spring `RestClient` 직접 구현** — Q-1 확정. 라이브러리를 쓰지 않는다 |
 | **권한** | 원본은 **읽기만**. 쓰기는 사용자 Fork 에 한정 — [`safety-boundaries.md`](./safety-boundaries.md) S-1 |
 | 레이트리밋 | 인증 5,000 req/h. Search API 는 별도(30 req/min) — **스캐너가 가장 먼저 부딪힌다** |
-| 미결 | 클라이언트 라이브러리 미선정 ([`open-questions.md`](./open-questions.md) Q-1) |
+
+⚠️ **fine-grained PAT 과 GitHub App 설치 토큰은 쓸 수 없다.** 둘 다 우리가 멤버가 아닌
+upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md`](./open-questions.md) Q-1.
+토큰을 교체할 때 「더 안전해 보인다」는 이유로 fine-grained 로 바꾸면 **PR 생성이 403 으로 죽는다.**
+
+⚠️ classic PAT 은 **저장소별 권한 제한이 불가능**하다. 원본 write 를 권한으로 막을 수 없으므로
+**push 직전 owner 어설션이 유일한 방어**다 (S-1).
 
 **설계 제약**
 - 이슈 수집은 `updated_at` 커서 + `ETag` 조건부 요청으로 증분화한다. 매 스캔 전량 조회는 레이트리밋을 태운다

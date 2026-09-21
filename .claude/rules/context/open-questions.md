@@ -12,19 +12,41 @@
 
 ## 🔴 착수를 막는 것
 
-### Q-1. GitHub 연동 방식 — 라이브러리와 인증 주체
+### Q-1. ✅ GitHub 연동 방식 — **classic PAT + Spring RestClient 직접 구현으로 확정** (2026-09-21 · #2)
 
-PRD §25 는 「GitHub App · 최소 권한」이라 썼지만, §23 API 와 `.env` 설계는 개인 토큰(PAT)을 전제한다. 둘은 양립하지만 **Fork 소유자가 달라진다.**
+**선택지가 하나뿐이었다.** PAT 과 GitHub App 의 트레이드오프 문제가 아니라, **둘 중 하나만 동작한다.**
 
-| 선택지 | 결과 |
+| 방식 | Fork 생성 | **upstream 에 PR 생성** | 판정 |
+|---|---|---|---|
+| fine-grained PAT | ✅ | ❌ `403 Resource not accessible by personal access token` | **불가** |
+| GitHub App (설치 토큰) | 공개 저장소는 가능 | ❌ upstream 이 우리 App 을 설치할 리 없다 | **불가** |
+| GitHub App (user-to-server OAuth) | ✅ | ✅ 사용자 대행이라 가능 | 가능하나 OAuth 플로우 필요 |
+| **classic PAT (`public_repo`)** | ✅ | ✅ | **채택** |
+
+PR 생성은 **대상 저장소 소유자 수준의 권한**을 요구한다. fine-grained PAT 은 내가 소유하거나 멤버인
+저장소로만 발급되므로, `spring-projects/spring-kafka` 에 PR 을 열 토큰을 **애초에 만들 수 없다.**
+GitHub 로드맵 #600 에 올라가 있으나 미해결이고, 커뮤니티의 일관된 워크어라운드는 classic PAT 회귀다.
+GitHub App 은 권한이 **설치 단위**라 설치되지 않은 upstream 에서는 동작하지 않는다.
+
+**라이브러리 — Spring `RestClient` 직접 구현.** `hub4j/github-api` 는 활발하지만(2026-09 push) 이 프로젝트와 어긋난다.
+
+| 항목 | hub4j 실태 |
 |---|---|
-| PAT | Fork 는 토큰 소유자 계정. 단일 사용자용. 구현이 가장 짧다 |
-| GitHub App | 설치한 계정마다 Fork. 다중 사용자 확장 가능. 설치 플로우·토큰 갱신 필요 |
+| 안정 버전 | 1.330 (2025-09). 이후 2.0-rc 만 7번 — 1년 넘게 RC |
+| 1차 레이트리밋 | ✅ `GitHubRateLimitChecker` 내장 |
+| **2차 레이트리밋(403)** | ❌ 미구현 (#1975 open, 2024-10~) — 어차피 직접 짜야 한다 |
+| **ETag 조건부 요청** | △ 라이브러리 기능이 아니라 OkHttp 디스크 캐시 위임 (#505, 2019). `updated_at` 커서와 맞물리기 어렵고 의존성이 붙는다 |
 
-라이브러리도 미정 — `kohsuke/github-api` · `hub4j` · Spring `RestClient` 직접 구현.
+우리가 쓸 API 표면은 6개 남짓(저장소 메타·파일·이슈 목록·fork·push·PR)인데,
+까다로운 요구 3개(ETag 커서 · 레이트리밋 헤더 · 403 구분)가 전부 **직접 제어**를 요구한다.
 
-**걸리는 것** — `pullrequest` 도메인의 Fork 좌표 결정 로직, S-1 의 어설션 대상.
-**현재 가정** — 단일 사용자 PAT (`GITHUB_FORK_OWNER` 환경변수가 그 흔적).
+**S-1 에 미친 영향** — classic PAT 은 저장소별 권한 제한이 불가능해 「토큰 권한 미부여」를 1차 방어로 쓸 수 없다.
+[`safety-boundaries.md`](./safety-boundaries.md) S-1 을 같은 커밋에서 개정했다. **코드 어설션이 유일한 방어**다.
+
+**남은 것**
+- PRD §25 의 「GitHub App · 최소 권한」은 이 시나리오에서 성립하지 않는다 — **PRD 개정 필요**
+- 다중 사용자로 확장할 때의 경로는 **GitHub App + user-to-server OAuth** 다. 능력 인터페이스를
+  그쪽으로 갈아끼울 수 있게 설계한다 (#6)
 
 ### Q-2. 스키마 마이그레이션 도구
 

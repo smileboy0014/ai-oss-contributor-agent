@@ -70,7 +70,9 @@ curl -X POST http://localhost:8080/api/repositories \
 | S-5 | 대상 저장소의 기여 규약이 우리 규약보다 우선 |
 | S-6 | 사람의 승인 지점을 코드로 우회하지 않음 |
 
-GitHub App 권한, LLM 키, sandbox 실행 권한은 애플리케이션 설정과 분리해 Secret Manager 또는 CI/CD 환경변수로 주입합니다. `.env`는 커밋 대상이 아니며, `git commit` 시 시크릿 패턴과 안전 경계 위반을 훅이 차단합니다.
+GitHub 토큰, LLM 키, sandbox 실행 권한은 애플리케이션 설정과 분리해 Secret Manager 또는 CI/CD 환경변수로 주입합니다. `.env`는 커밋 대상이 아니며, `git commit` 시 시크릿 패턴과 안전 경계 위반을 훅이 차단합니다.
+
+GitHub 인증은 **classic PAT(`public_repo`)** 입니다. fine-grained PAT과 GitHub App 설치 토큰은 우리가 멤버가 아닌 upstream에 PR을 만들지 못해 사용할 수 없습니다 — 근거는 [`open-questions.md`](.claude/rules/context/open-questions.md) Q-1.
 
 ## 개발 규칙
 

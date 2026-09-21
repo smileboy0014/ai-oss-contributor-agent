@@ -20,7 +20,7 @@ import lombok.NoArgsConstructor;
  * 남의 저장소에 중복 PR 을 여는 것은 스팸으로 취급된다 — S-2.
  */
 @Entity
-@Table(name = "pull_requests")
+@Table(name = "pull_request")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class PullRequest {
@@ -29,7 +29,7 @@ public class PullRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidates.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code contribution_candidate.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
     @Column(name = "candidate_id", nullable = false)
     private Long candidateId;
 
@@ -37,7 +37,7 @@ public class PullRequest {
      * push 대상 Fork 의 좌표 — S-1.
      *
      * <p>스키마에 upstream 좌표가 없다는 뜻이 아니다({@link #prUrl} 과
-     * {@code oss_repositories.url} 은 upstream 을 가리킨다). S-1 의 방어는 컬럼 구성이 아니라
+     * {@code oss_repository.url} 은 upstream 을 가리킨다). S-1 의 방어는 컬럼 구성이 아니라
      * <b>push 직전 owner 어설션</b>이며 그것은 #22 소관이다.
      */
     @Column(nullable = false, length = 512)

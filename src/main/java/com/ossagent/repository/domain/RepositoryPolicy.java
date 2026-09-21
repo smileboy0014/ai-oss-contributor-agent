@@ -19,7 +19,7 @@ import lombok.NoArgsConstructor;
  * 여기 담긴 규약을 따른다.
  */
 @Entity
-@Table(name = "repository_policies")
+@Table(name = "repository_policy")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RepositoryPolicy {
@@ -28,7 +28,7 @@ public class RepositoryPolicy {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code oss_repositories.id}. 도메인 간 참조는 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code oss_repository.id}. 도메인 간 참조는 값으로만 보관한다 — architecture.md 규율 ④ */
     @Column(name = "repository_id", nullable = false)
     private Long repositoryId;
 

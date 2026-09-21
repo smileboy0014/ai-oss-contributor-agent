@@ -16,7 +16,7 @@ import java.time.Instant;
  * {@code .claude/rules/context/safety-boundaries.md} S-1.
  */
 @Entity
-@Table(name = "oss_repositories")
+@Table(name = "oss_repository")
 public class OssRepository {
 
     @Id

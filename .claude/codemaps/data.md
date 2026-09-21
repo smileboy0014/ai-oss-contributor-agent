@@ -13,8 +13,9 @@
 
 ```
 src/main/resources/db/migration/
-├── V1__create_oss_repositories.sql
-└── V2__create_pipeline_tables.sql
+├── V1__create_oss_repositories.sql      (적용된 파일이라 이름을 바꾸지 않는다)
+├── V2__create_pipeline_tables.sql
+└── V3__rename_oss_repositories_to_singular.sql
 ```
 
 | 규칙 | 이유 |
@@ -31,7 +32,9 @@ JSONB·파티셔닝은 여전히 금지다 — [`open-questions.md`](../rules/co
 
 ## 네이밍 컨벤션
 
-- 테이블·컬럼은 **snake_case**. 테이블명은 복수형 (`oss_repositories`)
+- 테이블·컬럼은 **snake_case**. 테이블명은 **단수** (`oss_repository` · `issue` · `agent_run`)
+  - PRD §22 ERD 가 단수이고 JPA/Hibernate 기본값도 단수다. 한 행이 곧 한 개체라는 관계형 관례를 따른다
+  - 복수/단수는 업계가 갈리는 주제지만 **정하고 일관되게 가는 것**이 전부다. 이 프로젝트는 단수다
 - PK 는 **`id`** (BIGINT AUTO_INCREMENT). FK 는 `{대상단수}_id` — `repository_id` · `candidate_id`
 - 시각은 **`~_at`** (TIMESTAMP) — `created_at` · `updated_at` · `last_scanned_at` · `started_at` · `finished_at`
 - BOOLEAN 은 **`is_~`** 또는 서술형 — `enabled` · `tests_required` · `breaking_change`
@@ -56,16 +59,16 @@ PRD ERD 는 `created_at`/`updated_at` 를 `ISSUE` 에만 그렸지만, **모든 
 ## 테이블 7개
 
 ```
-oss_repositories ──1:1──▶ repository_policies
+oss_repository ──1:1──▶ repository_policy
        │
-       └──1:N──▶ issues ──1:0..1──▶ contribution_candidates
+       └──1:N──▶ issue ──1:0..1──▶ contribution_candidate
                                           │
-                                          ├──1:N──▶ agent_runs
-                                          ├──1:N──▶ generated_changes
-                                          └──1:0..1──▶ pull_requests
+                                          ├──1:N──▶ agent_run
+                                          ├──1:N──▶ generated_change
+                                          └──1:0..1──▶ pull_request
 ```
 
-### `oss_repositories` ✅ 실재 (V1)
+### `oss_repository` ✅ 실재 (V1)
 
 대상 저장소 등록 정보. 이 프로젝트 자신이 아니라 **기여 대상**이다.
 
@@ -84,7 +87,7 @@ oss_repositories ──1:1──▶ repository_policies
 
 인덱스 후보 — `UNIQUE(url)` (있음) · `INDEX(enabled, last_scanned_at)` 스캔 대상 선별용.
 
-### `repository_policies` ✅ 실재 (V2)
+### `repository_policy` ✅ 실재 (V2)
 
 대상 저장소의 **기여 규약**. 없으면 구현 단계로 넘어가지 않는다 — [S-5](../rules/context/safety-boundaries.md).
 
@@ -103,7 +106,7 @@ oss_repositories ──1:1──▶ repository_policies
 
 **`ai_contribution_allowed` 를 NOT NULL DEFAULT true 로 두지 않는다.** 기본 허용은 S-5 위반을 기본값으로 만드는 것이다.
 
-### `issues` ✅ 실재 (V2)
+### `issue` ✅ 실재 (V2)
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
@@ -123,7 +126,7 @@ oss_repositories ──1:1──▶ repository_policies
 
 인덱스 후보 — `INDEX(repository_id, updated_at)` 증분 수집 · `INDEX(state, filter_result)` 후보 선별.
 
-### `contribution_candidates` ✅ 실재 (V2)
+### `contribution_candidate` ✅ 실재 (V2)
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
@@ -142,7 +145,7 @@ oss_repositories ──1:1──▶ repository_policies
 멱등키 — **`UNIQUE(issue_id)`**.
 인덱스 후보 — `INDEX(status)` 대시보드 · `INDEX(status, confidence DESC)` 추천 정렬.
 
-### `agent_runs` ✅ 실재 (V2)
+### `agent_run` ✅ 실재 (V2)
 
 파이프라인 한 단계의 **1회 실행 기록**. 비용·재시도의 유일한 근거다.
 
@@ -159,7 +162,7 @@ oss_repositories ──1:1──▶ repository_policies
 
 인덱스 후보 — `INDEX(candidate_id, stage, attempt)`.
 
-### `generated_changes` ✅ 실재 (V2)
+### `generated_change` ✅ 실재 (V2)
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
@@ -173,7 +176,7 @@ oss_repositories ──1:1──▶ repository_policies
 
 후보당 N 행이다. 재시도할 때마다 새 행을 남기고 **덮어쓰지 않는다** — 무엇이 어떻게 바뀌었는지 추적이 사라진다.
 
-### `pull_requests` ✅ 실재 (V2)
+### `pull_request` ✅ 실재 (V2)
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|

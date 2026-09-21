@@ -46,44 +46,44 @@ class SchemaMigrationTest {
     @Test
     void 마이그레이션이_ERD_7테이블을_만든다() throws Exception {
         assertThat(tableNames()).contains(
-                "oss_repositories",
-                "repository_policies",
-                "issues",
-                "contribution_candidates",
-                "agent_runs",
-                "generated_changes",
-                "pull_requests");
+                "oss_repository",
+                "repository_policy",
+                "issue",
+                "contribution_candidate",
+                "agent_run",
+                "generated_change",
+                "pull_request");
     }
 
     @Test
     void 멱등키_UNIQUE_제약이_걸려_있다() throws Exception {
         // 없으면 재실행이 중복을 만든다 — 이슈 중복 적재 · 후보 이중 실행 · 대상 저장소에 중복 PR
         assertThat(constraintNames("UNIQUE")).contains(
-                "uk_issues_repository_number",
-                "uk_contribution_candidates_issue",
-                "uk_pull_requests_candidate",
-                "uk_pull_requests_fork_branch",
-                "uk_oss_repositories_url");
+                "uk_issue_repository_number",
+                "uk_contribution_candidate_issue",
+                "uk_pull_request_candidate",
+                "uk_pull_request_fork_branch",
+                "uk_oss_repository_url");
     }
 
     @Test
     void 판정_실패를_허용으로_읽지_않도록_ai_contribution_allowed_는_NULL_을_허용한다_S5() throws Exception {
         // NOT NULL DEFAULT TRUE 로 두면 「AI 기여 금지」 저장소를 기본 허용해 버린다.
         // 기본값이 곧 S-5 위반이 되는 자리다
-        assertThat(isNullable("repository_policies", "ai_contribution_allowed")).isTrue();
+        assertThat(isNullable("repository_policy", "ai_contribution_allowed")).isTrue();
     }
 
     @Test
     void 사람이_고른_시각이_비어_있을_수_있어야_한다_S6() throws Exception {
         // selected_at NULL = 아직 사람이 고르지 않음 = 구현 단계로 갈 수 없음.
         // NOT NULL 이면 「사람이 골랐다」를 표현할 수 없게 된다
-        assertThat(isNullable("contribution_candidates", "selected_at")).isTrue();
+        assertThat(isNullable("contribution_candidate", "selected_at")).isTrue();
     }
 
     @Test
     void PR_의_Fork_URL_은_비어_있을_수_없다_S1() throws Exception {
         // 쓰기 대상이 Fork 임을 데이터로 고정한다
-        assertThat(isNullable("pull_requests", "fork_url")).isFalse();
+        assertThat(isNullable("pull_request", "fork_url")).isFalse();
     }
 
     private List<String> tableNames() throws Exception {

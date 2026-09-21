@@ -20,7 +20,7 @@ import lombok.NoArgsConstructor;
  * <p>토큰을 기록하지 않으면 재시도 루프가 조용히 돈을 태운다.
  */
 @Entity
-@Table(name = "agent_runs")
+@Table(name = "agent_run")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class AgentRun {
@@ -29,7 +29,7 @@ public class AgentRun {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidates.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code contribution_candidate.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
     @Column(name = "candidate_id", nullable = false)
     private Long candidateId;
 

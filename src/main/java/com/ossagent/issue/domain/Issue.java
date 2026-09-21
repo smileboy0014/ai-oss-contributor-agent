@@ -19,7 +19,7 @@ import lombok.NoArgsConstructor;
  * 없으면 재스캔마다 같은 이슈가 중복 적재되고 후보도 중복 생성된다.
  */
 @Entity
-@Table(name = "issues")
+@Table(name = "issue")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Issue {
@@ -28,7 +28,7 @@ public class Issue {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code oss_repositories.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code oss_repository.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
     @Column(name = "repository_id", nullable = false)
     private Long repositoryId;
 

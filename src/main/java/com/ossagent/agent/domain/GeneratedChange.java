@@ -22,7 +22,7 @@ import lombok.NoArgsConstructor;
  * 목록 조회 응답에 싣지 않는다 — 실으면 {@code GET /api/candidates} 가 메가바이트를 뱉는다.
  */
 @Entity
-@Table(name = "generated_changes")
+@Table(name = "generated_change")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class GeneratedChange {
@@ -31,7 +31,7 @@ public class GeneratedChange {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidates.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code contribution_candidate.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
     @Column(name = "candidate_id", nullable = false)
     private Long candidateId;
 

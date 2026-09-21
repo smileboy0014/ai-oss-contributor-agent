@@ -22,7 +22,7 @@ import lombok.NoArgsConstructor;
  * 대상 저장소에 PR 이 두 개 난다.
  */
 @Entity
-@Table(name = "contribution_candidates")
+@Table(name = "contribution_candidate")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class ContributionCandidate {
@@ -31,7 +31,7 @@ public class ContributionCandidate {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code issues.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code issue.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
     @Column(name = "issue_id", nullable = false)
     private Long issueId;
 

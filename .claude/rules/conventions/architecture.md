@@ -57,7 +57,26 @@ com.ossagent.{도메인}
 | ① **의존은 안쪽으로** | adapter → application → domain. **domain 의 import 에 기술이 없어야 한다** (JPA 어노테이션만 예외 — 완화 ①). Spring·HTTP·GitHub·LLM 타입이 domain 에 들어오면 반려 |
 | ② **진입점 유형별 분리** | web · scheduler · event. `worker` 프로필 분리(Q-3)가 `@Profile` 로 걸리는 자리다 |
 | ③ **능력은 domain 이 선언, 기술은 adapter 가 구현** | 인터페이스는 **능력 이름**으로 domain 에(`IssueSource` · `CodeSandbox` · `DraftPrPublisher`), 구현체는 **기술 이름**으로 adapter/out 에(`GitHubIssueSource` · `DockerCodeSandbox`). `client`·`port` 라는 패키지명은 쓰지 않는다 |
-| ④ **도메인 간 호출은 application 을 통해서만** | 남의 domain 엔티티·Spring Data 인터페이스를 직접 import 하지 않는다. 필요한 것은 상대 도메인의 UseCase 또는 값 타입 |
+| ④ **도메인 간 호출은 application 을 통해서만** | 남의 domain 엔티티·Spring Data 인터페이스를 직접 import 하지 않는다. 필요한 것은 상대 도메인의 UseCase 또는 값 타입. **도메인 안에서는 제한하지 않는다** — 아래 참조 |
+
+#### 규율 ④의 경계 — 엔티티 참조
+
+④가 막는 것은 **도메인을 넘는** 참조다. 같은 도메인 안에서는 JPA 연관관계를 정상적으로 쓴다.
+
+| | JPA 연관관계 | 물리 FK | 왜 |
+|---|---|---|---|
+| **도메인 안** | ✅ `@OneToOne`·`@ManyToOne` | ✅ 건다 | 함께 움직이는 것들이라 분리 대상이 아니다. 값으로 들고 있으면 매번 두 번 조회한다 |
+| **도메인 넘음** | ❌ `Long` 값만 | ❌ 걸지 않는다 | 아래 두 이유가 **서로 다르다** |
+
+**연관관계를 막는 이유는 컴파일 결합**이다. `@ManyToOne` 을 걸면 `agent` 가 `candidate` 의 엔티티 클래스를 import 하게 되고, 떼어내는 순간 컴파일이 안 된다. 값 참조는 고칠 것이 없다.
+
+**물리 FK 를 막는 이유는 DB 결합**이다. 테이블을 다른 DB 로 옮기면 제약이 깨지고, 삭제 순서가 DB 에 묶인다.
+
+⚠️ 둘을 한 덩어리로 묶어 생각하지 않는다. 「`@ManyToOne` 은 쓰되 물리 FK 만 끄면 분리가 쉬워진다」는 **틀렸다** — 컴파일 결합이 그대로 남는다.
+
+⚠️ **`@ForeignKey(ConstraintMode.NO_CONSTRAINT)` 는 이 프로젝트에서 아무 일도 하지 않는다.** 그 애노테이션은 Hibernate 가 DDL 을 생성할 때만 참조되는데, 우리는 `ddl-auto: validate` 에 스키마 정본이 Flyway SQL 이다. **물리 FK 존재 여부는 마이그레이션이 100% 결정한다.** 의도 표기로 붙이는 것은 무방하나, 그것만 믿고 SQL 을 확인하지 않으면 안 된다.
+
+경계를 넘는 참조는 **참조 무결성을 애플리케이션과 테스트가 책임진다.** DB 가 고아 행을 막아주지 않는다.
 
 ### 의도적 완화 2개 — 근거: 1인 개발
 

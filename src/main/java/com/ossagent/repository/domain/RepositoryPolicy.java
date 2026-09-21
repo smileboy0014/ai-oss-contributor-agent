@@ -3,9 +3,12 @@ package com.ossagent.repository.domain;
 import com.ossagent.support.ExternalText;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import lombok.AccessLevel;
@@ -28,9 +31,19 @@ public class RepositoryPolicy {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code oss_repository.id}. 도메인 간 참조는 값으로만 보관한다 — architecture.md 규율 ④ */
-    @Column(name = "repository_id", nullable = false)
-    private Long repositoryId;
+    /**
+     * 소유 저장소. <b>같은 {@code repository} 도메인 안이라 연관관계를 쓴다</b> — architecture.md 규율 ④.
+     *
+     * <p>규율 ④가 막는 것은 <b>도메인을 넘는</b> 참조다. 남의 도메인 엔티티를 import 하면
+     * 컴파일 의존이 생겨 떼어낼 때 코드를 고쳐야 한다. 같은 도메인 안에서는 그 문제가 없고,
+     * 오히려 값으로 들고 있으면 정책을 읽을 때마다 저장소를 따로 조회해야 한다.
+     *
+     * <p>물리 FK 는 마이그레이션에 있다. JPA 애노테이션이 아니라 <b>SQL 이 제약을 결정한다</b> —
+     * {@code ddl-auto: validate} 라 {@code @ForeignKey(NO_CONSTRAINT)} 같은 지정은 무시된다.
+     */
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "repository_id", nullable = false)
+    private OssRepository repository;
 
     private String javaVersion;
 

@@ -1,0 +1,82 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/output-truncator.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/edit-recovery.sh",
+            "timeout": 3000
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/large-file-recovery.sh",
+            "timeout": 3000
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/tool-failure-tracker.sh",
+            "timeout": 3000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(git commit:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/secret-scan.sh",
+            "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": ".claude/scripts/safety-boundary-check.sh",
+            "timeout": 15000
+          },
+          {
+            "type": "command",
+            "command": ".claude/scripts/pre-commit-check.sh",
+            "timeout": 300000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/scripts/impl-test-loop.sh",
+            "timeout": 300000
+          }
+        ]
+      }
+    ]
+  }
+}

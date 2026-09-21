@@ -1,0 +1,59 @@
+{
+  "_comment": [
+    "이 파일을 .claude/settings.local.json 으로 복사한 뒤 값을 채운다.",
+    "settings.local.json 은 .gitignore 대상이다 — 실제 토큰을 settings.json 에 넣지 않는다.",
+    "<REPLACE_WITH_SECRET_MANAGER> 자리는 로컬에서만 실제 값으로 바꾸고, CI 에서는 환경변수로 주입한다."
+  ],
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(./gradlew:*)",
+      "Bash(java:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(wc:*)",
+      "Bash(jq:*)",
+      "Bash(mkdir:*)",
+      "Bash(chmod:*)",
+      "Bash(echo:*)",
+      "Bash(ps:*)",
+      "Bash(lsof:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:docs.github.com)",
+      "WebFetch(domain:docs.spring.io)",
+      "Skill(*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./secrets/**)",
+      "Bash(git push --force:*)"
+    ]
+  },
+  "env": {
+    "GRADLE_OPTS": "-Dorg.gradle.jvmargs=-Xmx2g"
+  },
+  "mcpServers": {
+    "github": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "<REPLACE_WITH_SECRET_MANAGER>",
+        "GITHUB_TOOLSETS": "repos,issues,pull_requests,actions"
+      }
+    }
+  }
+}

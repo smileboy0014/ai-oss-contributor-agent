@@ -1,0 +1,49 @@
+{
+  "_comment": "키워드가 대화에 등장하면 해당 스킬을 우선 검토한다. 스킬 자동 발동을 보장하지는 않는다 — 확실한 강제는 hooks.",
+  "rules": [
+    {
+      "keywords": ["PRD", "요구사항", "정책", "기획"],
+      "skill": "prd"
+    },
+    {
+      "keywords": ["계획", "plan", "설계", "구현 계획"],
+      "skill": "plan"
+    },
+    {
+      "keywords": ["작업", "티켓", "이슈 작업", "work"],
+      "skill": "work"
+    },
+    {
+      "keywords": ["커밋", "commit"],
+      "skill": "commit"
+    },
+    {
+      "keywords": ["PR", "풀리퀘", "pull request"],
+      "skill": "pr"
+    },
+    {
+      "keywords": ["리뷰", "review", "코드리뷰"],
+      "skill": "pr-review"
+    },
+    {
+      "keywords": ["codemap", "코드맵", "아키텍처 갱신"],
+      "skill": "update-codemaps"
+    },
+    {
+      "keywords": ["논의", "discuss", "의논", "상의"],
+      "skill": "discuss"
+    },
+    {
+      "keywords": ["handoff", "인계", "세션 종료"],
+      "skill": "handoff"
+    },
+    {
+      "keywords": ["안티패턴", "antipattern", "훅으로 막아"],
+      "skill": "antipattern"
+    },
+    {
+      "keywords": ["스킬 개선", "improve skill", "워크플로우 개선"],
+      "skill": "improve-skill"
+    }
+  ]
+}

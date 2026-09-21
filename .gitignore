@@ -1,6 +1,27 @@
+# IDE
 .idea/
+*.iml
+
+# 빌드 산출물 · 의존성
 .gradle/
 target/
-*.iml
-.env
+build/
+node_modules/
+dist/
 
+# 시크릿 — 절대 커밋 금지
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+
+# Claude Code 로컬 설정 (크리덴셜 포함)
+.claude/settings.local.json
+
+# 런타임
+logs/
+*.log

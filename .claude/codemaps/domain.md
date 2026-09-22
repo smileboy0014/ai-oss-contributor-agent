@@ -221,6 +221,22 @@ oss-agent/issue-{issueNumber}-{short-description}
 우리 저장소의 브랜치 컨벤션([`../rules/conventions/git-workflow.md`](../rules/conventions/git-workflow.md))과 **다르다.** 섞지 않는다.
 대상 저장소에 나가는 커밋 메시지도 마찬가지로 그쪽 `CONTRIBUTING.md` 를 따른다 — S-5.
 
+## 애그리거트 경계
+
+| 애그리거트 | 루트 | 멤버 | 왜 이 경계인가 |
+|---|---|---|---|
+| 저장소 | `OssRepository` | `RepositoryPolicy` | 1:1 · 규약 없이 저장소만 두는 의미가 없다 |
+| 이슈 | `Issue` | — | 저장소당 수천 개. 저장소 애그리거트에 넣을 수 없다 |
+| 후보 | `ContributionCandidate` | `PullRequest` | 불변식 ①③⑨ 가 후보 상태와 **함께 서야 한다** |
+| 실행 기록 | `AgentRun` | — | append-only · 재시도마다 증가 |
+| 생성 변경분 | `GeneratedChange` | — | append-only · 행마다 수십 KB |
+
+애그리거트를 넘는 참조는 **ID 값**이다. 넘지 않으면 JPA 연관관계를 쓴다 —
+[`../rules/conventions/architecture.md`](../rules/conventions/architecture.md) 규율 ④.
+
+⚠️ 불변식 ⑧(재시도 상한)은 `AgentRun` 컬렉션을 세어 판정하지 않는다.
+경계가 다르므로 **후보 루트가 자기 상태로** 들고 있어야 한다. 형태는 Q-6 확정 후(#21).
+
 ## 변경 이력
 
 | 일자 | 작성자 | 변경 내용 |

@@ -82,9 +82,9 @@ public class ContributionCandidate {
      * <p>애그리거트 안의 읽기 전용 역방향({@code mappedBy}). {@code cascade} 는 걸지 않는다 —
      * 종단 기록을 지우지 않는 것이 이 프로젝트의 원칙이다(불변식 ⑩).
      *
-     * <p>{@code agentRuns}·{@code generatedChanges} 는 <b>일부러 매핑하지 않는다.</b>
-     * 같은 애그리거트라 걸 수는 있지만, 재시도마다 무한정 쌓이고 {@code diff} 는 행마다
-     * 수십 KB 다 — 후보 하나를 읽었다가 메가바이트가 딸려온다. 필요할 때 쿼리로 가져온다.
+     * <p>{@link AgentRun}·{@link GeneratedChange} 는 <b>이 애그리거트의 멤버가 아니다.</b>
+     * 무한정 쌓이는 append-only 기록이라 별도 애그리거트로 두고 {@code candidateId} 로
+     * 참조한다. 컬렉션이 없는 것은 성능 회피가 아니라 <b>경계가 다르기 때문</b>이다.
      */
     @OneToOne(mappedBy = "candidate", fetch = FetchType.LAZY)
     private PullRequest pullRequest;

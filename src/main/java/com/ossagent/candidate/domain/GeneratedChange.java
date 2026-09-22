@@ -13,7 +13,13 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 /**
- * AI 가 만든 변경분. 후보의 속성이 아니라 <b>에이전트 실행의 산출물</b>이라 {@code agent} 소유다.
+ * AI 가 만든 변경분.
+ *
+ * <p><b>독립 애그리거트 루트</b>다 — {@code ContributionCandidate} 의 멤버가 아니다.
+ * 재시도할 때마다 새 행이 쌓이고 행마다 <b>수십 KB diff</b> 를 담는다. 후보 애그리거트에
+ * 넣으면 후보 하나를 읽었다가 메가바이트가 딸려온다. 애그리거트는 작게 유지한다.
+ *
+ * <p>그래서 {@code candidateId} 는 <b>다른 애그리거트로의 ID 참조</b>이고, 이것이 정상이다.
  *
  * <p>재시도할 때마다 새 행을 남기고 <b>덮어쓰지 않는다.</b> 덮어쓰면 무엇이 어떻게
  * 바뀌었는지 추적이 사라진다.
@@ -31,7 +37,7 @@ public class GeneratedChange {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidate.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code contribution_candidate.id}. <b>다른 애그리거트</b>로의 ID 참조 — architecture.md 규율 ④ */
     @Column(name = "candidate_id", nullable = false)
     private Long candidateId;
 

@@ -65,15 +65,26 @@ com.ossagent.{도메인}
 **경계는 패키지가 아니라 애그리거트다.** 「누가 만들어내는가」가 아니라
 **「무엇과 같은 트랜잭션에서 일관성을 지켜야 하는가」**로 가른다.
 
-| 애그리거트 | 루트 | 포함 |
+| 애그리거트 | 루트 | 멤버 |
 |---|---|---|
 | 저장소 | `OssRepository` | `RepositoryPolicy` |
 | 이슈 | `Issue` | — |
-| **후보** | `ContributionCandidate` | `AgentRun` · `GeneratedChange` · `PullRequest` |
+| 후보 | `ContributionCandidate` | `PullRequest` |
+| 실행 기록 | `AgentRun` | — |
+| 생성 변경분 | `GeneratedChange` | — |
 
-후보 애그리거트가 넷을 묶는 이유는 [`codemaps/domain.md`](../../codemaps/domain.md) 의 불변식이다 —
-재시도 상한 판정이 `candidate.status` 와 `agentRun.attempt` 를 함께 보고(⑧),
-「PR 은 항상 draft」·「후보당 PR 1건」이 후보 상태와 함께 서야 한다(①③⑨).
+후보가 `PullRequest` 를 품는 이유는 [`codemaps/domain.md`](../../codemaps/domain.md) 의 불변식이다 —
+「PR 은 항상 draft」·「후보당 PR 1건」이 후보 상태와 **함께 서야 한다**(①③⑨).
+
+**`AgentRun`·`GeneratedChange` 는 멤버가 아니다.** 재시도마다 무한정 쌓이는 append-only
+기록이고 `diff` 는 행마다 수십 KB 다. **애그리거트는 작게 유지한다** — 무한정 자라는 것을
+멤버로 넣으면 루트를 읽을 때마다 전체를 끌고 오게 된다.
+
+⚠️ 「컬렉션으로 들기엔 너무 크다」는 **애그리거트가 아니라는 신호**다. 성능을 이유로
+멤버인데 매핑만 빼면 「이름만 애그리거트」가 된다. 경계를 다시 긋는다.
+
+⚠️ 그래서 불변식 ⑧(재시도 상한)은 **컬렉션을 세어 판정하지 않는다.** 후보 루트가 자기
+상태로 들고 있어야 하며, 그 형태는 `attempt` 의 의미가 확정된 뒤에 정한다 — Q-6 · #21.
 
 ⚠️ `agent`·`pullrequest` **패키지**는 능력·어댑터(LLM 호출·샌드박스 실행·Fork push·PR 생성)를
 담고, **엔티티를 갖지 않는다.** PRD §6.2 의 모듈 목록은 파이프라인 단계별 기능 분해이지
@@ -96,21 +107,19 @@ com.ossagent.{도메인}
 
 경계를 넘는 참조는 **참조 무결성을 애플리케이션과 테스트가 책임진다.** DB 가 고아 행을 막아주지 않는다.
 
-#### 컬렉션은 걸 수 있어도 안 거는 자리가 있다
-
-애그리거트 경계를 바로잡고 나면 `candidate → agentRuns`·`generatedChanges` 를
-`@OneToMany` 로 걸 **수는** 있다. 그래도 걸지 않는다 — 성격이 다른 판단이다.
+#### 관계별 매핑 판정
 
 | 관계 | 매핑 | 왜 |
 |---|---|---|
-| `candidate` → `pullRequest` | ✅ `@OneToOne` | 1:0..1 · 작다 · 불변식 ①③⑨ 를 코드로 표현해야 한다 |
-| `candidate` → `agentRun` | ❌ 쿼리로 | 재시도마다 무한정 쌓인다. 페이징 대상 |
-| `candidate` → `generatedChange` | ❌ 쿼리로 | 행마다 **수십 KB diff**. 후보 하나에 메가바이트가 딸려온다 |
-| `repository` → `issue` | ❌ 쿼리로 | 대상 저장소 이슈는 **수천 개** |
-| `issue` → `candidate` | ❌ 값 참조 | **애그리거트가 다르다** |
+| `repository` → `policy` | ✅ `@OneToOne` | 애그리거트 안 · 1:1 |
+| `candidate` → `pullRequest` | ✅ `@OneToOne` | 애그리거트 안 · 불변식 ①③⑨ 를 코드로 표현해야 한다 |
+| `candidate` → `agentRun` | ❌ ID 참조 | **애그리거트가 다르다** (무한 증가) |
+| `candidate` → `generatedChange` | ❌ ID 참조 | **애그리거트가 다르다** (수십 KB × N) |
+| `issue` → `candidate` | ❌ ID 참조 | 〃 |
+| `repository` → `issue` | ❌ ID 참조 | 〃 (이슈는 수천 개) |
 
-**「경계라서 못 한다」와 「할 수 있지만 안 한다」를 구분한다.** 앞은 구조 제약이고
-뒤는 성능 판단이다. 뒤엣것은 필요해지면 되돌릴 수 있다.
+**애그리거트 안이면 매핑하고, 넘으면 ID 참조다.** 예외를 두지 않는다 —
+「멤버인데 무거워서 매핑만 뺀다」가 생기는 순간 경계가 이름뿐인 것이 된다.
 
 ### 의도적 완화 2개 — 근거: 1인 개발
 

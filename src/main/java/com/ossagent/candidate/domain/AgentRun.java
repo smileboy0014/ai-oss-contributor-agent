@@ -17,6 +17,17 @@ import lombok.NoArgsConstructor;
 /**
  * 파이프라인 한 단계의 1회 실행 기록. <b>비용과 재시도의 유일한 근거</b>다.
  *
+ * <p><b>독립 애그리거트 루트</b>다 — {@code ContributionCandidate} 의 멤버가 아니다.
+ * 재시도마다 무한정 쌓이는 <b>append-only 기록</b>이라, 후보 애그리거트에 넣으면
+ * 루트를 읽을 때마다 전체를 끌고 오게 된다. 애그리거트는 작게 유지한다.
+ *
+ * <p>그래서 {@code candidateId} 는 <b>다른 애그리거트로의 ID 참조</b>이고, 이것이
+ * 정상이다 — 연관관계를 걸지 않은 것은 예외가 아니라 설계다.
+ *
+ * <p>⚠️ 불변식 ⑧(재시도 상한)을 이 컬렉션을 세어 판정하지 않는다. 후보 루트가
+ * 자기 상태로 들고 있어야 하며, 그 형태는 {@code attempt} 의 의미가 확정된 뒤에
+ * 정한다 — Q-6 · #21.
+ *
  * <p>토큰을 기록하지 않으면 재시도 루프가 조용히 돈을 태운다.
  */
 @Entity
@@ -29,7 +40,7 @@ public class AgentRun {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidate.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
+    /** {@code contribution_candidate.id}. <b>다른 애그리거트</b>로의 ID 참조 — architecture.md 규율 ④ */
     @Column(name = "candidate_id", nullable = false)
     private Long candidateId;
 

@@ -1,4 +1,4 @@
-package com.ossagent.agent.domain;
+package com.ossagent.candidate.domain;
 
 import com.ossagent.support.ExternalText;
 import jakarta.persistence.Column;

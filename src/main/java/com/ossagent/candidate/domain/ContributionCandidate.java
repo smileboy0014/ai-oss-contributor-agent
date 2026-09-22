@@ -5,9 +5,11 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -73,6 +75,19 @@ public class ContributionCandidate {
      * 만들지 않는다.
      */
     private Instant selectedAt;
+
+    /**
+     * 생성된 Draft PR. 아직 없으면 {@code null} 이다.
+     *
+     * <p>애그리거트 안의 읽기 전용 역방향({@code mappedBy}). {@code cascade} 는 걸지 않는다 —
+     * 종단 기록을 지우지 않는 것이 이 프로젝트의 원칙이다(불변식 ⑩).
+     *
+     * <p>{@code agentRuns}·{@code generatedChanges} 는 <b>일부러 매핑하지 않는다.</b>
+     * 같은 애그리거트라 걸 수는 있지만, 재시도마다 무한정 쌓이고 {@code diff} 는 행마다
+     * 수십 KB 다 — 후보 하나를 읽었다가 메가바이트가 딸려온다. 필요할 때 쿼리로 가져온다.
+     */
+    @OneToOne(mappedBy = "candidate", fetch = FetchType.LAZY)
+    private PullRequest pullRequest;
 
     @Column(nullable = false)
     private Instant createdAt;

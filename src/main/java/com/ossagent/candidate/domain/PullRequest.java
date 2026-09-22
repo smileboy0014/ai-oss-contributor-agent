@@ -1,12 +1,15 @@
-package com.ossagent.pullrequest.domain;
+package com.ossagent.candidate.domain;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import lombok.AccessLevel;
@@ -29,9 +32,15 @@ public class PullRequest {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidate.id}. 값으로만 보관한다 — architecture.md 규율 ④ */
-    @Column(name = "candidate_id", nullable = false)
-    private Long candidateId;
+    /**
+     * 소유 후보. <b>같은 애그리거트 안이라 연관관계를 쓴다</b>.
+     *
+     * <p>{@code UNIQUE(candidate_id)} 와 「PR 은 항상 draft」가 후보 상태와 <b>함께 서야 하는</b>
+     * 불변식이다(①③⑨). 값으로 들고 있으면 그 불변식을 코드로 표현할 수 없다.
+     */
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "candidate_id", nullable = false)
+    private ContributionCandidate candidate;
 
     /**
      * push 대상 Fork 의 좌표 — S-1.

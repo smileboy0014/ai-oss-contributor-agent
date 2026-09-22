@@ -8,7 +8,8 @@
 ```
 ai-oss-contributor-agent (jar 1개)
 └── src/main/java/com/ossagent/
-    ├── {도메인}/              repository · issue · candidate · agent · pullrequest
+    ├── {도메인}/              repository · issue · candidate (애그리거트 3개)
+    │                      agent · pullrequest (능력·어댑터 — 엔티티 없음)
     ├── support/              도메인 없는 공통 (web · github 클라이언트 …)
     └── config/               조립 전용. 비즈니스 코드 금지
 ```
@@ -57,16 +58,33 @@ com.ossagent.{도메인}
 | ① **의존은 안쪽으로** | adapter → application → domain. **domain 의 import 에 기술이 없어야 한다** (JPA 어노테이션만 예외 — 완화 ①). Spring·HTTP·GitHub·LLM 타입이 domain 에 들어오면 반려 |
 | ② **진입점 유형별 분리** | web · scheduler · event. `worker` 프로필 분리(Q-3)가 `@Profile` 로 걸리는 자리다 |
 | ③ **능력은 domain 이 선언, 기술은 adapter 가 구현** | 인터페이스는 **능력 이름**으로 domain 에(`IssueSource` · `CodeSandbox` · `DraftPrPublisher`), 구현체는 **기술 이름**으로 adapter/out 에(`GitHubIssueSource` · `DockerCodeSandbox`). `client`·`port` 라는 패키지명은 쓰지 않는다 |
-| ④ **도메인 간 호출은 application 을 통해서만** | 남의 domain 엔티티·Spring Data 인터페이스를 직접 import 하지 않는다. 필요한 것은 상대 도메인의 UseCase 또는 값 타입. **도메인 안에서는 제한하지 않는다** — 아래 참조 |
+| ④ **애그리거트를 넘는 호출은 application 을 통해서만** | 남의 애그리거트 엔티티·Spring Data 인터페이스를 직접 import 하지 않는다. 필요한 것은 상대 도메인의 UseCase 또는 값 타입. **애그리거트 안에서는 제한하지 않는다** — 아래 참조 |
 
 #### 규율 ④의 경계 — 엔티티 참조
 
-④가 막는 것은 **도메인을 넘는** 참조다. 같은 도메인 안에서는 JPA 연관관계를 정상적으로 쓴다.
+**경계는 패키지가 아니라 애그리거트다.** 「누가 만들어내는가」가 아니라
+**「무엇과 같은 트랜잭션에서 일관성을 지켜야 하는가」**로 가른다.
+
+| 애그리거트 | 루트 | 포함 |
+|---|---|---|
+| 저장소 | `OssRepository` | `RepositoryPolicy` |
+| 이슈 | `Issue` | — |
+| **후보** | `ContributionCandidate` | `AgentRun` · `GeneratedChange` · `PullRequest` |
+
+후보 애그리거트가 넷을 묶는 이유는 [`codemaps/domain.md`](../../codemaps/domain.md) 의 불변식이다 —
+재시도 상한 판정이 `candidate.status` 와 `agentRun.attempt` 를 함께 보고(⑧),
+「PR 은 항상 draft」·「후보당 PR 1건」이 후보 상태와 함께 서야 한다(①③⑨).
+
+⚠️ `agent`·`pullrequest` **패키지**는 능력·어댑터(LLM 호출·샌드박스 실행·Fork push·PR 생성)를
+담고, **엔티티를 갖지 않는다.** PRD §6.2 의 모듈 목록은 파이프라인 단계별 기능 분해이지
+애그리거트 분해가 아니다. 그대로 엔티티 소유로 옮기면 애그리거트가 쪼개진다.
+
+④가 막는 것은 **애그리거트를 넘는** 참조다. 같은 애그리거트 안에서는 JPA 연관관계를 정상적으로 쓴다.
 
 | | JPA 연관관계 | 물리 FK | 왜 |
 |---|---|---|---|
-| **도메인 안** | ✅ `@OneToOne`·`@ManyToOne` | ✅ 건다 | 함께 움직이는 것들이라 분리 대상이 아니다. 값으로 들고 있으면 매번 두 번 조회한다 |
-| **도메인 넘음** | ❌ `Long` 값만 | ❌ 걸지 않는다 | 아래 두 이유가 **서로 다르다** |
+| **애그리거트 안** | ✅ `@OneToOne`·`@ManyToOne` | ✅ 건다 | 함께 일관성을 지켜야 하는 것들이다. 값으로 들고 있으면 불변식을 코드로 표현할 수 없다 |
+| **애그리거트 넘음** | ❌ `Long` 값만 | ❌ 걸지 않는다 | 아래 두 이유가 **서로 다르다** |
 
 **연관관계를 막는 이유는 컴파일 결합**이다. `@ManyToOne` 을 걸면 `agent` 가 `candidate` 의 엔티티 클래스를 import 하게 되고, 떼어내는 순간 컴파일이 안 된다. 값 참조는 고칠 것이 없다.
 
@@ -78,23 +96,21 @@ com.ossagent.{도메인}
 
 경계를 넘는 참조는 **참조 무결성을 애플리케이션과 테스트가 책임진다.** DB 가 고아 행을 막아주지 않는다.
 
-#### 대가 — 컬렉션 탐색이 사실상 없다
+#### 컬렉션은 걸 수 있어도 안 거는 자리가 있다
 
-ERD 의 관계 6개 중 **컬렉션이 되는 5개가 전부 경계를 넘는다.** 즉 `@OneToMany` 를 쓸 수 있는 자리가 구조적으로 0이고, `candidate.getAgentRuns()` 같은 탐색은 없다. **JPA 의 대표적 이점 하나를 포기한 것**이므로, 모르고 지나가지 않게 적어 둔다.
+애그리거트 경계를 바로잡고 나면 `candidate → agentRuns`·`generatedChanges` 를
+`@OneToMany` 로 걸 **수는** 있다. 그래도 걸지 않는다 — 성격이 다른 판단이다.
 
-| 관계 | 잃은 것의 성격 |
-|---|---|
-| `oss_repository` → `issue` | 어차피 안 매핑했을 것 — 대상 저장소 이슈는 **수천 개**다 |
-| `contribution_candidate` → `agent_run` | 어차피 안 매핑했을 것 — 재시도마다 쌓이는 **append-only 로그** |
-| `contribution_candidate` → `generated_change` | 어차피 안 매핑했을 것 — 행마다 **수십 KB diff**. 후보 하나에 메가바이트가 딸려온다 |
-| `issue` → `contribution_candidate` | **진짜 손실.** 작은 1:0..1 인데 못 쓴다 |
-| `contribution_candidate` → `pull_request` | **진짜 손실.** 〃 |
+| 관계 | 매핑 | 왜 |
+|---|---|---|
+| `candidate` → `pullRequest` | ✅ `@OneToOne` | 1:0..1 · 작다 · 불변식 ①③⑨ 를 코드로 표현해야 한다 |
+| `candidate` → `agentRun` | ❌ 쿼리로 | 재시도마다 무한정 쌓인다. 페이징 대상 |
+| `candidate` → `generatedChange` | ❌ 쿼리로 | 행마다 **수십 KB diff**. 후보 하나에 메가바이트가 딸려온다 |
+| `repository` → `issue` | ❌ 쿼리로 | 대상 저장소 이슈는 **수천 개** |
+| `issue` → `candidate` | ❌ 값 참조 | **애그리거트가 다르다** |
 
-앞의 셋은 JPA 를 쓰든 안 쓰든 `@OneToMany` 로 매핑하면 안 되는 자리라 실질 손해가 없다.
-뒤의 둘은 UseCase 가 따로 조회해야 한다 — 그 비용을 감수하고 분리 가능성을 택한 것이다.
-
-**도메인 안에서는 양방향을 만든다.** `oss_repository` ↔ `repository_policy` 가 그 예다
-(`mappedBy` 로 읽기 전용 역방향, `cascade` 없음 — 종단 기록을 지우지 않는다는 원칙 때문).
+**「경계라서 못 한다」와 「할 수 있지만 안 한다」를 구분한다.** 앞은 구조 제약이고
+뒤는 성능 판단이다. 뒤엣것은 필요해지면 되돌릴 수 있다.
 
 ### 의도적 완화 2개 — 근거: 1인 개발
 
@@ -148,5 +164,6 @@ Q5. DB·GitHub·LLM·Docker 기술인가?
 - [ ] 트랜잭션 경계가 UseCase 에 있는가 · **트랜잭션 안에 대외 호출이 없는가**
 - [ ] 진입점이 유형별(web·scheduler·event)로 분리돼 있는가
 - [ ] 능력 인터페이스가 domain 에 **능력 이름**으로 있는가 · 기술 이름은 adapter/out 에만 있는가
-- [ ] 남의 도메인 엔티티·Repository 를 직접 import 하지 않는가
+- [ ] 남의 **애그리거트** 엔티티·Repository 를 직접 import 하지 않는가
+- [ ] 엔티티가 **일관성 경계**를 따라 배치됐는가 — 「누가 만드는가」가 아니라 「무엇과 함께 서야 하는가」
 - [ ] `Instant.now()` 대신 `Clock` 을 쓰는가

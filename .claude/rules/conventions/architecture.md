@@ -78,6 +78,24 @@ com.ossagent.{도메인}
 
 경계를 넘는 참조는 **참조 무결성을 애플리케이션과 테스트가 책임진다.** DB 가 고아 행을 막아주지 않는다.
 
+#### 대가 — 컬렉션 탐색이 사실상 없다
+
+ERD 의 관계 6개 중 **컬렉션이 되는 5개가 전부 경계를 넘는다.** 즉 `@OneToMany` 를 쓸 수 있는 자리가 구조적으로 0이고, `candidate.getAgentRuns()` 같은 탐색은 없다. **JPA 의 대표적 이점 하나를 포기한 것**이므로, 모르고 지나가지 않게 적어 둔다.
+
+| 관계 | 잃은 것의 성격 |
+|---|---|
+| `oss_repository` → `issue` | 어차피 안 매핑했을 것 — 대상 저장소 이슈는 **수천 개**다 |
+| `contribution_candidate` → `agent_run` | 어차피 안 매핑했을 것 — 재시도마다 쌓이는 **append-only 로그** |
+| `contribution_candidate` → `generated_change` | 어차피 안 매핑했을 것 — 행마다 **수십 KB diff**. 후보 하나에 메가바이트가 딸려온다 |
+| `issue` → `contribution_candidate` | **진짜 손실.** 작은 1:0..1 인데 못 쓴다 |
+| `contribution_candidate` → `pull_request` | **진짜 손실.** 〃 |
+
+앞의 셋은 JPA 를 쓰든 안 쓰든 `@OneToMany` 로 매핑하면 안 되는 자리라 실질 손해가 없다.
+뒤의 둘은 UseCase 가 따로 조회해야 한다 — 그 비용을 감수하고 분리 가능성을 택한 것이다.
+
+**도메인 안에서는 양방향을 만든다.** `oss_repository` ↔ `repository_policy` 가 그 예다
+(`mappedBy` 로 읽기 전용 역방향, `cascade` 없음 — 종단 기록을 지우지 않는다는 원칙 때문).
+
 ### 의도적 완화 2개 — 근거: 1인 개발
 
 | 완화 | 내용 |

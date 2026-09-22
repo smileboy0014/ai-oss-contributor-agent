@@ -8,7 +8,8 @@
 ```
 ai-oss-contributor-agent (jar 1개)
 └── src/main/java/com/ossagent/
-    ├── {도메인}/              repository · issue · candidate · agent · pullrequest
+    ├── {도메인}/              repository · issue · candidate (애그리거트 3개)
+    │                      agent · pullrequest (능력·어댑터 — 엔티티 없음)
     ├── support/              도메인 없는 공통 (web · github 클라이언트 …)
     └── config/               조립 전용. 비즈니스 코드 금지
 ```
@@ -57,7 +58,68 @@ com.ossagent.{도메인}
 | ① **의존은 안쪽으로** | adapter → application → domain. **domain 의 import 에 기술이 없어야 한다** (JPA 어노테이션만 예외 — 완화 ①). Spring·HTTP·GitHub·LLM 타입이 domain 에 들어오면 반려 |
 | ② **진입점 유형별 분리** | web · scheduler · event. `worker` 프로필 분리(Q-3)가 `@Profile` 로 걸리는 자리다 |
 | ③ **능력은 domain 이 선언, 기술은 adapter 가 구현** | 인터페이스는 **능력 이름**으로 domain 에(`IssueSource` · `CodeSandbox` · `DraftPrPublisher`), 구현체는 **기술 이름**으로 adapter/out 에(`GitHubIssueSource` · `DockerCodeSandbox`). `client`·`port` 라는 패키지명은 쓰지 않는다 |
-| ④ **도메인 간 호출은 application 을 통해서만** | 남의 domain 엔티티·Spring Data 인터페이스를 직접 import 하지 않는다. 필요한 것은 상대 도메인의 UseCase 또는 값 타입 |
+| ④ **애그리거트를 넘는 호출은 application 을 통해서만** | 남의 애그리거트 엔티티·Spring Data 인터페이스를 직접 import 하지 않는다. 필요한 것은 상대 도메인의 UseCase 또는 값 타입. **애그리거트 안에서는 제한하지 않는다** — 아래 참조 |
+
+#### 규율 ④의 경계 — 엔티티 참조
+
+**경계는 패키지가 아니라 애그리거트다.** 「누가 만들어내는가」가 아니라
+**「무엇과 같은 트랜잭션에서 일관성을 지켜야 하는가」**로 가른다.
+
+| 애그리거트 | 루트 | 멤버 |
+|---|---|---|
+| 저장소 | `OssRepository` | `RepositoryPolicy` |
+| 이슈 | `Issue` | — |
+| 후보 | `ContributionCandidate` | `PullRequest` |
+| 실행 기록 | `AgentRun` | — |
+| 생성 변경분 | `GeneratedChange` | — |
+
+후보가 `PullRequest` 를 품는 이유는 [`codemaps/domain.md`](../../codemaps/domain.md) 의 불변식이다 —
+「PR 은 항상 draft」·「후보당 PR 1건」이 후보 상태와 **함께 서야 한다**(①③⑨).
+
+**`AgentRun`·`GeneratedChange` 는 멤버가 아니다.** 재시도마다 무한정 쌓이는 append-only
+기록이고 `diff` 는 행마다 수십 KB 다. **애그리거트는 작게 유지한다** — 무한정 자라는 것을
+멤버로 넣으면 루트를 읽을 때마다 전체를 끌고 오게 된다.
+
+⚠️ 「컬렉션으로 들기엔 너무 크다」는 **애그리거트가 아니라는 신호**다. 성능을 이유로
+멤버인데 매핑만 빼면 「이름만 애그리거트」가 된다. 경계를 다시 긋는다.
+
+⚠️ 그래서 불변식 ⑧(재시도 상한)은 **컬렉션을 세어 판정하지 않는다.** 후보 루트가 자기
+상태로 들고 있어야 하며, 그 형태는 `attempt` 의 의미가 확정된 뒤에 정한다 — Q-6 · #21.
+
+⚠️ `agent`·`pullrequest` **패키지**는 능력·어댑터(LLM 호출·샌드박스 실행·Fork push·PR 생성)를
+담고, **엔티티를 갖지 않는다.** PRD §6.2 의 모듈 목록은 파이프라인 단계별 기능 분해이지
+애그리거트 분해가 아니다. 그대로 엔티티 소유로 옮기면 애그리거트가 쪼개진다.
+
+④가 막는 것은 **애그리거트를 넘는** 참조다. 같은 애그리거트 안에서는 JPA 연관관계를 정상적으로 쓴다.
+
+| | JPA 연관관계 | 물리 FK | 왜 |
+|---|---|---|---|
+| **애그리거트 안** | ✅ `@OneToOne`·`@ManyToOne` | ✅ 건다 | 함께 일관성을 지켜야 하는 것들이다. 값으로 들고 있으면 불변식을 코드로 표현할 수 없다 |
+| **애그리거트 넘음** | ❌ `Long` 값만 | ❌ 걸지 않는다 | 아래 두 이유가 **서로 다르다** |
+
+**연관관계를 막는 이유는 컴파일 결합**이다. `@ManyToOne` 을 걸면 `agent` 가 `candidate` 의 엔티티 클래스를 import 하게 되고, 떼어내는 순간 컴파일이 안 된다. 값 참조는 고칠 것이 없다.
+
+**물리 FK 를 막는 이유는 DB 결합**이다. 테이블을 다른 DB 로 옮기면 제약이 깨지고, 삭제 순서가 DB 에 묶인다.
+
+⚠️ 둘을 한 덩어리로 묶어 생각하지 않는다. 「`@ManyToOne` 은 쓰되 물리 FK 만 끄면 분리가 쉬워진다」는 **틀렸다** — 컴파일 결합이 그대로 남는다.
+
+⚠️ **`@ForeignKey(ConstraintMode.NO_CONSTRAINT)` 는 이 프로젝트에서 아무 일도 하지 않는다.** 그 애노테이션은 Hibernate 가 DDL 을 생성할 때만 참조되는데, 우리는 `ddl-auto: validate` 에 스키마 정본이 Flyway SQL 이다. **물리 FK 존재 여부는 마이그레이션이 100% 결정한다.** 의도 표기로 붙이는 것은 무방하나, 그것만 믿고 SQL 을 확인하지 않으면 안 된다.
+
+경계를 넘는 참조는 **참조 무결성을 애플리케이션과 테스트가 책임진다.** DB 가 고아 행을 막아주지 않는다.
+
+#### 관계별 매핑 판정
+
+| 관계 | 매핑 | 왜 |
+|---|---|---|
+| `repository` → `policy` | ✅ `@OneToOne` | 애그리거트 안 · 1:1 |
+| `candidate` → `pullRequest` | ✅ `@OneToOne` | 애그리거트 안 · 불변식 ①③⑨ 를 코드로 표현해야 한다 |
+| `candidate` → `agentRun` | ❌ ID 참조 | **애그리거트가 다르다** (무한 증가) |
+| `candidate` → `generatedChange` | ❌ ID 참조 | **애그리거트가 다르다** (수십 KB × N) |
+| `issue` → `candidate` | ❌ ID 참조 | 〃 |
+| `repository` → `issue` | ❌ ID 참조 | 〃 (이슈는 수천 개) |
+
+**애그리거트 안이면 매핑하고, 넘으면 ID 참조다.** 예외를 두지 않는다 —
+「멤버인데 무거워서 매핑만 뺀다」가 생기는 순간 경계가 이름뿐인 것이 된다.
 
 ### 의도적 완화 2개 — 근거: 1인 개발
 
@@ -111,5 +173,6 @@ Q5. DB·GitHub·LLM·Docker 기술인가?
 - [ ] 트랜잭션 경계가 UseCase 에 있는가 · **트랜잭션 안에 대외 호출이 없는가**
 - [ ] 진입점이 유형별(web·scheduler·event)로 분리돼 있는가
 - [ ] 능력 인터페이스가 domain 에 **능력 이름**으로 있는가 · 기술 이름은 adapter/out 에만 있는가
-- [ ] 남의 도메인 엔티티·Repository 를 직접 import 하지 않는가
+- [ ] 남의 **애그리거트** 엔티티·Repository 를 직접 import 하지 않는가
+- [ ] 엔티티가 **일관성 경계**를 따라 배치됐는가 — 「누가 만드는가」가 아니라 「무엇과 함께 서야 하는가」
 - [ ] `Instant.now()` 대신 `Clock` 을 쓰는가

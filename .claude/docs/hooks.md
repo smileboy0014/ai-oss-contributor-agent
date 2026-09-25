@@ -3,30 +3,62 @@
 > **메모리는 잊는다. 하네스는 잊지 않는다.**
 > 강제력 위계: 훅(기계적 차단, 100%) > 스킬(워크플로우, ~80%) > CLAUDE.md·memory(참고, ~50%).
 
-등록은 [`.claude/settings.json`](../settings.json), 구현은 [`.claude/scripts/`](../scripts/).
+구현은 전부 [`.claude/scripts/`](../scripts/) 에 있고, **등록처가 둘**이다.
+
+| 등록처 | 언제 도나 | 무엇이 걸려 있나 |
+|---|---|---|
+| **git `.githooks/pre-commit`** | **모든** `git commit` — 사람·Claude·IDE·worktree | 차단형 2개 |
+| [`.claude/settings.json`](../settings.json) | Claude 의 도구 호출 전후 | 피드백형 4개 · Stop 훅 |
 
 ## 등록 현황
 
+### git 훅 — 차단형
+
+| 스크립트 | 하는 일 |
+|---|---|
+| [`secret-scan.sh`](../scripts/secret-scan.sh) | 시크릿 패턴·`.env` 스테이징 **차단** |
+| [`safety-boundary-check.sh`](../scripts/safety-boundary-check.sh) | 안전 경계 S-1~S-4 정적 위반 **차단** |
+
+[`pre-commit-check.sh`](../scripts/pre-commit-check.sh)(`./gradlew check`)는 **여기 없다** —
+CI 로 옮겼다(Q-10). 스크립트는 남아 있고 CI 가 호출한다.
+
+### Claude 훅 — 피드백형
+
 | 이벤트 | matcher | 스크립트 | 하는 일 |
 |---|---|---|---|
-| `PreToolUse` | `Bash(git commit:*)` | [`secret-scan.sh`](../scripts/secret-scan.sh) | 시크릿 패턴·`.env` 스테이징 **차단** |
-| | | [`safety-boundary-check.sh`](../scripts/safety-boundary-check.sh) | 안전 경계 S-1~S-4 정적 위반 **차단** |
-| | | [`pre-commit-check.sh`](../scripts/pre-commit-check.sh) | `./gradlew check` |
 | `PostToolUse` | `Bash\|Grep\|Glob` | [`output-truncator.sh`](../scripts/output-truncator.sh) | 50K자 초과 출력 축약 |
 | `PostToolUseFailure` | `Edit\|Write` | [`edit-recovery.sh`](../scripts/edit-recovery.sh) | 실패 패턴별 복구 가이드 |
 | | `Read` | [`large-file-recovery.sh`](../scripts/large-file-recovery.sh) | 대용량·바이너리 파일 대안 안내 |
 | | `` (전체) | [`tool-failure-tracker.sh`](../scripts/tool-failure-tracker.sh) | 60초 내 반복 실패 감지 → 전략 전환 유도 |
 | `Stop` | `` | [`impl-test-loop.sh`](../scripts/impl-test-loop.sh) | 변경분이 있으면 `./gradlew test` |
 
-## 차단형 3개 — 커밋 시점
+## 차단형 2개 — 커밋 시점
 
 순서가 의미를 갖는다. **싼 검사가 먼저** 돈다.
 
 ```
-secret-scan (grep)  →  safety-boundary-check (grep)  →  pre-commit-check (gradle, 수십 초)
+secret-scan (grep)  →  safety-boundary-check (grep)
 ```
 
-시크릿이 걸리면 빌드를 돌려볼 이유가 없다.
+### ⚠️ 왜 git 훅으로 옮겼나 (2026-09-25 · #27)
+
+원래 이 셋은 `PreToolUse` `matcher: "Bash(git commit:*)"` 에만 걸려 있었다. **두 경로로 샜다.**
+
+| 구멍 | 결과 |
+|---|---|
+| 사람이 IDE·터미널에서 직접 커밋 | Claude 를 거치지 않으므로 **아무것도 돌지 않는다** |
+| `cd <path> && git commit …` · `git -C … commit` | 접두사 매칭이라 **빗나간다** — worktree 작업에서 실제로 발생 |
+
+`#35` 리뷰에서 「훅이 실행된 흔적이 없다」로 드러났다. 아래 「훅이 조용히 죽는 경우가 가장 나쁘다」가
+**우리에게 일어난 것**이고, 매처 하나에 게이트 전체를 건 것이 원인이었다.
+
+스크립트는 stdin 을 읽지 않고 `git diff --cached` 만 보므로 수정 없이 그대로 git 훅이 된다.
+
+```bash
+git config core.hooksPath .githooks   # 클론·worktree 추가 후 1회 — 커밋되지 않는 로컬 설정이다
+```
+
+`--no-verify` 우회는 **CI 가 같은 스캔 2종을 다시 돌려** 잡는다.
 
 ### secret-scan.sh
 
@@ -84,8 +116,10 @@ Process p = new ProcessBuilder("docker", "run", ...).start();
 
 1. `.claude/scripts/` 에 스크립트 작성 (`#!/bin/bash` + 역할 주석 + `chmod +x`)
 2. `bash -n` 으로 문법 확인
-3. `.claude/settings.json` 의 hooks 에 등록
+3. 등록처를 고른다 — **커밋을 막아야 하면 `.githooks/pre-commit`**, Claude 도구 흐름에 끼우는 것이면 `.claude/settings.json`
 4. 위반 코드와 정상 코드 양쪽으로 시뮬레이션
+
+⚠️ **차단형을 `.claude/settings.json` 에만 걸지 않는다.** 사람이 직접 커밋하는 경로가 통째로 빠진다.
 
 **오탐 최소화가 최우선이다.** 규칙이 너무 넓으면 개발이 멈추고, 결국 `--no-verify` 로 우회하게 된다.
 의심스러우면 훅 대신 스킬 체크리스트에 먼저 두고, 패턴이 명확해지면 승격한다 —

@@ -99,17 +99,46 @@ Refs: #12
 - **scope 생략** — 어느 파이프라인 단계가 움직였는지 추적이 안 된다
 - `Feat:` 같은 대문자 type
 - 한 커밋에 여러 도메인 섞기
-- `--no-verify` 로 훅 건너뛰기 (사용자 명시 요청 시만) — 훅이 시크릿·안전 경계를 본다
+- `--no-verify` 로 훅 건너뛰기 (사용자 명시 요청 시만) — 훅이 시크릿·안전 경계를 본다. 우회해도 **CI 에서 다시 걸린다**
 
-## pre-commit 훅
+## pre-commit 훅 — **git 훅이 정본이다** (2026-09-25 개정 · #27)
 
-`git commit` 시점에 셋이 순서대로 돈다.
+`git commit` 시점에 둘이 순서대로 돈다. 싼 것이 먼저다.
 
 | 스크립트 | 보는 것 |
 |---|---|
 | [`secret-scan.sh`](../../scripts/secret-scan.sh) | 토큰 패턴 · `.env` 실값 스테이징 |
 | [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | S-1~S-4 의 정적 탐지 가능분 |
-| [`pre-commit-check.sh`](../../scripts/pre-commit-check.sh) | `./gradlew check` |
+
+`./gradlew check`([`pre-commit-check.sh`](../../scripts/pre-commit-check.sh))는 **훅에서 뺐다.**
+CI 가 같은 일을 하고(Q-10), 커밋마다 스위트 전체를 기다릴 이유가 없다.
+로컬 테스트 피드백은 Stop 훅 [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh) 가 준다.
+
+### 왜 git 훅인가 — Claude 훅만으로는 안 돌았다
+
+원래 이 셋은 `.claude/settings.json` 의 `PreToolUse` `matcher: "Bash(git commit:*)"` 에만 걸려 있었고,
+그래서 **두 경로로 새고 있었다.**
+
+| 구멍 | 결과 |
+|---|---|
+| 사람이 IDE·터미널에서 직접 커밋 | Claude 를 거치지 않으므로 **아무것도 돌지 않는다** |
+| `cd <path> && git commit …` · `git -C … commit` | 매처가 접두사 매칭이라 **빗나간다** (worktree 작업에서 실제로 발생) |
+
+`#35` 리뷰에서 「훅이 실행된 흔적이 없다」로 드러났다.
+[`hooks.md`](../../docs/hooks.md) 가 적어 둔 그대로다 — **훅이 조용히 죽는 경우가 가장 나쁘다.**
+
+그래서 등록을 git 으로 옮긴다. 스크립트는 stdin 을 읽지 않고 `git diff --cached` 만 보므로
+**수정 없이 그대로 git 훅이 된다.** 사람·Claude·IDE·worktree 가 전부 같은 게이트를 지난다.
+
+```bash
+git config core.hooksPath .githooks   # 클론·worktree 추가 후 1회
+```
+
+⚠️ `core.hooksPath` 는 **커밋되지 않는 로컬 설정**이다. 새 클론에서는 위 명령을 다시 쳐야 한다.
+
+### 스킵
 
 훅을 스킵하지 않는다. 실패하면 **수정 후 새 커밋**으로 재시도한다.
 의도된 예외는 사유와 함께 남긴다 — 위반 라인 또는 바로 윗줄에 `// safety-ok: <사유>`. 사유 없는 예외는 반려.
+
+`--no-verify` 로는 git 훅을 우회할 수 있다. **그 우회를 잡는 것이 CI 다** — CI 가 같은 스캔 2종을 다시 돌린다.

@@ -51,21 +51,29 @@
 | # | 무엇 | 파일 |
 |---|---|---|
 | 1 | `SchemaMigrationTest` 를 `@AgentIntegrationTest` 로 이관 → **raw 사용 0** | `SchemaMigrationTest.java` |
-| 2 | raw `@SpringBootTest` 사용 **0건**을 단언하는 정적 스캔 | `SpringBootTestUsageTest.java` (신규) |
-| 3 | 「열려 있는 구멍」 절을 **닫힌 것으로** 갱신 | `testing-philosophy.md:156` |
+| 2 | **컨텍스트를 띄우는 모든 클래스에 `test` 프로필**이 있음을 단언 | `IntegrationTestProfileTest.java` (신규) |
+| 2b | 검사기 물림을 회귀로 고정하는 상시 표본 | `probe/ProbeUnprofiledBootstrap.java` · `probe/BypassProbe.java` (신규) |
+| 3 | 「열려 있는 구멍」 절을 **장치 4(프로필 불변식)**로 갱신 · 남는 구멍 명시 | `testing-philosophy.md` |
 | 4 | `@AgentIntegrationTest` javadoc 의 구멍 설명 갱신 | `AgentIntegrationTest.java` |
 
-### ⚠️ 2번의 구현 함정 — #4 에서 미리 확인한 것
+### ⚠️ 2번 — 「직접 사용 금지」로 짰다가 우회를 재현하고 바꿨다
 
-`ClassPathScanningCandidateComponentProvider` + `AnnotationTypeFilter(SpringBootTest.class)` 는
-**기본적으로 메타 애노테이션을 따라간다.** 그대로 두면 `@AgentIntegrationTest` 를 **제대로 쓴**
-클래스까지 전부 적발한다.
+초안은 `AnnotationTypeFilter(SpringBootTest.class, considerMetaAnnotations=false)` 로
+**직접 선언 0건**을 단언하는 것이었다. 실제로 미끼를 만들어 돌려 보니 **셋이 빠져나갔다.**
 
-- `AnnotationTypeFilter(SpringBootTest.class, /* considerMetaAnnotations */ false, ...)`
-- `@SpringBootTest` 가 `@Inherited` 인 점도 오탐 요인 → **선언된 애노테이션**으로 확인한다
+| 우회 | 왜 빠지나 |
+|---|---|
+| `@SpringBootTest` 를 메타 애노테이트한 **새 애노테이션** | `considerMetaAnnotations=false` 의 대가. 켜면 준수 클래스가 전부 오탐된다 |
+| 추상 상위 클래스 **2단계 이상** 상속 | `AnnotationTypeFilter` 가 조부모까지 따라가지 않는다 |
+| `@ContextConfiguration` · `@DataJpaTest` 등 | 필터가 `@SpringBootTest` 한 타입만 본다 |
 
-스캐너가 「직접 선언」과 「메타를 통한 선언」을 구분하지 못하면 이 수정 자체가 성립하지 않는다.
-**그 구분이 이 테스트의 핵심**이므로 양쪽을 모두 테스트로 고정한다.
+**축을 바꿨다** — 「어떻게 띄웠는가」가 아니라 **「프로필이 맞는가」**를 본다.
+후보를 애노테이션으로 거르지 않고 전부 훑은 뒤 `@BootstrapWith` 또는 `@ContextConfiguration`
+으로 판정하고, `SearchStrategy.TYPE_HIERARCHY` 로 상위까지 읽는다. 셋이 한 번에 닫힌다.
+
+⚠️ **물림을 회귀로 고정한다.** 위반이 0건이면 검사기가 아무것도 못 잡아도 초록이다.
+`probe` 패키지에 상시 양성 표본을 두되, **이름이 `Test` 로 끝나지 않고 `@Test` 메서드도 없어
+실행되지 않는** 형태로 만든다 — 미끼 때문에 실어댑터가 올라오면 본말전도다.
 
 ### 판단 — `@SchemaTest` 같은 별도 애노테이션을 만들지 않는다
 
@@ -117,4 +125,5 @@
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-25 | smileboy0014 | 초안 — #4 가 남긴 구멍 2건 |
+| 2026-09-25 | smileboy0014 | **검사 축을 「직접 사용 금지」→「프로필 불변식」으로 교체** — 미끼로 우회 3종을 재현해 초안이 뚫리는 것을 확인했다. 상시 양성 표본으로 물림을 회귀 고정. 문서의 「우회는 막혀 있다」 단언도 남는 구멍을 적는 형태로 정정 |
 | 2026-09-25 | smileboy0014 | **Java 25 함정 기록을 범위에서 제외** — Java 21 고정은 #4 에서 이미 끝났고, 문서 기록은 지금 필요하지 않다고 판단 |

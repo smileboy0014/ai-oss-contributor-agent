@@ -81,7 +81,11 @@ for f in $files; do
   esac
 
   # 바이너리 스킵
-  if ! read_file "$f" | head -c 8000 | grep -qI . 2>/dev/null; then
+  # ⚠ head 를 중괄호로 묶어 stderr 를 버린다. grep -q 가 첫 매치에서 빠져나가면 head 가
+  #   SIGPIPE 를 받는데, GNU head(리눅스·CI)는 그때 「write error: Broken pipe」를 찍는다.
+  #   macOS 에서는 조용해서 로컬로는 재현되지 않는다. 게이트 출력에 「error」가 섞이면
+  #   사람이 게이트 출력 전체를 흘려보게 된다
+  if ! { read_file "$f" | head -c 8000; } 2>/dev/null | grep -qI . ; then
     continue
   fi
 

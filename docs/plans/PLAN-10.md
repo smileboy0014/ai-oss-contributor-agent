@@ -119,10 +119,19 @@ FR-8 은 완료조건 목록에는 없지만 이슈의 **「안전 경계」 절
 대상 저장소 파일을 프롬프트에 싣는 것은 소비자 이슈의 일상 동작이므로, 이음매를 지금 고정하지 않으면
 **소비자 4곳이 각자 기억해야 하는 구조**가 확정된다.
 
-- `agent/domain` 에 `PromptScrubber` 능력 선언. `AnthropicLanguageModel` 이 송신 직전 **반드시** 통과
-- 이 이슈의 구현은 `PatternPromptScrubber` — **fail-closed**. 패턴 적중 시 치환하고, 치환 사실을
-  `WARN` 으로 남긴다(무엇이 걸렸는지는 남기지 않는다)
+- `agent/domain` 에 `PromptScrubber` 능력 선언. `AnthropicLanguageModel` 이 **생성자 필수 인자**로 받고
+  송신 직전 `system` 과 `userPrompt` **양쪽** 모두 통과시킨다
+- 구현은 `PatternPromptScrubber` — 적중 시 **치환(redact) 후 진행**하고 `WARN` 을 남긴다
+  (무엇이 걸렸는지는 남기지 않는다). 중단하지 않는 이유는 파이프라인이 멈추기 때문이다
 - 패턴: `ghp_` · `gho_` · `github_pat_` · `sk-ant-` · `AKIA` · `xox` — S-4 가 열거한 것 그대로
+- 🔴 **no-op 구현을 코드베이스에 두지 않는다.** 진짜 fail-closed 여야 하는 지점은 「패턴 적중 시」가
+  아니라 **「스크럽기가 없거나 무력화됐을 때」**다. `s -> s` 를 누가 끼우면 S-4 본류 방어가
+  조용히 0 이 된다. 테스트용 대역도 실제 패턴 구현을 쓴다
+- **치환 플레이스홀더는 검색 가능한 고정 상수** `«REDACTED-BY-AGENT»` 로 두고 `agent/domain` 에 둔다.
+  이유 — `CODE` 호출은 대상 저장소 파일을 싣고 나가고 모델은 그 파일의 패치를 낸다.
+  치환된 텍스트가 **패치에 그대로 실려 Fork 커밋·Draft PR 까지 갈 수 있다.** 확률은 낮지만
+  결과가 **외부로 나간다.** 이 상수를 diff 검사에서 걸러내는 것은 소비자 이슈(#13·#16)에 넘기는
+  계약이고, **상수 자체는 여기서 정의**한다
 - ⚠️ **#28 과 중복이 아니다.** #28 은 「저장소 컨텍스트 수집 단계의 파일 배제 + 공통 스크럽 모듈」이고,
   여기는 「LLM 어댑터의 송신 이음매」다. #28 의 `TokenRedactor` 가 오면 **`PromptScrubber` 구현만
   갈아끼운다** — 능력이 domain 에 있으므로 교체 비용이 0 이다
@@ -157,9 +166,28 @@ Q-6 이 2026-09-25 에 확정했고, **그 결론이 이 설계를 그대로 지
 | **파이프라인 재시도** | `CODE`→`VERIFY`→`REVIEW` 한 바퀴 | `agent.execution.max-retries` (3) | 후보 상태머신 |
 
 🔴 **어댑터는 `agent.execution.max-retries` 를 읽지도 바꾸지도 않는다.**
-- 비재시도(400·401·403·404·`REFUSAL`)는 **즉시 실패**. 재시도하면 무한 루프가 된다
 - 타임아웃은 명시값. 무한 대기 없음
 - 곱셈 예산 — 후보 1건당 최대 **3 × (1 + 2) = 9회**. Q-6 이 계산해 둔 그대로다
+
+**전송 재시도 여부는 사유가 결정한다** — `LlmFailureReason` 이 `retryable` 을 들고 있다.
+
+| 사유 | 전송 재시도 | 왜 |
+|---|---|---|
+| `TIMEOUT` · `RATE_LIMITED` · `UNAVAILABLE` | ✅ | 같은 요청이 다음에 성공할 수 있다 |
+| `REJECTED` | ❌ | 재전송해도 같은 답이 온다 |
+| **`TRUNCATED`** | ❌ | 아래 |
+| `INVALID_REQUEST` | ❌ | 재시도하면 무한 루프가 된다 |
+
+⚠️ **`TRUNCATED` 를 전송 재시도에 넣지 않는다.** 같은 요청을 같은 상한으로 재전송하면
+**같은 지점에서 잘린다** — 성공 확률이 사실상 0 인데 입력 토큰은 매번 전액 과금되고 출력도
+상한까지 또 생성된다. **3배 비용을 확실히 태우고 결과는 같다.**
+
+그리고 절단은 애초에 **전송 실패가 아니다.** 전송은 성공했고 모델 출력이 예산을 넘었을 뿐이다.
+고칠 수 있는 주체는 어댑터가 아니라 **호출자**(상한을 올리거나 작업을 쪼갠다)이고,
+그 재시도는 정의상 **파이프라인 축**이다. 여기서 재시도하면 S-6 이 갈라 놓은 두 축이 다시 붙는다.
+
+절단 예외에는 **실제 소비 토큰을 실어 올린다** — 절단 응답에도 `usage` 는 온다.
+호출자가 상한을 얼마나 올려야 하는지 판단할 근거다.
 
 `S-1`·`S-2`·`S-3`·`S-5` 미접촉 — push·PR·샌드박스·대상 저장소 산출물 경로가 없다.
 
@@ -186,6 +214,16 @@ Q-6 이 2026-09-25 에 확정했고, **그 결론이 이 설계를 그대로 지
 - `.githooks/` 는 이 베이스에 없다. `core.hooksPath` 설정은 #27 머지 후에 의미가 생긴다
 - 머지 순서가 뒤바뀌면 `external-deps.md`·`open-questions.md` 편집이 충돌한다. **본문을 다시 쓰지 않고
   해당 절만 최소 수정**한다
+
+**결론 — 머지 순서를 정해 둔다.** 인지만 하고 넘기면 저장소 안에 모순이 남는다.
+
+| 순서 | 해야 할 일 |
+|---|---|
+| **#4 · #27 · #35 가 먼저 머지됨** (기대) | 리베이스만 하고 이 PR 은 그대로 올린다 |
+| **이 PR 이 먼저 머지됨** | `testing-philosophy.md`(「자체 페이크만」 → 3계층)·`open-questions.md` Q-9/Q-10 항목을 **이 PR 이 함께 갱신**해야 한다. 그러지 않으면 「Q-9 미결」과 「Q-11 신설」이 한 파일에 공존하고, `wiremock` 의존이 「정해지기 전까지는 자체 페이크」와 정면으로 어긋난다 |
+
+이 가정을 PR 본문에 남긴다 — `open-questions.md` 서문이 요구하는 그대로다
+(「확인이 불가능하면 가정을 명시하고 진행한 뒤 PR 본문에 남긴다」).
 
 ---
 
@@ -283,6 +321,13 @@ SDK 에 맡기면 몇 번 재전송했는지, 각 시도가 얼마나 걸렸는�
 | 키 없음 | `RecordingLanguageModel(DisabledLanguageModel)` — 호출 시 원인이 분명한 예외 |
 | 테스트 | `FakeLanguageModel` (`@TestConfiguration`) |
 
+🔴 **키 판정은 환경변수 직독이 아니라 `AnthropicProperties.apiKey` 로 한다.** 환경변수를 직접 읽으면
+**개발자 머신에 `ANTHROPIC_API_KEY` 가 export 돼 있을 때 `@SpringBootTest` 가 실제 어댑터를 올린다.**
+기존 `OssContributorAgentApplicationTests`·`SchemaMigrationTest` 는 `@TestConfiguration` 을 쓰지 않으므로
+그대로 노출되고, NFR-2 검증 테스트가 **머신마다 결과가 달라진다.**
+`src/test/resources/application.yml` 에서 키 소스를 **명시적으로 비운다.**
+테스트 이름도 의도를 드러낸다 — `키가_있는_머신에서도_테스트_컨텍스트에_실제_어댑터가_없다()`.
+
 조건부 등록(`@ConditionalOnProperty`)을 **쓰지 않는 이유** — 빈이 없으면 소비자가 필수 의존으로
 받는 순간 기본 설정으로 기동이 안 되고, 그러면 누군가 기본값을 뒤집거나
 `@Autowired(required=false)` 로 눕힌다. 후자면 **「조용히 통과」가 그대로 돌아온다.**
@@ -376,19 +421,37 @@ agent:
 
 Q-9 은 「LLM API — 3계층 전부」를 지목했다. 그런데 **중간 층이 우리 어댑터에는 적용 불가능**하다.
 
+**층은 3개 그대로 유지한다. 중간 층의 「도구만」 치환한다.**
+
 | 층 | Q-9 의 지정 | #10 에서 | 왜 |
 |---|---|---|---|
 | 능력 소비자 | 자체 페이크 | ✅ `FakeLanguageModel` | 그대로 |
-| 어댑터 매핑 | `MockRestServiceServer` | ❌ → **WireMock 으로 대체** | 아래 |
+| 어댑터 매핑 | `MockRestServiceServer` | 🔄 **스텁 `HttpClient` 주입** | 도구만 다르다 — 아래 |
 | 전송 계약 | WireMock | ✅ WireMock | 그대로 |
 
-🔴 **`MockRestServiceServer` 는 Spring `RestClient`/`RestTemplate` 전용**이다. 우리 어댑터는
-Anthropic SDK(OkHttp)를 쓰므로 **가로챌 대상이 없다.** Q-9 의 3계층은 GitHub 어댑터
-(`RestClient` 직접 구현 · Q-1)를 염두에 두고 쓰인 것이고, LLM 에는 그 전제가 없다.
+🔴 **`MockRestServiceServer` 는 Spring `RestClient`/`RestTemplate` 전용**이다
+(`MockRestServiceServer.bindTo(RestClient.Builder)`). 우리 어댑터는 Anthropic SDK 를 쓰므로
+**Spring 이 제공하는 바인딩 대상이 없다.** Q-9 의 3계층은 GitHub 어댑터(`RestClient` 직접 구현 · Q-1)를
+염두에 두고 쓰였고, LLM 에는 그 전제가 없다.
 
-요청 조립·응답 파싱·오류 변환은 **WireMock 이 함께 본다** — base URL 을 WireMock 으로 돌리면
-같은 소켓 위에서 매핑과 전송 계약을 둘 다 검증할 수 있다. `agent.llm.base-url` 설정을
-S-4 ② 때문에 이미 두었으므로 추가 비용이 없다. **층이 줄어든 것이 아니라 도구가 합쳐진 것**이다.
+**그렇다고 층을 접지는 않는다.** SDK 가 자체 이음매를 공개한다 — 검증 완료(2026-09-25, `2.65.0`):
+
+| 확인한 것 | 결과 |
+|---|---|
+| `com.anthropic.core.http.HttpClient` | ✅ **공개 인터페이스** — `execute(HttpRequest, RequestOptions)` |
+| `ClientOptions.Builder.httpClient(HttpClient)` | ✅ 공개 주입점 |
+| `new AnthropicClientImpl(ClientOptions)` | ✅ 공개 생성자 |
+| `AnthropicOkHttpClient.Builder` | ❌ `httpClient(...)` 없음 — OkHttp 를 내부에서 만든다 |
+
+따라서 운영 경로는 `AnthropicOkHttpClient`, **테스트 중간 층은
+`ClientOptions.builder().httpClient(스텁)` → `AnthropicClientImpl`** 로 간다.
+소켓 없이 요청 조립·응답 파싱·오류 번역만 본다.
+
+**층을 지키는 이유는 도구 개수가 아니라 실패 격리다.** WireMock 하나로 합치면 빨간불이 떴을 때
+요청 조립 오류인지 · 파싱 오류인지 · 타임아웃 설정인지 · 포트 바인딩인지 **테스트가 말해주지 않는다.**
+
+덤 — `ClientOptions.Builder` 에 `.clock(Clock)` · `.sleeper(Sleeper)` 가 있어 **재시도 백오프를
+결정론적으로** 검증할 수 있다. 실시간 대기 없이 상한을 테스트한다.
 
 ❌ 녹화 응답(VCR)은 쓰지 않는다 — 녹음본에 토큰이 섞여 커밋된다(S-4). Q-9 과 같은 판단.
 
@@ -443,6 +506,7 @@ S-4 ② 때문에 이미 두었으므로 추가 비용이 없다. **층이 줄�
 | `agent` 가 `AgentRun` 을 직접 쓰고 싶어진다 | 규율 ④ 위반. `AgentRunRecorder` 가 유일한 경로 |
 | **프롬프트 미기록의 운영 비용** | 응답이 이상할 때 재현 수단이 없다. 대체 진단 수단 = 프롬프트 **해시 + 길이 + `callSite`**. #28 머지 후 `debug` + 스크럽 재개방을 **재검토**한다(기본은 계속 미기록) |
 | 비용 — 재시도 루프 | 전송 상한 2 · 곱 9회 · 모든 호출이 `AgentRun` 에 남는다 |
+| ⚠️ **전송 재시도 비용이 DB 장부에 안 남는다 — 알려진 한계** | `agent_run` 행은 **최종 시도의 usage 만** 담는다. 중간에 타임아웃으로 버린 시도의 토큰은 **구조화 로그에만** 남는다. `agent_run` 에 `transport_attempts` 컬럼이 없고, 이 이슈에서 스키마를 바꾸지 않기로 했기 때문이다. **장부를 전액으로 믿지 않는다** — 정확한 비용은 로그와 합산해야 한다. 컬럼 추가는 후속 판단 |
 
 ---
 

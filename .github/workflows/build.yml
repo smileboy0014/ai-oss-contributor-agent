@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # ── 싼 검사가 먼저. 시크릿이 걸리면 빌드를 돌려볼 이유가 없다 ──
       - name: 시크릿 검사 (S-4)
@@ -34,16 +34,18 @@ jobs:
           SCAN_MODE: tree
         run: .claude/scripts/safety-boundary-check.sh
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           java-version: '21'
           distribution: temurin
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       # ⚠ build.gradle.kts 가 docker-java 를 api.version=1.44 로 핀해 뒀다 (Q-9b).
       #   러너 엔진이 그보다 낮으면 Testcontainers 가 「Docker 환경을 찾을 수 없다」로 죽는데
       #   증상이 원인을 가린다. 버전을 먼저 찍어 두면 진단이 한 줄로 끝난다.
+      #   2026-09-25 ubuntu-latest 실측: Server API=1.48 — 핀보다 높으므로 안전하다.
+      #   러너 이미지가 바뀌어 이 값이 1.44 아래로 내려가면 그때 핀을 조정한다.
       - name: Docker API 버전 (Testcontainers 전제)
         run: docker version --format 'Server API={{.Server.APIVersion}}'
 

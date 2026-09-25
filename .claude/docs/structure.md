@@ -107,5 +107,28 @@ Spring Data 인터페이스가 같은 이름이 되어 더 헷갈린다 — [`gl
 src/test/java/com/ossagent/{도메인}/...
 ```
 
-프로덕션 패키지 구조를 따라간다. 대외 의존(GitHub·LLM·샌드박스)은 **페이크로 대체**한다 —
+프로덕션 패키지 구조를 따라간다. 대외 의존(GitHub·LLM·샌드박스)은 **대역으로 갈음**한다 —
 [`testing-philosophy.md`](../rules/conventions/testing-philosophy.md).
+
+대역은 **층마다 다르다**(Q-9) — 능력은 자체 페이크, 어댑터 매핑은 `MockRestServiceServer`,
+전송 계약은 WireMock. 「페이크로 대체」 한 마디로 뭉치면 층이 하나 빠진다.
+
+```
+src/test/java/com/ossagent/{도메인}/domain/Fake{능력이름}.java   능력 대역 — 능력과 같은 패키지
+src/test/java/com/ossagent/support/testing/                    통합 테스트 하네스 (아래)
+src/test/resources/{github,policy,llm}/                        리소스 픽스처
+```
+
+`support/testing` 만 프로덕션 구조를 따라가지 않는다. **하네스**이지 어느 도메인의 테스트가 아니다.
+
+| 파일 | 역할 |
+|---|---|
+| `AgentIntegrationTest` | 통합 테스트의 표준 진입점. **`@SpringBootTest` 를 직접 쓰지 않는다** |
+| `FakeAdapter` | 대역 표시. 붙이면 **자동 등록**된다 (`@Component` + `@Profile("test")`) |
+| `ExternalAdapters` | 「이 클래스가 대외 어댑터인가」 판정기 — 패키지 + 네트워크 클라이언트 보유 |
+| `ExternalAdapterIsolationTest` | 컨텍스트에 실어댑터가 없음을 **강제**하는 가드 |
+| `probe/` | 판정기가 실제로 무는지 확인하는 미끼 2종. **스테레오타입을 붙이지 않는다** |
+
+실물에는 `@ExternalAdapter`(`com.ossagent.support`, src/main), 대역에는 `@FakeAdapter` 를
+붙인다. **그게 전부다** — 중앙 등록 지점이 없어 「등록을 깜빡해서 빈이 없다」가 생기지 않는다.
+빠뜨리면 가드가 RED 로 잡는다.

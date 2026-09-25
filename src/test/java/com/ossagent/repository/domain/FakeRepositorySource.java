@@ -1,5 +1,6 @@
 package com.ossagent.repository.domain;
 
+import com.ossagent.support.testing.FakeAdapter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Optional;
  * <p>이 클래스를 쓰는 곳은 #7(규약 수집)·#15(저장소 분석)의 UseCase 테스트다.
  * 지금은 계약이 실제로 페이크로 대체 가능한지를 증명하는 것이 역할이다.
  */
+@FakeAdapter
 public class FakeRepositorySource implements RepositorySource {
 
     private final Map<String, RepositoryMetadata> metadata = new HashMap<>();

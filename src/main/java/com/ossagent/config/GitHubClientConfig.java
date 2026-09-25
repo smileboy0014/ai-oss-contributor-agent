@@ -1,5 +1,6 @@
 package com.ossagent.config;
 
+import com.ossagent.support.ExternalAdapter;
 import com.ossagent.support.github.GitHubApiClient;
 import com.ossagent.support.github.GitHubCredentials;
 import com.ossagent.support.github.GitHubErrorTranslator;
@@ -25,6 +26,7 @@ import org.springframework.web.client.RestClient;
  * {@code .claude/rules/conventions/architecture.md} 「재시도·타임아웃은 adapter/out 에 명시」.
  */
 @Configuration
+@ExternalAdapter
 @EnableConfigurationProperties(GitHubProperties.class)
 public class GitHubClientConfig {
 

@@ -1,5 +1,6 @@
 package com.ossagent.repository.adapter.out.github;
 
+import com.ossagent.support.ExternalAdapter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryFile;
@@ -27,6 +28,7 @@ import org.springframework.stereotype.Component;
  * <p>읽기만 한다. Fork 생성·push 는 이 어댑터에 없다 — S-1.
  */
 @Component
+@ExternalAdapter
 public class GitHubRepositorySource implements RepositorySource {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubRepositorySource.class);

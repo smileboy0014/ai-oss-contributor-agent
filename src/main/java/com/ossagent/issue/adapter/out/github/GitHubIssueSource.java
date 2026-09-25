@@ -1,5 +1,6 @@
 package com.ossagent.issue.adapter.out.github;
 
+import com.ossagent.support.ExternalAdapter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ossagent.issue.domain.IssuePage;
 import com.ossagent.issue.domain.IssueQuery;
@@ -30,6 +31,7 @@ import org.springframework.stereotype.Component;
  * </ol>
  */
 @Component
+@ExternalAdapter
 public class GitHubIssueSource implements IssueSource {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubIssueSource.class);

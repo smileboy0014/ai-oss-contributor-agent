@@ -39,8 +39,19 @@ github:
   #   후보가 코드 문제 없이 FAILED 로 떨어진다 — 재시도 단위의 정의는 미결(Q-6)
   max-retries: 2
   retry-backoff: 500ms
-  # 남은 호출이 이 값 미만이면 경고만 남긴다. 지연 정책은 이슈 #8
+  # 🔴 남은 호출이 이 값 미만이면 호출하지 않고 GitHubRateLimitException 을 던진다 (#8).
+  #    소진된 뒤가 아니라 임계 미만이 되는 순간부터다 — 예산을 끝까지 태우면 같은 토큰을
+  #    쓰는 다른 작업(규약 수집 #7 · 코드 검색 #15)이 전부 막힌다.
+  #    호출자는 이 예외를 실패가 아니라 「지연」으로 다룬다
   rate-limit-threshold: 100
+
+  scan:
+    # 스캔 1회의 페이지 상한. 상한 없이 hasNext 를 따라가면 첫 스캔이 리밋을 통째로 태운다
+    # (spring-kafka 는 open 이슈가 수백 건이다). 잘리면 ScanResult.hasMore 로 드러난다
+    max-pages-per-scan: 10
+    # Retry-After 도 resetAt 도 없을 때의 기본 지연. 보수적으로 잡는다 —
+    # 짧게 잡으면 2차 리밋에서 차단이 더 길어진다
+    secondary-limit-backoff: 5m
 
 repository:
   policy:

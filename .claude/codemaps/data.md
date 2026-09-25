@@ -79,13 +79,32 @@ oss_repository ──1:1──▶ repository_policy
 | `name` | VARCHAR NOT NULL | `spring-kafka` |
 | `url` | VARCHAR NOT NULL **UNIQUE** | 중복 등록 차단의 근거 |
 | `enabled` | BOOLEAN NOT NULL | 스캔 대상 여부 |
-| `last_scanned_at` | TIMESTAMP NULL | 스캔 커서 |
+| `last_scanned_at` | TIMESTAMP NULL | **언제 돌렸나** — 커서가 아니다(아래) |
+| `issue_cursor_updated_at` | TIMESTAMP NULL | ✅ V6 — 이슈 증분 수집 커서. **어디까지 봤나** |
+| `issue_cursor_etag` | VARCHAR(255) NULL | ✅ V6 — page 1 응답의 ETag |
 | `default_branch` | VARCHAR | **설계만** — 코드에 없다 |
 | `language` | VARCHAR | 〃 |
 | `build_tool` | VARCHAR | 〃 `gradle` / `maven` |
 | `build_command` | VARCHAR | 〃 |
 
 인덱스 후보 — `UNIQUE(url)` (있음) · `INDEX(enabled, last_scanned_at)` 스캔 대상 선별용.
+
+#### ⚠️ `last_scanned_at` 은 커서가 아니다 (#8)
+
+둘을 겹쳐 쓰면 **스캔이 실패해도 커서가 전진해 이슈를 영구히 건너뛴다.**
+
+| 컬럼 | 뜻 | 언제 갱신되나 |
+|---|---|---|
+| `last_scanned_at` | 우리가 **언제 돌렸나** | 스캔을 요청·시작할 때 |
+| `issue_cursor_updated_at` | 데이터를 **어디까지 봤나** | 🔴 **저장이 끝난 뒤에만** |
+
+⚠️ **`issue_cursor_etag` 는 `issue_cursor_updated_at` 과 짝이다.** ETag 는 URL 단위로
+유효한데 `since` 가 URL 에 들어간다 — 커서가 전진하면 ETag 를 `NULL` 로 버린다.
+둘을 따로 갱신하는 코드를 만들지 않는다(`OssRepository.updateIssueScanCursor` 가 함께 받는다).
+
+⚠️ **커서를 `MAX(issue.github_updated_at)` 으로 파생하지 않는다.** 검토했으나 기각했다 —
+커서가 행 보존 정책에 묶여, 오래된 이슈를 정리하는 순간 `MAX` 가 뒤로 점프해 전량
+재스캔이 터진다.
 
 ### `repository_policy` ✅ 실재 (V2)
 

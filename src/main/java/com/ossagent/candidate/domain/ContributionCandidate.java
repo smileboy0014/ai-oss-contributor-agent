@@ -231,6 +231,7 @@ public class ContributionCandidate {
      */
     public StatusTransition startImplementing(int maxAttempts, Clock clock) {
         guardAttemptBudget(maxAttempts);
+        guardHumanSelection();
         StatusTransition transition = transitionTo(CandidateStatus.IMPLEMENTING, clock);
         this.attempt = 1;
         return transition;
@@ -273,7 +274,8 @@ public class ContributionCandidate {
     /**
      * {@code READY_FOR_PR → PR_CREATED} (종단).
      *
-     * <p>⚠️ <b>불변식 ③(「{@code PR_CREATED} 인데 PR 행이 없다」 금지)을 여기서 막지 않는다.</b>
+     * <p>⚠️ <b>「{@code PR_CREATED} 인데 PR 행이 없다」를 여기서 막지 않는다.</b>
+     * (불변식 ③ 의 본체인 「PR 은 항상 draft」와 다른 이야기다 — 그쪽은 아래에서 다룬다.)
      * 막으려 했으나 <b>지금은 작동할 수 없다</b> — {@link #pullRequest} 는 {@code mappedBy}
      * 역방향이라 PR 을 만든 <b>같은 트랜잭션 안에서는 항상 {@code null}</b> 이다(소유 측이
      * {@code PullRequest} 다). 가드를 넣으면 정상 경로가 100% 막힌다.
@@ -330,6 +332,29 @@ public class ContributionCandidate {
      * <p>⚠️ 위쪽 경계가 본체다. {@code maxAttempts = 0} 은 무한이 아니라 최강 제약이고
      * (즉시 {@code FAILED}), 정작 위험한 것은 {@code 10000} 처럼 <b>상한을 사실상 없애는 값</b>이다.
      */
+    /**
+     * 🔴 <b>사람이 고르지 않았으면 구현 단계로 못 간다</b> — 불변식 ② · S-6.
+     *
+     * <p>지금은 전이표가 이미 막는다({@code SELECTED} 에 닿는 유일한 길이
+     * {@link #selectByHuman(Clock)} 이고 그것이 {@code selectedAt} 을 채운다).
+     * <b>그래도 게이트에서 한 번 더 본다.</b>
+     *
+     * <p>이유는 이 클래스가 {@code isTerminal()} 을 하드코딩 목록으로 두지 않은 것과 같다 —
+     * 「지금 도달 불가하니 안전하다」에 기대면, 나중에 어떤 전이의 목적지가 바뀌는 순간
+     * {@code SELECTED} + {@code selectedAt == null} 이라는 불법 상태가 조용히 생긴다.
+     * S-1 이 「없는 권한에 기대지 않는다」로 어설션을 필수로 둔 것과 같은 형태다.
+     *
+     * <p>{@code selectedAt} 필드 javadoc 과 {@code codemaps/data.md} 가 「NULL 이면 구현
+     * 단계로 갈 수 없다」고 <b>단언</b>한다. 그 문장을 코드가 뒷받침해야 한다.
+     */
+    private void guardHumanSelection() {
+        if (isNotSelectedByHuman()) {
+            throw new CandidateTransitionException(
+                    "사람이 고르지 않은 후보는 구현 단계로 갈 수 없습니다 candidateId=" + id
+                            + " — selectedAt 이 비어 있다 (S-6)");
+        }
+    }
+
     private void guardAttemptBudget(int maxAttempts) {
         if (maxAttempts < 1 || maxAttempts > MAX_ALLOWED_ATTEMPTS) {
             throw new IllegalArgumentException(

@@ -145,6 +145,51 @@ class ContributionCandidateTest {
                 .isTrue();
     }
 
+    @Test
+    @DisplayName("사람이 고르지 않으면 구현 단계로 갈 수 없다 — 게이트가 전이표와 독립적이다")
+    void 사람이_고르지_않으면_구현할_수_없다_S6() {
+        ContributionCandidate candidate = analyzed();
+
+        assertThatThrownBy(() -> candidate.startImplementing(MAX_ATTEMPTS, clock()))
+                .as("selectedAt 이 「NULL 이면 구현 단계로 갈 수 없다」고 문서가 단언한다. "
+                        + "전이표가 대신 막고 있다는 사실에 기대지 않는다 — S-1 의 선례")
+                .isInstanceOf(CandidateTransitionException.class)
+                .hasMessageContaining("selectedAt");
+
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.ANALYZED);
+        assertThat(candidate.getAttempt()).isZero();
+    }
+
+    @Test
+    @DisplayName("시스템 판정으로 후보를 배제할 수 있다 — ANALYZED → REJECTED")
+    void 구현_불가_판정이면_배제한다_S6() {
+        ContributionCandidate candidate = analyzed();
+
+        StatusTransition transition = candidate.rejectAsInfeasible(clock());
+
+        assertThat(transition).isEqualTo(
+                new StatusTransition(CandidateStatus.ANALYZED, CandidateStatus.REJECTED));
+        assertThat(candidate.isTerminal()).isTrue();
+        assertThat(candidate.isNotSelectedByHuman())
+                .as("시스템 배제가 사람의 승인 흔적을 남겨서는 안 된다")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("복구 불가 오류는 상한과 무관하게 FAILED 다 — IMPLEMENTING 출발")
+    void 복구_불가_오류는_바로_FAILED_다_S6() {
+        ContributionCandidate candidate = implementing();
+
+        StatusTransition transition = candidate.fail(clock());
+
+        assertThat(transition).isEqualTo(
+                new StatusTransition(CandidateStatus.IMPLEMENTING, CandidateStatus.FAILED));
+        assertThat(candidate.isTerminal()).isTrue();
+        assertThat(candidate.getAttempt())
+                .as("실패가 카운터를 건드리지 않는다 — 소진과 복구 불가는 다른 사유다")
+                .isEqualTo(1);
+    }
+
     // ─────────────────────── 불변식 ⑧ 재시도 상한 ───────────────────────
 
     @Test
@@ -185,6 +230,29 @@ class ContributionCandidateTest {
         assertThat(candidate.isTerminal())
                 .as("상한 소진은 실패가 아니라 사람에게 넘기는 신호다 — S-6")
                 .isTrue();
+    }
+
+    @Test
+    @DisplayName("리뷰 실패로 소진해도 FAILED 다 — 테스트 실패와 같은 카운터")
+    void 리뷰_실패도_같은_카운터를_소진한다_S6() {
+        ContributionCandidate candidate = implementing();   // attempt = 1
+
+        candidate.startTesting(clock());
+        candidate.startReview(clock());
+        candidate.retryImplementation(MAX_ATTEMPTS, clock());   // 리뷰 실패 → attempt = 2
+        candidate.startTesting(clock());
+        candidate.startReview(clock());
+        candidate.retryImplementation(MAX_ATTEMPTS, clock());   // attempt = 3
+        candidate.startTesting(clock());
+        candidate.startReview(clock());
+
+        StatusTransition transition = candidate.retryImplementation(MAX_ATTEMPTS, clock());
+
+        assertThat(transition)
+                .as("리뷰 실패가 테스트 실패와 같은 Error Analyzer 로 들어가고 게이트가 "
+                        + "하나뿐이다 — Q-6 「합산」. REVIEWING 출발도 FAILED 로 가야 한다")
+                .isEqualTo(new StatusTransition(CandidateStatus.REVIEWING, CandidateStatus.FAILED));
+        assertThat(candidate.getAttempt()).isEqualTo(MAX_ATTEMPTS);
     }
 
     @Test

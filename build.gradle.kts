@@ -46,6 +46,11 @@ dependencies {
     testImplementation("org.testcontainers:junit-jupiter")
     testImplementation("org.testcontainers:postgresql")
 
+    // 🔴 전송 계약(읽기 타임아웃·리다이렉트 거부·연결 실패)은 실제 소켓이 아니면 검증되지 않는다.
+    //    MockRestServiceServer 는 ClientHttpRequestFactory 를 통째로 갈아끼워 JDK HttpClient 가
+    //    아예 돌지 않으므로, 그 층에서는 「설정값이 프로퍼티에 있다」까지만 확인된다 — Q-9 3계층
+    testImplementation(libs.wiremock.standalone)
+
     // 선언하지 않으면 Gradle 이 자기 버전의 launcher 를 끼워 넣어 BOM 이 관리하는 engine 과 어긋난다.
     // 증상이 「테스트를 못 찾는다」로 나와 원인을 짚기 어렵다.
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

@@ -226,10 +226,21 @@ public class GitHubApiClient {
      *
      * <p>소진된 뒤가 아니라 {@code github.rate-limit-threshold} 미만이 되는 순간부터다.
      * 남은 예산을 끝까지 태우면 <b>같은 토큰을 쓰는 다른 작업</b>(규약 수집 #7 · 코드 검색 #15)이
-     * 전부 막힌다. 스캐너가 가장 많이 호출하므로 스캐너가 먼저 양보한다.
+     * 전부 막힌다 — 마지막 예산은 아무도 못 쓰는 것보다 아무도 안 쓰는 편이 낫다.
+     *
+     * <p>⚠ <b>호출자를 구분하지 않는다.</b> 임계는 {@code github.rate-limit-threshold} 하나뿐이라
+     * 스캐너든 규약 수집이든 <b>똑같이</b> 거절된다. 「스캐너가 먼저 양보한다」 같은 우선순위는
+     * 구현돼 있지 않다 — 필요해지면 호출자 등급을 인자로 받아야 한다.
      *
      * <p>⚠ 리셋 시각이 지났으면 예산이 다시 찼으므로 통과시킨다. 기억한 값은 그대로 두고
      * 다음 응답이 갱신한다 — 여기서 지우면 리셋 직후 첫 호출이 판단 근거를 잃는다.
+     *
+     * <p>🔴 <b>{@code resetAt} 을 모르면 막지 않는다.</b> 막아 버리면 스스로 빠져나올 수 없다 —
+     * 이 값은 <b>응답을 받아야</b> 갱신되는데, 막는 동안에는 호출이 나가지 않아
+     * <b>재기동 전까지 모든 GitHub 호출이 영구히 실패</b>한다. 방어가 자폭이 되는 자리다.
+     * {@code GitHubHeaders.rateLimit} 은 헤더를 부분 파싱하므로
+     * 「{@code remaining} 은 알고 {@code resetAt} 은 모름」이 <b>정상적으로 만들어진다.</b>
+     * {@code GitHubRateLimit.isBelow} 가 「모르면 false」인 것과 같은 철학이다.
      *
      * <p>상태를 클라이언트가 들고 있는 것은 의도다. <b>GitHub 레이트리밋은 토큰 단위 전역</b>이라
      * 어느 어댑터가 태운 예산이든 같은 예산이다. {@code volatile} 이면 충분하다 —
@@ -241,7 +252,13 @@ public class GitHubApiClient {
             return;
         }
         Instant resetAt = observed.resetAt();
-        if (resetAt != null && !clock.instant().isBefore(resetAt)) {
+        if (resetAt == null) {
+            // 🔴 언제 풀리는지 모르면 막지 않는다 — 막으면 스스로 빠져나올 수 없다(위 참조)
+            log.warn("GitHub 레이트리밋 임계 미만이나 resetAt 을 모른다 — 차단하지 않는다 path={} remaining={}",
+                    request.path(), observed.remaining());
+            return;
+        }
+        if (!clock.instant().isBefore(resetAt)) {
             return;   // 리셋이 지났다 — 예산이 다시 찼다
         }
         log.warn("GitHub 레이트리밋 임계 미만 — 호출하지 않고 지연 path={} remaining={} threshold={} resetAt={}",

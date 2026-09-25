@@ -410,6 +410,31 @@ class GitHubApiClientTest {
         server.verify();   // 호출은 딱 1회만 나갔다
     }
 
+    @Test
+    @DisplayName("🔴 resetAt 을 모르면 차단하지 않는다 — 막으면 스스로 빠져나올 수 없다")
+    void resetAt_을_모르면_차단하지_않는다() {
+        // GitHubHeaders 는 헤더를 부분 파싱한다 — 「remaining 은 알고 Reset 은 모름」이
+        // 정상적으로 만들어진다. 그 상태에서 막아 버리면 lastRateLimit 을 갱신할 응답이
+        // 영영 오지 않아 재기동 전까지 모든 GitHub 호출이 실패한다. 방어가 자폭이 된다.
+        GitHubApiClient limited = clientWith(properties(FAKE_TOKEN, 0, Duration.ZERO, 100));
+
+        HttpHeaders noReset = new HttpHeaders();
+        noReset.set("X-RateLimit-Remaining", "5");   // 임계(100) 미만, Reset 헤더는 없다
+
+        server.expect(once(), requestTo(BASE_URL + "/repos/o/n"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON).headers(noReset));
+        server.expect(once(), requestTo(BASE_URL + "/repos/o/n"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON).headers(noReset));
+
+        limited.get(GitHubRequest.of("/repos/o/n"));
+
+        assertThatCode(() -> limited.get(GitHubRequest.of("/repos/o/n")))
+                .as("언제 풀리는지 모르면 막지 않는다 — isBelow 가 「모르면 false」인 것과 같은 철학")
+                .doesNotThrowAnyException();
+
+        server.verify();   // 두 호출 모두 실제로 나갔다
+    }
+
     private GitHubApiClient clientWith(GitHubProperties properties) {
         RestClient.Builder builder = RestClient.builder().baseUrl(BASE_URL);
         server = MockRestServiceServer.bindTo(builder).build();

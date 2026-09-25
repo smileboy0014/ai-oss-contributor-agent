@@ -157,8 +157,28 @@ public class AnalyzeRepositoryPolicyUseCase {
                 policies.findByRepositoryId(repositoryId).orElse(null));
     }
 
+    /**
+     * 보류를 기록한다.
+     *
+     * <p>🔴 <b>이미 판정이 선 정책을 보류로 되돌리지 않는다.</b> 두 가지 이유가 겹친다.
+     *
+     * <ol>
+     *   <li><b>불법 상태</b> — {@code RepositoryPolicy.pending()} 은 새 엔티티를 만드는데
+     *       {@code UNIQUE(repository_id)} 가 있다. 그대로 저장하면 제약 위반으로 터진다</li>
+     *   <li><b>되돌릴 수 없는 보류를 만든다</b> — 한 번 읽어서 판정이 선 저장소를, 나중에
+     *       문서가 상한을 넘었다는 이유로 보류로 떨어뜨리면 사람이 풀어야 하는 상태가 된다
+     *       (#24 미구현). 이미 확인한 판정을 지울 이유가 없다</li>
+     * </ol>
+     *
+     * <p>기존 판정을 유지하고 사실만 남긴다. 규약이 실제로 바뀌었다면 사람이 다시 볼 일이다.
+     */
     @Transactional
     protected RepositoryPolicy savePending(Snapshot snapshot, String reason) {
+        if (snapshot.policy() != null) {
+            log.warn("규약을 다시 읽지 못했다 repo={} reason={} — 기존 판정을 유지한다",
+                    snapshot.coordinates().fullName(), reason);
+            return snapshot.policy();
+        }
         log.info("규약 판정 보류 repo={} reason={} — 사람이 해소한다 (#24)",
                 snapshot.coordinates().fullName(), reason);
         return policies.save(RepositoryPolicy.pending(snapshot.repository(), reason, clock));

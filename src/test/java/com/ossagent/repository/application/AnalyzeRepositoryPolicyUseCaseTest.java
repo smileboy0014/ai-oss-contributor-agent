@@ -221,6 +221,26 @@ class AnalyzeRepositoryPolicyUseCaseTest {
                 .isEmpty();
     }
 
+    @Test
+    void 이미_판정이_선_저장소를_보류로_되돌리지_않는다_S5() {
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        // 나중에 문서가 상한을 넘었다 — 영구 실패다
+        documents.reset().givenUnreadable("CONTRIBUTING.md", UnreadableReason.TRUNCATED);
+        interpreter.reset();
+
+        RepositoryPolicy policy = useCase.analyze(repositoryId).orElseThrow();
+
+        assertThat(policy.allowsContribution())
+                .as("이미 확인한 판정을 지울 이유가 없다. 되돌리면 사람이 풀어야 하는 상태가 된다 (#24 미구현)")
+                .isTrue();
+        assertThat(policies.findAll())
+                .as("UNIQUE(repository_id) 가 있다 — 새 행을 만들면 제약 위반으로 터진다")
+                .hasSize(1);
+    }
+
     // ── 게이트 (FR-4) ──────────────────────────────────────
 
     @Test

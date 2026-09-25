@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -114,6 +115,16 @@ public class GitHubApiClient {
             throw e;
         } catch (ResourceAccessException e) {
             // 연결 거부·타임아웃 — 응답이 없다
+            throw errorTranslator.translateIoFailure(request.path(), e);
+        } catch (CancellationException e) {
+            // 🔴 읽기 타임아웃의 두 번째 경로. RestClientException 계열이 아니라
+            //    아래 catch 들을 전부 빠져나간다 — 잡지 않으면 타입 없는 예외가 올라가고
+            //    GitHubRetryPolicy 가 보지 못해 「타임아웃인데 재시도 안 됨」이 된다.
+            //
+            //    Spring 6.2.7 JdkClientHttpRequest.executeInternal 은 ExecutionException 에
+            //    감싸져 온 취소만 HttpTimeoutException 으로 바꾼다. TimeoutHandler 가 레이스를
+            //    이겨 future 가 이미 취소된 뒤 get() 이 불리면 CancellationException 이 직접
+            //    날아오고 그 분기에 걸리지 않는다. 부하가 걸릴수록 자주 탄다.
             throw errorTranslator.translateIoFailure(request.path(), e);
         } catch (RestClientException e) {
             GitHubApiException unwrapped = unwrap(e);

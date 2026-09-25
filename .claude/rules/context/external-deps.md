@@ -23,6 +23,35 @@ upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md
 - 이슈 수집은 `updated_at` 커서 + `ETag` 조건부 요청으로 증분화한다. 매 스캔 전량 조회는 레이트리밋을 태운다
 - `X-RateLimit-Remaining` 이 임계 미만이면 **작업을 실패시키지 말고 지연**시킨다. 리밋 소진은 정상 운영 상황이다
 - 2차 레이트리밋(abuse detection)은 429 가 아니라 403 으로 온다. 403 을 권한 오류로만 처리하면 무한 재시도에 빠진다
+- 🔴 **읽기 타임아웃은 두 갈래로 온다.** 보통은 `ResourceAccessException` 이지만, 취소가 레이스를
+  이기면 **`CancellationException` 이 맨몸으로** 올라온다. 그것은 `RestClientException` 계열이 아니라
+  catch 를 전부 빠져나가고, 그러면 재시도 정책이 보지 못해 **「타임아웃인데 재시도 안 됨」**이 된다 —
+  아래 함정 기록
+
+### ⚠️ Spring 이 `CancellationException` 을 번역하지 않는다 — 함정 기록 (2026-09-25)
+
+부하가 걸릴 때만 재현돼 **flaky 테스트로 오인하기 쉽다.** 실제로는 운영 코드 결함이다.
+
+`JdkClientHttpRequest.executeInternal`(spring-web 6.2.7)은 `ExecutionException` 에 **감싸져 온**
+취소만 `HttpTimeoutException` 으로 바꾼다.
+
+```java
+catch (ExecutionException ex) {
+    if (cause instanceof CancellationException) throw new HttpTimeoutException(...);   // ← 이 경로만
+```
+
+그런데 `TimeoutHandler` 가 레이스를 이겨 future 가 **이미 취소된 뒤** `get()` 이 불리면
+`CompletableFuture.get()` 이 `CancellationException` 을 **직접** 던지고, 그 분기에 걸리지 않는다.
+CPU 가 바쁠수록 핸들러가 자주 이긴다.
+
+| 영향 | |
+|---|---|
+| 재시도 | `GitHubRetryPolicy` 가 `GitHubApiException` 만 잡는다 → **재시도 안 됨** |
+| 예외 매핑 | 타입 없는 예외가 `support/web` 으로 올라간다 |
+| 규약 파싱 | 「못 읽음」 분류를 예외 타입에 거는 쪽이 오분류한다 — #7 이 그래서 **fail-closed**(`RuntimeException` 전부를 「못 읽음」)로 갔다 |
+
+**우리가 방어한다** — `GitHubApiClient` 가 `CancellationException` 을 잡아
+`GitHubTransientException` 으로 번역한다. 새 어댑터를 만들 때 **같은 catch 를 빠뜨리지 않는다.**
 
 ## LLM API
 

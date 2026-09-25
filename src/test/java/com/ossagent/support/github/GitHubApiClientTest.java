@@ -23,6 +23,8 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -73,6 +75,35 @@ class GitHubApiClientTest {
     @AfterEach
     void tearDown() {
         clientLogger.detachAppender(logs);
+    }
+
+    // ── 전송 실패 번역 ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("취소로 올라온 읽기 타임아웃도 전송 실패로 번역되고 재시도된다")
+    void 취소된_요청은_전송_실패로_번역된다() {
+        AtomicInteger calls = new AtomicInteger();
+        GitHubProperties properties = properties(FAKE_TOKEN, 2, Duration.ZERO, 100);
+        RestClient cancelling = RestClient.builder()
+                .baseUrl(BASE_URL)
+                .requestFactory((uri, httpMethod) -> {
+                    calls.incrementAndGet();
+                    throw new CancellationException("Request cancelled by TimeoutHandler");
+                })
+                .build();
+        GitHubApiClient candidate = new GitHubApiClient(cancelling,
+                StaticTokenCredentials.from(properties), properties,
+                new GitHubErrorTranslator(clock), clock);
+
+        assertThatThrownBy(() -> candidate.get(GitHubRequest.of("/repos/spring-projects/spring-kafka")))
+                .as("CancellationException 은 RestClientException 계열이 아니라 catch 를 전부 "
+                        + "빠져나간다. 잡지 않으면 타입 없는 예외가 올라간다")
+                .isInstanceOf(GitHubTransientException.class);
+
+        assertThat(calls.get())
+                .as("이것이 본체다 — 번역되지 않으면 재시도 루프(GitHubApiException 만 잡는다)를 "
+                        + "빠져나가 1회로 끝난다. 「타임아웃인데 재시도 안 됨」이 그 증상이다")
+                .isEqualTo(3);
     }
 
     // ── S-1 · 읽기 전용 표면 ────────────────────────────────────────────

@@ -68,10 +68,17 @@ public class GitHubErrorTranslator {
         return new GitHubApiException(status, "GitHub 호출 실패. " + where + excerpt(body));
     }
 
-    /** 연결 자체가 실패한 경우(타임아웃·연결 거부). 응답이 없으므로 항상 재시도 대상이다. */
+    /**
+     * 응답을 받지 못한 경우 — 연결 거부 · 연결 타임아웃 · <b>읽기 타임아웃</b>.
+     * 응답이 없으므로 항상 재시도 대상이다.
+     *
+     * <p>읽기 타임아웃은 두 갈래로 온다. {@code ResourceAccessException} 으로 감싸져 오는 것이
+     * 보통이지만, 취소가 먼저 이기면 {@link java.util.concurrent.CancellationException} 이
+     * 맨몸으로 올라온다 — {@code GitHubApiClient} 가 둘 다 여기로 보낸다.
+     */
     public GitHubTransientException translateIoFailure(String path, Throwable cause) {
         return new GitHubTransientException(GitHubApiException.NO_STATUS,
-                "GitHub 연결 실패 — 재시도 대상입니다. path=" + path, cause);
+                "GitHub 응답 없음(연결 실패·타임아웃) — 재시도 대상입니다. path=" + path, cause);
     }
 
     private GitHubApiException translateForbidden(int status, HttpHeaders headers, String body,

@@ -2,11 +2,17 @@
 [versions]
 springBoot = "3.5.0"
 springDependencyManagement = "1.1.7"
+# 공식 Anthropic Java SDK. GitHub 은 직접 구현이지만(Q-1) 여기는 SDK 다 —
+# Q-1 의 근거 3개(ETag 커서 · 403 2차 리밋 · 라이브러리가 RC) 중 어느 것도 LLM 에 성립하지 않는다.
+# 일반화하지 않는다는 기록은 Q-11
+anthropicJava = "2.65.0"
 # 전송 계약 검증용 — Q-9 3계층의 세 번째 층. 4.0 은 beta 라 쓰지 않는다
 wiremock = "3.13.1"
 
 [libraries]
-# standalone(shaded) 을 쓴다. 일반 배포판은 Jetty 를 끌고 와 Boot 의 서블릿 컨테이너와 충돌한다
+anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthropicJava" }
+# standalone(shaded) 을 쓴다. 일반 배포판은 Jetty 를 끌고 와 Boot 의 서블릿 컨테이너와 충돌한다.
+# 셰이딩은 Anthropic SDK 쪽에도 이득이다 — SDK 가 Jackson 버전 호환성을 직접 검사한다
 wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
 
 [plugins]

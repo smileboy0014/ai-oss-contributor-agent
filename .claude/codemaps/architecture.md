@@ -44,8 +44,8 @@
 |---|---|---|
 | `repository` | 대상 저장소 등록 정보 · **기여 규약**(`RepositoryPolicy`) · 스캔 커서 | 이슈 본문 · 후보 판정 |
 | `issue` | 이슈 스냅샷 · 수집 커서 · **필터 판정 이력** | 기여 가능성 판정(LLM) |
-| `candidate` | 기여 후보 · **상태머신** · 난이도·신뢰도 분석 결과 | LLM 호출 자체 · PR 생성 |
-| `agent` | **실행 이력**(`AgentRun`) · 생성 변경분(`GeneratedChange`) · 토큰·비용 · 재시도 카운터 | 후보 상태 전이 · PR 메타데이터 |
+| `candidate` | 기여 후보 · **상태머신** · 난이도·신뢰도 분석 결과 · **실행 이력**(`AgentRun`) · 생성 변경분(`GeneratedChange`) | LLM 호출 자체 · PR 생성 |
+| `agent` | LLM 호출 · 프롬프트 스크럽 · 샌드박스 실행 · **전송 재시도** | **실행 이력 엔티티** — `candidate` 소유다 |
 | `pullrequest` | Fork 좌표 · 브랜치 · **Draft PR** 메타데이터 | 코드 생성·검증 |
 | `support` | HTTP 예외 매핑 · 공통 GitHub 클라이언트(토큰·레이트리밋) | 도메인 규칙 일체 |
 | `config` | 빈 조립 (`ClockConfig` 등) | **비즈니스 코드 금지** |
@@ -95,7 +95,8 @@ com.ossagent.{도메인}
 | GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` | ✅ **존재** (#6) |
 | GitHub — 규약 판정 | `PolicySource` (제안) | — | `repository` | ❌ #7 — `RepositorySource.fetchFile` 위에 올린다 |
 | GitHub — Fork·PR | `ForkRegistry` · `DraftPrPublisher` (제안) | `GitHubDraftPrPublisher` | `pullrequest` | ❌ #22 · #23 |
-| LLM | `IssueAnalyst` · `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | `ClaudeIssueAnalyst` 등 | `agent` | ❌ #10 |
+| LLM — 전송 (1층) | `LanguageModel` · `PromptScrubber` · `AgentRunRecorder` | `AnthropicLanguageModel`(+`RecordingLanguageModel` 데코레이터) · `TokenRedactingPromptScrubber` · `RecordAgentRunUseCase`(candidate) | `agent` | ✅ **존재** (#10) |
+| LLM — 도메인 능력 (2층) | `IssueAnalyst` · `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | — | `agent` | ❌ 소비자 이슈 |
 | Docker | `CodeSandbox` (제안) | `DockerCodeSandbox` | `agent` | ❌ #17 |
 | PostgreSQL | Spring Data 인터페이스 (완화 ②로 직접 주입) | `adapter/out/persistence` | 각 도메인 | 부분 |
 
@@ -147,7 +148,9 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | 시크릿 스크럽 | ⚠️ 부분 | `support/secret/TokenRedactor` — 토큰 패턴 치환만. LLM 프롬프트 단위 배제는 #28 |
 | `RepositoryPolicy` 수집 | ❌ | 능력(`fetchFile`)은 있다. 규약 판정 로직이 없다 — #7 |
 | `issue` 수집 UseCase | ❌ | 능력(`IssueSource`)은 있다. 커서·지연·멱등 저장이 없다 — #8 |
-| `agent` 도메인 (LLM·샌드박스) | ❌ | `package-info.java` 뿐 |
+| **LLM 능력·어댑터** | ✅ | `LanguageModel`(agent/domain) + `AnthropicLanguageModel` — 송신 전 스크럽 필수(S-4) · 타임아웃·전송 재시도 명시 · 절단·거부는 예외 · **노출 빈은 기록 데코레이터 하나뿐** (#10) |
+| **LLM 토큰·비용 기록** | ✅ | `AgentRunRecorder`(agent/domain) ← `RecordAgentRunUseCase`(candidate/application). 실패도 남긴다 |
+| `agent` 샌드박스 | ❌ | 아직 없다 — #17 |
 | `pullrequest` 도메인 | ❌ | 〃 — **쓰기 경로는 여기 생긴다** (#22 · #23). 어설션 없는 push 는 반려 |
 | Scheduler | ❌ | 없음 |
 | Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |

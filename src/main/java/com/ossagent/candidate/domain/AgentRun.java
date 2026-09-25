@@ -1,6 +1,7 @@
 package com.ossagent.candidate.domain;
 
 import com.ossagent.support.ExternalText;
+import com.ossagent.support.secret.TokenRedactor;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -9,6 +10,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.time.Clock;
 import java.time.Instant;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -81,6 +83,93 @@ public class AgentRun {
     private Instant startedAt;
 
     private Instant finishedAt;
+
+    /**
+     * 실행 시작을 기록한다. <b>대외 호출 전에</b> 부른다.
+     *
+     * <p>왜 호출 전인가 — <b>실패한 호출도 토큰을 먹는다.</b> 타임아웃으로 끊긴 호출은 사용량을
+     * 돌려받지 못하지만 모델은 이미 생성했고 과금된다. 시작 행을 먼저 남기지 않으면 그 비용이
+     * 장부에서 통째로 사라진다.
+     *
+     * @param attempt Q-6 확정(2026-09-25) — {@code CODE → VERIFY → REVIEW} 한 바퀴가 1 이다.
+     *                같은 사이클의 여러 행이 같은 값을 갖는다. <b>전송 재시도 횟수를 더하지 않는다</b>
+     */
+    public static AgentRun start(Long candidateId, Stage stage, int attempt, Clock clock) {
+        if (candidateId == null) {
+            throw new IllegalArgumentException("candidateId 는 필수다");
+        }
+        if (stage == null) {
+            throw new IllegalArgumentException("stage 는 필수다");
+        }
+        if (attempt < 1) {
+            throw new IllegalArgumentException("attempt 는 1 부터다: " + attempt);
+        }
+        AgentRun run = new AgentRun();
+        run.candidateId = candidateId;
+        run.stage = stage;
+        run.attempt = attempt;
+        run.status = RunStatus.RUNNING;
+        run.startedAt = clock.instant();
+        return run;
+    }
+
+    /** 성공과 토큰을 기록한다. */
+    public void succeed(int inputTokens, int outputTokens, Clock clock) {
+        requireRunning();
+        if (inputTokens < 0 || outputTokens < 0) {
+            throw new IllegalArgumentException("토큰 수는 음수일 수 없다");
+        }
+        this.inputTokens = inputTokens;
+        this.outputTokens = outputTokens;
+        this.status = RunStatus.SUCCEEDED;
+        this.finishedAt = clock.instant();
+    }
+
+    /**
+     * 실패를 기록한다.
+     *
+     * <p>⚠️ {@code reason} 은 <b>우리 어휘</b>여야 한다. SDK·HTTP 예외 메시지를 그대로 넘기지
+     * 않는다 — 요청 URL 과 헤더가 담겨 있고, 거기 토큰이 붙어 있으면 그대로 적재된다 (S-4).
+     */
+    public void fail(String reason, Clock clock) {
+        fail(reason, null, null, clock);
+    }
+
+    /**
+     * 실패하면서 <b>토큰은 나간</b> 경우.
+     *
+     * <p>출력 상한 절단이 대표적이다 — 응답을 받았으니 사용량을 알지만 결과는 실패다.
+     * 성공으로 기록하면 장부가 거짓말을 하고, 사용량을 버리면 비용이 사라진다.
+     * 토큰을 모르면 {@code null} 을 넘긴다.
+     */
+    public void fail(String reason, Integer inputTokens, Integer outputTokens, Clock clock) {
+        requireRunning();
+        if ((inputTokens != null && inputTokens < 0) || (outputTokens != null && outputTokens < 0)) {
+            throw new IllegalArgumentException("토큰 수는 음수일 수 없다");
+        }
+        // 🔴 마지막 그물이다. 호출자가 「우리 어휘만 넣는다」는 규약을 지키는 것이 1차 방어이나,
+        // 규약은 언젠가 깨진다 — #17 샌드박스 단계가 예외 메시지를 그대로 넘기면 요청 URL 과
+        // 토큰이 이 컬럼에 적재된다. 구조로 막는 비용이 한 줄이다 (S-4)
+        this.errorMessage = TokenRedactor.redact(reason);
+        this.inputTokens = inputTokens;
+        this.outputTokens = outputTokens;
+        this.status = RunStatus.FAILED;
+        this.finishedAt = clock.instant();
+    }
+
+    /**
+     * 종단 상태에서 나가는 전이를 만들지 않는다.
+     *
+     * <p>{@code SUCCEEDED}·{@code FAILED} 는 append-only 기록의 끝이다. 이미 끝난 기록을
+     * 다시 쓰면 <b>비용 장부가 조용히 바뀐다</b> — 그 자체가 재시도 상한 판정의 근거이므로
+     * S-6 의 종단 상태 원칙과 같은 무게다.
+     */
+    private void requireRunning() {
+        if (status != RunStatus.RUNNING) {
+            throw new IllegalStateException(
+                    "종단 상태의 실행 기록은 바꿀 수 없다: status=" + status + " id=" + id);
+        }
+    }
 
     public enum Stage {
         ANALYZE,

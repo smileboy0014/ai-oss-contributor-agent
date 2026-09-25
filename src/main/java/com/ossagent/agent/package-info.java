@@ -14,6 +14,18 @@
  * 호스트에서 직접 실행하는 경로를 만들지 않는다 —
  * {@code .claude/rules/context/safety-boundaries.md} S-3.
  *
- * <p>아직 비어 있다.
+ * <h2>LLM 능력은 2층이다</h2>
+ *
+ * <p><b>1층 — 전송</b>: {@code LanguageModel} 하나. PRD §6.1 의 4개 호출 지점이 공유한다.
+ * 타임아웃·전송 재시도·토큰 기록·프롬프트 스크럽이 전부 여기 모인다. 갈라지면 비용이
+ * 보이지 않게 된다.
+ *
+ * <p><b>2층 — 도메인 능력</b>: {@code IssueAnalyst} · {@code ImplementationPlanner} ·
+ * {@code CodingAgent} · {@code DiffReviewer}. 1층 위에 얹히고 <b>아직 없다</b> — 소비자 이슈의 몫이다.
+ *
+ * <p>🔴 노출되는 {@code LanguageModel} 빈은 {@code RecordingLanguageModel} <b>하나뿐</b>이다.
+ * 속 구현을 빈으로 내보내지 않으므로 실행 이력을 건너뛰고 LLM 을 부를 경로가 존재하지 않는다.
+ *
+ * <p>샌드박스({@code CodeSandbox})는 아직 없다 — #17.
  */
 package com.ossagent.agent;

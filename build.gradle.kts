@@ -33,6 +33,10 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
     runtimeOnly("com.h2database:h2")
 
+    // LLM 호출. 능력 인터페이스가 agent/domain 에 있어 어댑터 한 장만 갈아끼우면 되므로
+    // SDK 를 써도 갇히지 않는다 — 이것이 Q-1(직접 구현)과 다른 결론을 낸 진짜 근거다
+    implementation(libs.anthropic.java)
+
     // 엔티티 보일러플레이트를 줄인다 — Q-7 (2026-09-22 도입 결정)
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
@@ -49,6 +53,9 @@ dependencies {
     // 🔴 전송 계약(읽기 타임아웃·리다이렉트 거부·연결 실패)은 실제 소켓이 아니면 검증되지 않는다.
     //    MockRestServiceServer 는 ClientHttpRequestFactory 를 통째로 갈아끼워 JDK HttpClient 가
     //    아예 돌지 않으므로, 그 층에서는 「설정값이 프로퍼티에 있다」까지만 확인된다 — Q-9 3계층
+    //    LLM 어댑터는 사정이 한 겹 더하다 — Anthropic SDK 는 자체 HTTP 스택이라
+    //    MockRestServiceServer 가 바인딩할 대상 자체가 없다. 중간 층은 SDK 가 공개하는
+    //    ClientOptions.httpClient 주입점에 스텁을 꽂아 대신한다 (StubHttpClient)
     testImplementation(libs.wiremock.standalone)
 
     // 선언하지 않으면 Gradle 이 자기 버전의 launcher 를 끼워 넣어 BOM 이 관리하는 engine 과 어긋난다.

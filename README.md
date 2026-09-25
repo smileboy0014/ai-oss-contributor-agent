@@ -65,7 +65,7 @@ curl -X POST http://localhost:8080/api/repositories \
     ├── repository/            대상 저장소 등록 · 메타데이터/파일 조회 · 기여 규약 분석
     ├── issue/                 이슈 조회 · 필터            (조회 능력만)
     ├── candidate/             기여 후보 · 상태 전이
-    ├── agent/                 LLM · 샌드박스 실행         (경계만)
+    ├── agent/                 LLM 능력·어댑터 ✅ / 샌드박스 (경계만)
     └── pullrequest/           Fork · Draft PR            (경계만)
 ```
 

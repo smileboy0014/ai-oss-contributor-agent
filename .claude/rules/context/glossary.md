@@ -51,6 +51,10 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `RepositorySource` | `GitHubRepositorySource` | 대상 저장소의 메타데이터·파일을 **읽는다**. 쓰기 없음 |
 | `IssueSource` | `GitHubIssueSource` | 대상 저장소의 open 이슈를 **읽는다**. 코멘트 경로 없음(S-2) |
 | `GitHubCredentials` | `StaticTokenCredentials` | 호출마다 자격증명을 공급한다. 단수명 토큰으로 갈아끼울 이음매 — Q-1 |
+| `LanguageModel` | `AnthropicLanguageModel` | LLM 호출. **4개 지점이 공유하는 1층 능력** — 그 위에 `IssueAnalyst` 등 2층이 얹힌다 |
+| `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
+| `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
+| `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
 | `IssueSnapshot` | — | 수집 시점의 이슈 원본 **값**. 영속 엔티티 `Issue` 와 다르다 |
 

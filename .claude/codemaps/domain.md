@@ -2,7 +2,8 @@
 
 > 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §9 Issue Discovery · §10 Candidate State Machine · §11 Issue Analysis · §15 Verification Pipeline · §17 Retry Strategy (v1.1 Draft).
 > 비즈니스 규칙과 상태머신. **구현 전에 이 맵을 확인하고 일치시킬 것.**
-> ⚠️ 코드에 존재하는 것은 `CandidateStatus` enum 뿐이다. 전이 로직·필터·검증 파이프라인은 전부 미구현이다.
+> ⚠️ **상태머신은 구현됐다**(#12) — 전이 규칙·불변식 ①②⑧·재시도 상한이 `candidate/domain` 에 있다.
+> **필터·검증 파이프라인은 여전히 미구현**이고, 전이를 부르는 UseCase·엔드포인트도 아직 없다(#13 · #24).
 
 ## 파이프라인
 
@@ -27,9 +28,9 @@
                        └──────┬──────┘
                               │ 분석 시작
                               ▼
-                       ┌─────────────┐
-                       │  ANALYZING  │
-                       └──────┬──────┘
+                       ┌─────────────┐   분석 실패
+                       │  ANALYZING  │──────────────────▶ (FAILED ●)
+                       └──────┬──────┘   Q-6
                               │ LLM 판정 완료
                               ▼
                        ┌─────────────┐   feasible=false
@@ -78,6 +79,7 @@
 | — | `DISCOVERED` | 필터 통과한 이슈로 후보 생성 | 스캐너 |
 | `DISCOVERED` | `ANALYZING` | 분석 요청 (`POST /candidates/{id}/analyze`) | 시스템 |
 | `ANALYZING` | `ANALYZED` | LLM 분석 산출물 저장 | 시스템 |
+| `ANALYZING` | `FAILED` ● | **분석 실패 — 즉시 종단** (Q-6: `ANALYZE`·`PLAN` 은 재시도 없음) | 시스템 |
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` 또는 `breaking_change=true` | 시스템 |
 | `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
 | `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject` | **사람** |
@@ -122,7 +124,7 @@ Draft PR 까지 그렸는데, 그대로 구현하면 위 세 번째 게이트가
 | 5 | **대상 저장소 실행은 샌드박스 안** | 악의적 저장소 하나로 호스트 장악 | S-3 |
 | 6 | **`RepositoryPolicy` 없이 구현 단계로 못 간다** | 규약 위반 PR 은 읽히지 않고 닫힌다 | S-5 |
 | 7 | **`ai_contribution_allowed` 판정 실패는 「보류」다** | AI 기여를 금지한 저장소에 PR 을 연다 | S-5 · Q-8 |
-| 8 | **재시도 상한을 무한으로 바꾸지 않는다** | LLM 비용이 조용히 폭주하고 `FAILED` 신호가 사라진다 | S-6 |
+| 8 | **재시도 상한을 무한으로 바꾸지 않는다** — 판정 필드는 `contribution_candidate.attempt`, 절대 상한은 도메인 상수 | LLM 비용이 조용히 폭주하고 `FAILED` 신호가 사라진다 | S-6 |
 | 9 | **후보는 이슈당 1건** | 같은 작업 이중 실행 · 중복 PR | [`data.md`](./data.md) |
 | 10 | **종단 상태 행을 삭제하지 않는다** | 같은 이슈를 다음 스캔에서 또 분석한다. LLM 비용 반복 | 〃 |
 
@@ -221,8 +223,14 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 | 단계 타임아웃 | `agent.execution.timeout-seconds: 1800` (30분) |
 | 상한 소진 | `FAILED` — **그 자체가 사람에게 넘기는 신호다** |
 
-⚠️ **「3회」의 단위가 미정이다.** 단계별 독립 카운터인지 후보 전체 통합인지 정해지지 않았다.
-`AgentRun.attempt` 의 의미가 여기서 갈리고, 비용 집계도 따라 흔들린다 → [`../rules/context/open-questions.md`](../rules/context/open-questions.md) **Q-6**.
+✅ **「3회」의 단위는 `CODE → VERIFY → REVIEW` 한 바퀴다** — Q-6 확정 (2026-09-25).
+리뷰 실패는 테스트 실패와 **합산**이고, `ANALYZE`·`PLAN` 은 카운터 밖(실패 시 즉시 `FAILED`)이다.
+판정 필드는 **`contribution_candidate.attempt`** 이고 도메인이 `MAX_ALLOWED_ATTEMPTS = 3` 을
+넘는 값을 거부한다 — 상한을 올리려면 도메인 코드를 고쳐야 하고 그것이 리뷰에 보인다(불변식 ⑧).
+
+⚠️ `application.yml` 의 키 이름은 `agent.execution.max-retries` 인데 **의미는 attempts**(총 시도 수)다.
+1 만큼 다른 개념이라 「off-by-one 버그」로 오인해 고치면 Q-6 의 곱셈 예산이 무효가 된다.
+개명은 그 프로퍼티를 실제로 읽는 #21 에서 한다.
 
 **재시도마다 `agent_run` 과 `generated_change` 를 새 행으로 남긴다.** 덮어쓰면 무엇이 왜 바뀌었는지 추적이 사라진다.
 

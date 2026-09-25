@@ -126,7 +126,7 @@ oss_repository ──1:1──▶ repository_policy
 
 인덱스 후보 — `INDEX(repository_id, updated_at)` 증분 수집 · `INDEX(state, filter_result)` 후보 선별.
 
-### `contribution_candidate` ✅ 실재 (V2)
+### `contribution_candidate` ✅ 실재 (V2 · V4)
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
@@ -141,6 +141,8 @@ oss_repository ──1:1──▶ repository_policy
 | `analysis` | TEXT | **대용량 · 스크럽 대상** |
 | `status` | VARCHAR NOT NULL | `CandidateStatus` 11종 — [`domain.md`](./domain.md) |
 | `selected_at` | TIMESTAMP NULL | **사람이 고른 시각.** NULL 이면 구현 단계로 못 간다 (S-6) |
+| `attempt` | INT NOT NULL DEFAULT 0 | **`CODE→VERIFY→REVIEW` 한 바퀴** — Q-6 확정. 0 = 미착수. 상한 3, 도메인이 그보다 큰 값을 거부한다(불변식 ⑧) — V4 |
+| `version` | BIGINT NOT NULL DEFAULT 0 | **낙관적 락.** 없으면 동시 전이로 같은 후보에 구현 사이클이 2개 생긴다 — 30분 샌드박스 ×2 · LLM 과금 ×2 — V4 |
 
 멱등키 — **`UNIQUE(issue_id)`**.
 인덱스 후보 — `INDEX(status)` 대시보드 · `INDEX(status, confidence DESC)` 추천 정렬.
@@ -154,7 +156,7 @@ oss_repository ──1:1──▶ repository_policy
 | `id` | BIGINT PK | |
 | `candidate_id` | BIGINT FK | |
 | `stage` | VARCHAR | `ANALYZE` / `PLAN` / `CODE` / `VERIFY` / `REVIEW` |
-| `attempt` | INT | **의미가 미정이다** — 단계별 독립 카운터인지 후보 통합인지 → Q-6 |
+| `attempt` | INT | **`CODE→VERIFY→REVIEW` 한 바퀴** — Q-6 확정. `ANALYZE`·`PLAN`·`POLICY` 행은 항상 1 이다(루프 밖) |
 | `input_tokens` · `output_tokens` | INT | 비용 집계 |
 | `status` | VARCHAR | `RUNNING` / `SUCCEEDED` / `FAILED` |
 | `error_message` | TEXT | **스크럽 대상** — 스택트레이스에 토큰이 섞인다 |

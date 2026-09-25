@@ -124,7 +124,7 @@ src/test/resources/{github,policy,llm}/                        리소스 픽스�
 | 파일 | 역할 |
 |---|---|
 | `AgentIntegrationTest` | 통합 테스트의 표준 진입점. **`@SpringBootTest` 를 직접 쓰지 않는다** |
-| `FakeAdapter` | 대역 표시. 붙이면 **자동 등록**된다 (`@Component` + `@Profile("test")`) |
+| `FakeAdapter` | 대역 표시. 붙이면 **자동 등록**된다 (`@Component` + `@Profile("fakes")`) |
 | `ExternalAdapters` | 「이 클래스가 대외 어댑터인가」 판정기 — 패키지 + 네트워크 클라이언트 보유 |
 | `ExternalAdapterIsolationTest` | 컨텍스트에 실어댑터가 없음을 **강제**하는 가드 |
 | `probe/` | 판정기가 실제로 무는지 확인하는 미끼 2종. **스테레오타입을 붙이지 않는다** |

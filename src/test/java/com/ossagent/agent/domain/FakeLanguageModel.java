@@ -16,7 +16,7 @@ import java.util.List;
  * <p>이름은 {@code Fake{능력이름}} — {@code FakeRepositorySource}·{@code FakeIssueSource} 와 같은 규약.
  *
  * <p>{@code @FakeAdapter} 가 컴포넌트 스캔으로 자동 등록한다. 실물
- * ({@code LanguageModelConfig}, {@code @ExternalAdapter})이 {@code test} 프로필에서 빠진 자리를
+ * ({@code LanguageModelConfig}, {@code @ExternalAdapter})이 {@code fakes} 프로필에서 빠진 자리를
  * 이것이 채운다 — 중앙 등록 지점이 없다.
  *
  * <p>🔴 실패 모드를 재현할 수 있다 — {@link #failWith}. 「항상 성공만 반환하는 페이크」는

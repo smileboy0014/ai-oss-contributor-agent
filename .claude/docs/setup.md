@@ -150,6 +150,22 @@ DATABASE_USERNAME=oss_agent DATABASE_PASSWORD=oss_agent ./gradlew bootRun
 
 Redis 는 `docker-compose.yml` 에만 있고 애플리케이션이 아직 쓰지 않는다.
 
+### 🔴 `fakes` 프로필로 애플리케이션을 띄우지 않는다
+
+`fakes` 는 **테스트 전용 대역 프로필**이다. 뜻은 「테스트」가 아니라 **「대역만 켠다 = 실물을 뺀다」**다.
+
+```bash
+SPRING_PROFILES_ACTIVE=fakes ./gradlew bootRun    # ❌ GitHub·LLM 어댑터가 통째로 사라진다
+```
+
+지금은 그 빈들을 주입하는 코드가 없어 **조용히 뜨고**, #7·#8·#11 이 주입하기 시작하면
+컨텍스트 실패로 바뀐다. 즉 **지금이 가장 알아채기 어려운 시기**다.
+
+원래 이름은 `test` 였는데 배포 환경 이름으로 흔해 바꿨다([#42](https://github.com/smileboy0014/ai-oss-contributor-agent/issues/42)).
+⚠️ **위험은 축소이지 제거가 아니다** — 「운영인지」를 코드가 판정할 방법이 없어(배포 프로파일이
+[Q-3](../rules/context/open-questions.md) 에서 미정) 런타임 가드는 두지 않았다.
+Q-3 이 확정되면 다시 검토한다.
+
 ## 5. 확인
 
 ```bash

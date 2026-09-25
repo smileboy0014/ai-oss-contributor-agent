@@ -1,7 +1,7 @@
 package com.ossagent.support.testing.probe;
 
 /**
- * 검사기의 <b>미끼</b>다 — {@code test} 프로필 없이 컨텍스트를 띄우는 클래스를
+ * 검사기의 <b>미끼</b>다 — {@code fakes} 프로필 없이 컨텍스트를 띄우는 클래스를
  * {@code IntegrationTestProfileTest} 가 실제로 잡아내는지 증명한다.
  *
  * <p>미끼가 없으면 「프로필 없는 테스트가 0건이다」는 <b>검사기가 아무것도 못 잡아도</b>

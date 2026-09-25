@@ -55,8 +55,8 @@ class ExternalAdapterIsolationTest {
                         금지 기술: %s (persistence 는 제외 — DB 는 Testcontainers 로 실제로 띄운다)
 
                         고치는 법 — 둘 다 해야 한다.
-                          1. 어댑터(또는 그 @Configuration)에 @Profile("!test") 를 단다
-                          2. 같은 능력의 페이크를 FakeExternalDependencies 에 @Bean 으로 등록한다
+                          1. 어댑터(또는 그 @Configuration)에 @ExternalAdapter 를 단다
+                          2. 같은 능력의 페이크에 @FakeAdapter 를 단다 (등록은 자동이다)
 
                         근거: .claude/rules/conventions/testing-philosophy.md · safety-boundaries S-1·S-2·S-3""",
                         ExternalAdapters.externalTechnologies())
@@ -73,17 +73,17 @@ class ExternalAdapterIsolationTest {
      * 능력 인터페이스로 주입되는 것이 <b>페이크인지</b> 본다.
      *
      * <p>빈이 없는 것과 「대역이 제자리에 있는 것」은 다른 문제다. 실어댑터를
-     * {@code @Profile("!test")} 로 빼기만 하고 페이크를 등록하지 않으면, 컨텍스트는 초록인데
+     * {@code @ExternalAdapter} 로 빼기만 하고 대역에 {@code @FakeAdapter} 를 달지 않으면, 컨텍스트는 초록인데
      * <b>UseCase 가 주입받을 것이 없는</b> 상태가 된다.
      */
     @Test
     void 능력_인터페이스는_페이크로_주입된다() {
         assertThat(context.getBean(IssueSource.class).getClass().getName())
-                .as("IssueSource 가 페이크가 아니다 — FakeExternalDependencies 를 확인하라")
+                .as("IssueSource 가 페이크가 아니다 — 대역에 @FakeAdapter 가 붙었는지 확인하라")
                 .startsWith("com.ossagent.issue.domain.Fake");
 
         assertThat(context.getBean(RepositorySource.class).getClass().getName())
-                .as("RepositorySource 가 페이크가 아니다 — FakeExternalDependencies 를 확인하라")
+                .as("RepositorySource 가 페이크가 아니다 — 대역에 @FakeAdapter 가 붙었는지 확인하라")
                 .startsWith("com.ossagent.repository.domain.Fake");
 
         assertThat(context.getBean(LanguageModel.class).getClass().getName())

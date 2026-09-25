@@ -18,14 +18,14 @@ import org.springframework.test.context.ContextConfiguration;
 import org.springframework.util.ClassUtils;
 
 /**
- * 스프링 컨텍스트를 띄우는 테스트가 <b>전부 {@code test} 프로필을 받는지</b> 검사한다 — #43.
+ * 스프링 컨텍스트를 띄우는 테스트가 <b>전부 {@code fakes} 프로필을 받는지</b> 검사한다 — #43.
  *
  * <p>{@link ExternalAdapterIsolationTest} 는 <b>자기가 띄운 컨텍스트</b>만 본다. 다른 테스트가
  * 어떤 컨텍스트를 띄우는지는 알지 못한다. 그래서 진입점을 우회하면 가드가 닿지 않는다.
  *
  * <table border="1">
  *   <caption>프로필에 따른 배선</caption>
- *   <tr><th></th><th>{@code test} 프로필</th><th>기본 프로필</th></tr>
+ *   <tr><th></th><th>{@code fakes} 프로필</th><th>기본 프로필</th></tr>
  *   <tr><td>{@code @ExternalAdapter} (실물)</td><td>❌ 빠짐</td><td>✅ <b>올라옴</b></td></tr>
  *   <tr><td>{@code @FakeAdapter} (대역)</td><td>✅ 뜸</td><td>❌ 안 뜸</td></tr>
  * </table>
@@ -69,31 +69,31 @@ import org.springframework.util.ClassUtils;
 class IntegrationTestProfileTest {
 
     private static final String BASE_PACKAGE = "com.ossagent";
-    private static final String REQUIRED_PROFILE = "test";
+    private static final String REQUIRED_PROFILE = "fakes";
 
     /** 미끼가 사는 곳. 본 단언에서 제외하지 않으면 가드가 영구 RED 가 된다. */
     private static final String PROBE_PACKAGE = "com.ossagent.support.testing.probe";
 
     @Test
-    void 컨텍스트를_띄우는_테스트는_전부_test_프로필을_받는다_S1_S2() {
+    void 컨텍스트를_띄우는_테스트는_전부_대역_프로필을_받는다_S1_S2() {
         List<String> violations = new ArrayList<>();
 
         for (Class<?> type : contextBootstrappingClasses()) {
             if (type.getName().startsWith(PROBE_PACKAGE)) {
                 continue;   // 미끼는 일부러 위반이다 — 아래 전용 테스트가 검사한다
             }
-            if (!hasTestProfile(type)) {
+            if (!hasRequiredProfile(type)) {
                 violations.add(type.getName());
             }
         }
 
         assertThat(violations)
                 .as("""
-                        스프링 컨텍스트를 띄우면서 test 프로필을 받지 않는 테스트가 있다.
+                        스프링 컨텍스트를 띄우면서 대역 프로필(fakes)을 받지 않는 테스트가 있다.
                         그 컨텍스트에는 실제 대외 어댑터가 올라오고 대역이 빠진다 — 배선이 정확히 반대다.
 
                         고치는 법: @AgentIntegrationTest 를 쓴다.
-                        (자기만의 합성 애노테이션을 만든다면 @ActiveProfiles("test") 를 반드시 포함시킨다)
+                        (자기만의 합성 애노테이션을 만든다면 @ActiveProfiles("fakes") 를 반드시 포함시킨다)
 
                         근거: .claude/rules/conventions/testing-philosophy.md · safety-boundaries S-1·S-2""")
                 .isEmpty();
@@ -112,15 +112,15 @@ class IntegrationTestProfileTest {
                         ProbeUnprofiledBootstrap.class.getSimpleName())
                 .contains(ProbeUnprofiledBootstrap.class);
 
-        assertThat(hasTestProfile(ProbeUnprofiledBootstrap.class))
-                .as("미끼는 test 프로필이 없다 — 이것이 false 가 아니면 프로필 판정이 고장 난 것이다")
+        assertThat(hasRequiredProfile(ProbeUnprofiledBootstrap.class))
+                .as("미끼는 대역 프로필이 없다 — 이것이 false 가 아니면 프로필 판정이 고장 난 것이다")
                 .isFalse();
     }
 
     @Test
     void 준수_클래스를_오탐하지_않는다() {
-        assertThat(hasTestProfile(ExternalAdapterIsolationTest.class))
-                .as("@AgentIntegrationTest 를 쓴 클래스의 test 프로필을 읽지 못했다 — 메타 애노테이션 탐색이 고장")
+        assertThat(hasRequiredProfile(ExternalAdapterIsolationTest.class))
+                .as("@AgentIntegrationTest 를 쓴 클래스의 대역 프로필을 읽지 못했다 — 메타 애노테이션 탐색이 고장")
                 .isTrue();
 
         assertThat(contextBootstrappingClasses())
@@ -136,8 +136,8 @@ class IntegrationTestProfileTest {
                 .hasSizeGreaterThan(1);
     }
 
-    /** 병합된 {@code @ActiveProfiles} 에 {@code test} 가 있는가 — 상위 클래스까지 본다. */
-    private static boolean hasTestProfile(Class<?> type) {
+    /** 병합된 {@code @ActiveProfiles} 에 {@code fakes} 가 있는가 — 상위 클래스까지 본다. */
+    private static boolean hasRequiredProfile(Class<?> type) {
         return MergedAnnotations.from(type, SearchStrategy.TYPE_HIERARCHY)
                 .stream(ActiveProfiles.class)
                 .map(annotation -> annotation.getStringArray("value"))

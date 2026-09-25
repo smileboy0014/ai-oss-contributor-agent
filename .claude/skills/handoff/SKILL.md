@@ -35,7 +35,7 @@ git status
 - 변경 있으면 → `/commit` 스킬의 프로세스로 커밋
 - 변경 없으면 → 건너뛴다
 
-⚠️ 커밋 훅([`secret-scan.sh`](../../scripts/secret-scan.sh) · [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) · [`pre-commit-check.sh`](../../scripts/pre-commit-check.sh))이 막으면
+⚠️ 커밋 훅([`secret-scan.sh`](../../scripts/secret-scan.sh) · [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh))이 막으면
 **`--no-verify`로 우회하지 않는다.** 훅이 막은 사실 자체가 다음 세션이 알아야 할 정보다 — 핸드오프 문서의 「주의」에 적는다.
 
 ## Step 2: 세션 요약 생성

@@ -20,12 +20,18 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 ## 시작하기
 
 ```bash
+git config core.hooksPath .githooks   # 커밋 훅 등록 — 클론 후 1회, 필수
+
 docker compose up -d
 
 DATABASE_URL=jdbc:postgresql://localhost:5432/oss_agent \
 DATABASE_USERNAME=oss_agent DATABASE_PASSWORD=oss_agent \
 ./gradlew bootRun
 ```
+
+⚠️ `core.hooksPath` 는 **커밋되지 않는 로컬 설정**입니다. 등록하지 않으면 시크릿·안전 경계 검사가
+커밋 시점에 돌지 않습니다. 잊더라도 CI 가 같은 검사를 다시 돌리지만, **유출은 커밋 전에 막아야
+회수가 가능합니다.**
 
 환경변수를 주지 않으면 외부 서비스 없이 H2 in-memory로 기동합니다. Gradle은 별도 설치가 필요 없고 `./gradlew` 래퍼를 사용합니다 (JDK 21 필요).
 
@@ -46,6 +52,8 @@ curl -X POST http://localhost:8080/api/repositories \
 ├── gradle/libs.versions.toml  의존성 버전 단일 관리
 ├── docker-compose.yml         postgres · redis
 ├── .env.example               환경변수 예시 (실제 값은 커밋 금지)
+├── .githooks/pre-commit       커밋 차단 검사 2종 (core.hooksPath 로 등록)
+├── .github/workflows/         CI — 안전 게이트 + build
 ├── docs/                      PRD · 구현 계획(plans/) 등 산출물
 ├── .claude/                   Claude Code 하네스 — 규칙 · 스킬 · 에이전트 · 훅
 └── src/main/java/com/ossagent/
@@ -76,7 +84,7 @@ curl -X POST http://localhost:8080/api/repositories \
 | S-5 | 대상 저장소의 기여 규약이 우리 규약보다 우선 |
 | S-6 | 사람의 승인 지점을 코드로 우회하지 않음 |
 
-GitHub 토큰, LLM 키, sandbox 실행 권한은 애플리케이션 설정과 분리해 Secret Manager 또는 CI/CD 환경변수로 주입합니다. `.env`는 커밋 대상이 아니며, `git commit` 시 시크릿 패턴과 안전 경계 위반을 훅이 차단합니다.
+GitHub 토큰, LLM 키, sandbox 실행 권한은 애플리케이션 설정과 분리해 Secret Manager 또는 CI/CD 환경변수로 주입합니다. `.env`는 커밋 대상이 아닙니다. 시크릿 패턴과 안전 경계 위반은 **두 곳**에서 막습니다 — `git commit` 시점의 [`.githooks/pre-commit`](.githooks/pre-commit)(스테이징분)과, `--no-verify` 우회·훅 미등록까지 잡는 **CI**(추적 파일 전체).
 
 GitHub 인증은 **classic PAT(`public_repo`)** 입니다. fine-grained PAT과 GitHub App 설치 토큰은 우리가 멤버가 아닌 upstream에 PR을 만들지 못해 사용할 수 없습니다 — 근거는 [`open-questions.md`](.claude/rules/context/open-questions.md) Q-1.
 

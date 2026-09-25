@@ -63,12 +63,14 @@ description: 발견된 안티패턴을 훅 또는 스킬 체크리스트로 전�
 
 | 스크립트 | 담당 |
 |---|---|
-| [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | S-1~S-4의 정적 탐지 가능분 (`git commit` 시점 차단) |
-| [`secret-scan.sh`](../../scripts/secret-scan.sh) | 토큰 패턴 · `.env` 실값 스테이징 |
-| [`pre-commit-check.sh`](../../scripts/pre-commit-check.sh) | `./gradlew check` |
-| [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh) | Stop 시점 테스트 |
+| [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | S-1~S-4의 정적 탐지 가능분 (`git commit` 시점 **차단**) |
+| [`secret-scan.sh`](../../scripts/secret-scan.sh) | 토큰 패턴 · `.env` 실값 (`git commit` 시점 **차단**) |
+| [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh) | Stop 시점 테스트 (차단 아님) |
 
-새 훅을 등록할 때는 [`settings.json`](../../settings.json)의 `hooks` 섹션에 추가한다.
+🔴 **차단형은 `settings.json` 이 아니라 git 훅에 등록한다.** 앞의 둘은
+[`.githooks/pre-commit`](../../../.githooks/pre-commit) 이 부르고, CI 가 `SCAN_MODE=tree` 로 다시 돈다.
+`settings.json` 의 `PreToolUse` 에만 걸면 **사람이 직접 커밋하는 경로가 통째로 빠진다** —
+실제로 그랬다([`hooks.md`](../../docs/hooks.md)). 피드백형(차단하지 않는 것)만 `settings.json` 에 둔다.
 
 **규칙 작성 원칙:**
 - 검사 대상 파일 범위를 명확히 (`src/**/*.java` 등)
@@ -76,22 +78,21 @@ description: 발견된 안티패턴을 훅 또는 스킬 체크리스트로 전�
 - 에러 메시지에 **조항 번호 + 왜 위험한지 + 올바른 대안**을 안내
 - 의도된 예외는 `// safety-ok: <사유>` 로 통과시키되, **사유 없는 `safety-ok`는 통과시키지 않는다**
 
-### 훅 등록 예시
+### 등록 — 차단형이면 git 훅
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash(git commit:*)",
-        "hooks": [
-          { "type": "command", "command": ".claude/scripts/safety-boundary-check.sh", "timeout": 15000 }
-        ]
-      }
-    ]
-  }
-}
+`.claude/scripts/` 에 규칙을 추가하는 것으로 끝나는 경우가 대부분이다.
+두 스크립트는 이미 [`.githooks/pre-commit`](../../../.githooks/pre-commit) 에 걸려 있다.
+
+새 **차단형** 스크립트를 만들었다면 그 훅에 한 줄 추가한다.
+
+```bash
+for script in secret-scan safety-boundary-check my-new-check; do
 ```
+
+⚠️ `SCAN_MODE` 규약을 지킨다 — `staged`(기본, 훅)와 `tree`(CI)를 모두 지원하고,
+**검사 대상이 0건이면 「실행하지 않았다」를 출력**한다. 조용한 통과는 게이트를 죽인다.
+
+새 **피드백형**(차단하지 않는 것)은 [`settings.json`](../../settings.json) 의 `hooks` 에 등록한다.
 
 ## Step 4: 스킬 체크리스트 추가 (맥락 판단 필요한 경우)
 

@@ -111,8 +111,9 @@ Refs: #12
 | [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | S-1~S-4 의 정적 탐지 가능분 |
 
 `./gradlew check`([`pre-commit-check.sh`](../../scripts/pre-commit-check.sh))는 **훅에서 뺐다.**
-CI 가 같은 일을 하고(Q-10), 커밋마다 스위트 전체를 기다릴 이유가 없다.
-로컬 테스트 피드백은 Stop 훅 [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh) 가 준다.
+빌드 게이트는 CI 가 `./gradlew build` 로 돌리고(Q-10), 커밋마다 스위트 전체를 기다릴 이유가 없다.
+로컬 테스트 피드백은 Stop 훅 [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh) 가 주고,
+그 스크립트는 푸시 전 **수동 실행용**으로 남겼다.
 
 ### 왜 git 훅인가 — Claude 훅만으로는 안 돌았다
 

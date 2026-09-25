@@ -280,7 +280,8 @@ docker-java 는 환경변수가 아니라 **점 표기 시스템 프로퍼티**�
 | Stop 훅 `impl-test-loop.sh` | 변경분 있으면 테스트 | 로컬 피드백은 이쪽이 준다 |
 
 `pre-commit-check.sh`(`./gradlew check`)는 **훅에서 뺀다.** CI 가 같은 일을 하고,
-커밋마다 스위트 전체를 기다릴 이유가 없다. 스크립트는 남겨 두고 CI 가 호출한다.
+커밋마다 스위트 전체를 기다릴 이유가 없다. CI 는 `./gradlew build` 를 직접 부르고,
+스크립트는 **수동 실행용**으로 남긴다.
 
 ⚠️ `build.gradle.kts` 의 `systemProperty("api.version", "1.44")` 는 로컬 Docker 때문에 박힌 핀이다(Q-9b).
 **러너 엔진이 그보다 낮으면 Testcontainers 가 깨진다** — CI 구성 시 러너의 Docker API 버전을 확인한다.

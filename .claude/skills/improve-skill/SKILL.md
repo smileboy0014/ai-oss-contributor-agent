@@ -78,9 +78,9 @@ description: 스킬과 훅을 개선합니다. 코드리뷰/회고에서 발견�
 
 | 성격 | 스크립트 | 훅 이벤트 |
 |---|---|---|
-| 안전 경계 정적 위반 | [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | `PreToolUse` — `Bash(git commit:*)` |
-| 시크릿 패턴 | [`secret-scan.sh`](../../scripts/secret-scan.sh) | `PreToolUse` — `Bash(git commit:*)` |
-| 빌드·정적검사 | [`pre-commit-check.sh`](../../scripts/pre-commit-check.sh) | `PreToolUse` — `Bash(git commit:*)` |
+| 안전 경계 정적 위반 | [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | **git `pre-commit`** + CI |
+| 시크릿 패턴 | [`secret-scan.sh`](../../scripts/secret-scan.sh) | **git `pre-commit`** + CI |
+| 빌드·정적검사 | `./gradlew build` | **CI** — [`build.yml`](../../../.github/workflows/build.yml) |
 | 테스트 자동 실행 | [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh) | `Stop` |
 | 도구 실패 복구 안내 | `edit-recovery.sh` · `large-file-recovery.sh` · `tool-failure-tracker.sh` | `PostToolUseFailure` |
 | 대용량 출력 축소 | `output-truncator.sh` | `PostToolUse` |

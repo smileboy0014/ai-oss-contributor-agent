@@ -193,8 +193,8 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      ⚠ 로그는 worktree 안(`build/`)에 쓴다. `/tmp/build.log` 같은 공용 경로는 **동시 작업이 서로 덮어쓴다**
 
   - 커밋: /commit (scope = repository·issue·candidate·agent·pr·support·build·infra·docs·claude ·
-    한 커밋에 여러 도메인 금지 · 커밋 시 훅 3개가 돈다 — secret-scan · safety-boundary-check ·
-    pre-commit-check. 훅 skip 금지)
+    한 커밋에 여러 도메인 금지 · 커밋 시 git 훅 2개가 돈다 — secret-scan ·
+    safety-boundary-check. 훅 skip 금지 · 출력이 없으면 core.hooksPath 미등록을 의심)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [Phase 3] 자가 점검 — git diff 육안   (리뷰 명령 호출 X — 리뷰는 Phase 5.5 한 번)

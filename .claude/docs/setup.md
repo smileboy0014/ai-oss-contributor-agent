@@ -58,7 +58,7 @@ push 직전 owner 어설션이 유일한 방어**다 — [S-1](../rules/context/
 
 | 필요 | 확인 |
 |---|---|
-| JDK 21 | `java -version` |
+| JDK 21 | `java -version` — **21 이어야 한다. 더 높아도 안 된다** (아래) |
 | Gradle | **설치 불필요** — `./gradlew` 래퍼를 쓴다 |
 | Docker | `docker --version` (로컬 DB · 향후 샌드박스) |
 | `gh` CLI | `gh auth status` (PR·이슈 스킬이 의존) |
@@ -68,6 +68,58 @@ push 직전 owner 어설션이 유일한 방어**다 — [S-1](../rules/context/
 ```
 
 ⚠️ `mvn` 은 쓰지 않는다. 2026-09-18 에 Maven → Gradle 로 전환했다.
+
+#### ⚠️ JDK 가 21 보다 높으면 Gradle 이 원인 불명 메시지로 죽는다
+
+`build.gradle.kts` 의 toolchain 21 은 **컴파일 대상**만 정한다. **Gradle 자신은 기본 JVM 위에서 돈다.**
+Gradle 8.14.3 은 JDK 25 를 지원하지 않는다.
+
+```
+FAILURE: Build failed with an exception.
+* What went wrong:
+25.0.4.1
+```
+
+버전 번호만 덜렁 나와서 원인이 보이지 않는다. `java -version` 은 「JDK 있음」으로 통과하므로
+위 표만 보고는 걸러지지 않는다 — 2026-09-25 에 실제로 막혔다.
+
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # macOS
+./gradlew build
+```
+
+CI 는 `actions/setup-java` 로 21 을 고정하므로 이 문제가 없다 — **로컬만의 함정**이다.
+
+### 커밋 훅 등록 — 클론 후 1회, 필수
+
+```bash
+git config core.hooksPath .githooks
+git config --get core.hooksPath          # .githooks 가 나와야 한다
+```
+
+`.githooks/pre-commit` 이 커밋 시점에 [`secret-scan.sh`](../scripts/secret-scan.sh) ·
+[`safety-boundary-check.sh`](../scripts/safety-boundary-check.sh) 를 돌린다.
+
+⚠️ **`core.hooksPath` 는 커밋되지 않는 로컬 설정이다.** 새 클론마다 다시 쳐야 한다.
+등록을 잊으면 검사가 통째로 빠지는데 **조용히** 빠진다 — 이 함정에 이미 한 번 걸렸다
+([`../rules/conventions/commit-convention.md`](../rules/conventions/commit-convention.md)).
+
+설정 자체는 `.git/config` 에 있어 **worktree 전체가 공유**하므로 worktree 마다 다시 칠 필요는 없다.
+다만 **`.githooks/` 디렉토리가 그 worktree 체크아웃에 있어야 한다.** 이 디렉토리가 들어오기 전에
+만든 브랜치에서 작업 중이라면 훅이 **오류 없이 건너뛰어진다** — git 은 훅 파일이 없으면 조용히 넘어간다.
+`main` 을 머지·리베이스하면 해결된다.
+
+잊더라도 CI 가 같은 검사를 `SCAN_MODE=tree` 로 다시 돌린다. 다만 **유출은 커밋 전에 막아야
+회수가 가능하다** — CI 에서 걸리면 이미 원격에 올라간 뒤다.
+
+수동으로 돌려볼 때:
+
+```bash
+.claude/scripts/secret-scan.sh                    # 스테이징분
+SCAN_MODE=tree .claude/scripts/secret-scan.sh     # 추적 파일 전체 (CI 와 동일)
+```
+
+`./gradlew check` 는 훅에 없다. **CI 가 게이트다** — [`open-questions.md`](../rules/context/open-questions.md) Q-10.
 
 ## 4. 로컬 인프라
 

@@ -1,0 +1,27 @@
+#!/bin/bash
+# git pre-commit 훅 — 차단형 검사 2종. 싼 것부터 돈다.
+#
+# 등록 (클론·worktree 추가 후 1회):
+#   git config core.hooksPath .githooks
+#
+# ⚠ core.hooksPath 는 커밋되지 않는 로컬 설정이다. 새 클론에서는 다시 쳐야 한다.
+#   등록을 잊으면 검사가 통째로 빠지므로, 같은 검사를 CI 가 tree 모드로 다시 돌린다
+#   — .github/workflows/build.yml · .claude/rules/conventions/commit-convention.md
+#
+# ./gradlew check 는 여기 없다. CI 로 옮겼다 (open-questions.md Q-10).
+# 로컬 테스트 피드백은 Stop 훅 impl-test-loop.sh 가 준다.
+
+set -uo pipefail
+
+ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+
+for script in secret-scan safety-boundary-check; do
+  path="${ROOT}/.claude/scripts/${script}.sh"
+  if [ ! -x "$path" ]; then
+    # 조용히 넘어가지 않는다 — 검사가 안 돌았는데 통과한 것처럼 보이는 것이 가장 나쁘다
+    echo "❌ ${script}.sh 를 실행할 수 없습니다 (없거나 실행 권한 없음) — 커밋을 중단합니다."
+    echo "   → chmod +x .claude/scripts/${script}.sh"
+    exit 1
+  fi
+  "$path" || exit 1
+done

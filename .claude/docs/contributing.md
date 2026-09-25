@@ -84,7 +84,8 @@ maxTurns: 15
 |---|---|
 | `safety-boundaries.md` 조항 | `safety-boundary-check.sh` · `agents/safety-reviewer.md` · `skills/pr-review` · `skills/antipattern` |
 | 커밋/PR 컨벤션 | `skills/commit` · `skills/pr` — 스킬은 규칙의 실행 절차일 뿐이다 |
-| 빌드 명령 | `scripts/pre-commit-check.sh` · `scripts/impl-test-loop.sh` · `agents/worker.md` · `agents/verifier.md` |
+| 빌드 명령 | `../../.github/workflows/build.yml` · `scripts/impl-test-loop.sh` · `agents/worker.md` · `agents/verifier.md` |
+| 커밋 훅 구성 | `../../.githooks/pre-commit` · `docs/hooks.md` · `rules/conventions/commit-convention.md` · `docs/setup.md` |
 | 패키지 구조 | `docs/structure.md` · `codemaps/architecture.md` · 커밋 scope 표 · 루트 `README.md` |
 | 새 환경변수 | `.env.example` · `docs/setup.md` |
 

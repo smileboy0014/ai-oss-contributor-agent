@@ -68,9 +68,12 @@ cp .claude/settings.json.example .claude/settings.local.json
 
 | 스크립트 | 막는 것 |
 |---|---|
-| [`scripts/secret-scan.sh`](scripts/secret-scan.sh) | 토큰 패턴(`ghp_`·`AKIA`·`sk-ant-`…) · `.env` 실값 스테이징 |
+| [`scripts/secret-scan.sh`](scripts/secret-scan.sh) | 토큰 패턴(`ghp_`·`AKIA`·`sk-ant-`…) · `.env` 실값 |
 | [`scripts/safety-boundary-check.sh`](scripts/safety-boundary-check.sh) | S-1~S-4 의 정적 탐지 가능분 |
-| [`scripts/pre-commit-check.sh`](scripts/pre-commit-check.sh) | `./gradlew check` |
+
+둘 다 **git 훅**([`.githooks/pre-commit`](../.githooks/pre-commit))과 **CI** 양쪽에서 돈다.
+등록은 `git config core.hooksPath .githooks` — 클론 후 1회.
+`./gradlew build` 는 훅이 아니라 **CI 가 게이트**다 ([`open-questions.md`](rules/context/open-questions.md) Q-10).
 
 ⚠️ **훅 통과가 합격이 아니다.** 훅은 문자열만 본다. 호출 그래프를 따라가야 아는 위반은
 [`agents/safety-reviewer.md`](agents/safety-reviewer.md) 와 사람이 본다.

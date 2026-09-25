@@ -89,9 +89,13 @@ Refs: #12
 
 | 순서 | 스크립트 | 보는 것 | 실패 시 |
 |---|---|---|---|
-| 1 | [`secret-scan.sh`](../../scripts/secret-scan.sh) | 토큰 패턴(`ghp_`·`AKIA`·`xox`·`sk-ant-`·PRIVATE KEY) · `.env` 실값 스테이징 | 커밋 차단 |
+| 1 | [`secret-scan.sh`](../../scripts/secret-scan.sh) | 토큰 패턴(`ghp_`·`AKIA`·`xox`·`sk-ant-`·PRIVATE KEY) · `.env` 실값 | 커밋 차단 |
 | 2 | [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) | S-1~S-4 의 정적 탐지 가능분 | 커밋 차단 |
-| 3 | [`pre-commit-check.sh`](../../scripts/pre-commit-check.sh) | `./gradlew check` | 커밋 차단 |
+
+[`.githooks/pre-commit`](../../../.githooks/pre-commit) 이 부른다. `./gradlew check` 는 **훅에 없다** —
+CI 가 게이트다(Q-10). 로컬 테스트는 Stop 훅 `impl-test-loop.sh` 가 돌린다.
+
+⚠️ 훅이 한 줄도 출력하지 않았다면 **등록이 안 된 것**이다 — `git config --get core.hooksPath` 확인.
 
 - **훅을 스킵하지 않는다.** 실패하면 수정 후 새 커밋으로 재시도한다
 - 안전 경계 훅의 의도된 예외는 **사유와 함께** 남긴다. 위반 라인 또는 바로 윗줄에 달면 통과한다

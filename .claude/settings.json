@@ -44,28 +44,6 @@
         ]
       }
     ],
-    "PreToolUse": [
-      {
-        "matcher": "Bash(git commit:*)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/scripts/secret-scan.sh",
-            "timeout": 15000
-          },
-          {
-            "type": "command",
-            "command": ".claude/scripts/safety-boundary-check.sh",
-            "timeout": 15000
-          },
-          {
-            "type": "command",
-            "command": ".claude/scripts/pre-commit-check.sh",
-            "timeout": 300000
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "matcher": "",

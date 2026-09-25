@@ -1,15 +1,40 @@
 #!/bin/bash
-# PreToolUse(Bash(git commit:*)) hook: 시크릿 커밋 차단
-# 스테이징된 내용에서 토큰·키 패턴을 찾고, .env 실파일이 올라갔는지 본다.
-# 하나라도 걸리면 exit 1 로 커밋을 막는다.
+# git pre-commit 훅 + CI: 시크릿 커밋 차단
+# 토큰·키 패턴을 찾고, .env 실파일이 올라갔는지 본다.
+# 하나라도 걸리면 exit 1 로 커밋(또는 CI)을 막는다.
+#
+# SCAN_MODE=staged (기본) — 스테이징분만. git 훅이 쓴다
+# SCAN_MODE=tree          — 추적 파일 전체. CI 가 쓴다
 
 set -uo pipefail
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT" || exit 0
 
-files=$(git diff --cached --name-only --diff-filter=ACMR)
+# ── 검사 범위 ─────────────────────────────────────────────────
+# staged (기본) — git 훅. 스테이징된 것만 본다
+# tree          — CI. 추적 파일 전체를 본다. --no-verify 우회가 여기서 잡힌다
+SCAN_MODE="${SCAN_MODE:-staged}"
+
+list_files() {
+  if [ "$SCAN_MODE" = "tree" ]; then
+    git ls-files
+  else
+    git diff --cached --name-only --diff-filter=ACMR
+  fi
+}
+
+read_file() {
+  if [ "$SCAN_MODE" = "tree" ]; then
+    cat "$1" 2>/dev/null
+  else
+    git show ":$1" 2>/dev/null
+  fi
+}
+
+files=$(list_files)
 if [ -z "$files" ]; then
+  echo "ℹ️  검사 대상 파일이 없습니다 (SCAN_MODE=${SCAN_MODE}) — 시크릿 검사를 실행하지 않았습니다."
   exit 0
 fi
 
@@ -37,7 +62,7 @@ scan_pattern() {
   local f="$4"
 
   local hits
-  hits=$(git show ":${f}" 2>/dev/null | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
+  hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
   if [ -n "$hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue
@@ -56,7 +81,7 @@ for f in $files; do
   esac
 
   # 바이너리 스킵
-  if ! git show ":${f}" 2>/dev/null | head -c 8000 | grep -qI . 2>/dev/null; then
+  if ! read_file "$f" | head -c 8000 | grep -qI . 2>/dev/null; then
     continue
   fi
 
@@ -85,7 +110,7 @@ for f in $files; do
     'sk-ant-[A-Za-z0-9_-]{20,}' "$f"
 
   # 개인키는 별도 처리 (하이픈으로 시작하는 정규식이 grep 인자로 오해되는 것을 피한다)
-  pk_hits=$(git show ":${f}" 2>/dev/null | grep -nE '^-+BEGIN [A-Z ]*PRIVATE KEY-+' || true)
+  pk_hits=$(read_file "$f" | grep -nE '^-+BEGIN [A-Z ]*PRIVATE KEY-+' || true)
   if [ -n "$pk_hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue
@@ -107,5 +132,5 @@ if [ "$found" -gt 0 ]; then
   exit 1
 fi
 
-echo "✅ 시크릿 검사 통과"
+echo "✅ 시크릿 검사 통과 (SCAN_MODE=${SCAN_MODE} · 파일 $(echo "$files" | wc -l | tr -d ' ')개)"
 exit 0

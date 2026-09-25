@@ -20,7 +20,7 @@
 | [`safety-boundary-check.sh`](../scripts/safety-boundary-check.sh) | 안전 경계 S-1~S-4 정적 위반 **차단** |
 
 [`pre-commit-check.sh`](../scripts/pre-commit-check.sh)(`./gradlew check`)는 **여기 없다** —
-CI 로 옮겼다(Q-10). 스크립트는 남아 있고 CI 가 호출한다.
+빌드 게이트는 CI 가 `./gradlew build` 로 직접 돌린다(Q-10). 스크립트는 **수동 실행용**으로만 남는다.
 
 ### Claude 훅 — 피드백형
 
@@ -58,7 +58,40 @@ secret-scan (grep)  →  safety-boundary-check (grep)
 git config core.hooksPath .githooks   # 클론·worktree 추가 후 1회 — 커밋되지 않는 로컬 설정이다
 ```
 
-`--no-verify` 우회는 **CI 가 같은 스캔 2종을 다시 돌려** 잡는다.
+### `SCAN_MODE` — 훅과 CI 가 같은 스크립트를 다르게 쓴다
+
+CI 에는 스테이징이 없다. `git diff --cached` 가 비어 있어 그대로 두면 **아무것도 검사하지 않고 통과**한다.
+
+| 값 | 대상 파일 | 내용을 어디서 | 누가 쓰나 |
+|---|---|---|---|
+| `staged` (기본) | `git diff --cached` | 인덱스 (`git show :file`) | git 훅 |
+| `tree` | `git ls-files` | 작업 트리 (`cat`) | **CI** |
+
+`tree` 가 더 넓다 — `--no-verify` 우회도, 훅 등록을 잊은 것도, **이전 커밋에 이미 들어간 것**도 잡는다.
+
+```bash
+SCAN_MODE=tree .claude/scripts/secret-scan.sh
+```
+
+🔴 **검사 대상이 0건이면 조용히 통과하지 않는다.** 두 스크립트 모두
+「검사를 실행하지 않았습니다」를 명시적으로 출력한다. 이 원칙이 깨지면
+**게이트가 죽은 것을 통과로 착각**하게 된다 — 실제로 그랬다.
+
+### 훅이 「없는」 세 가지 경우 — 전부 조용하다
+
+git 은 훅 파일이 없으면 **오류 없이 넘어간다.** 커밋이 그냥 성공하므로 구분이 안 된다.
+
+| 경우 | 확인 |
+|---|---|
+| `core.hooksPath` 미등록 | `git config --get core.hooksPath` → `.githooks` 가 나와야 한다 |
+| `.githooks/` 가 그 체크아웃에 없음 (옛 브랜치·worktree) | `ls .githooks/pre-commit` |
+| 실행 권한 없음 | `test -x .githooks/pre-commit` |
+
+`core.hooksPath` 는 `.git/config` 라 **worktree 전체가 공유**한다. 등록은 클론당 1회지만,
+**디렉토리는 브랜치마다 따로**다 — 이 디렉토리 도입 이전에 판 브랜치에서는 훅이 없다.
+
+그래서 커밋할 때 **출력이 한 줄도 없으면 훅이 안 돈 것**이다. 통과 메시지를 눈으로 확인한다.
+그리고 이 모든 경우를 CI 가 마지막에 잡는다.
 
 ### secret-scan.sh
 
@@ -128,9 +161,14 @@ Process p = new ProcessBuilder("docker", "run", ...).start();
 ## 훅 디버깅
 
 ```bash
-echo '{}' | .claude/scripts/secret-scan.sh; echo "exit=$?"
-bash -n .claude/scripts/safety-boundary-check.sh
+bash -n .claude/scripts/safety-boundary-check.sh        # 문법
+.claude/scripts/secret-scan.sh; echo "exit=$?"          # 스테이징분
+SCAN_MODE=tree .claude/scripts/secret-scan.sh           # CI 와 동일한 범위
+git config --get core.hooksPath                         # .githooks 가 나와야 한다
 ```
+
+**규칙을 고쳤으면 위반 파일을 심어 「잡히는지」까지 본다.** 통과만 확인하면
+정규식이 깨져도 green 이다.
 
 훅이 조용히 죽는 경우가 가장 나쁘다 — 검사가 안 돌았는데 통과한 것처럼 보인다.
 그래서 모든 차단형 스크립트는 **「검사를 실행하지 않았다」를 명시적으로 출력**한다.

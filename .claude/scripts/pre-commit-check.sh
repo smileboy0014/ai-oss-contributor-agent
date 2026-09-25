@@ -1,5 +1,13 @@
 #!/bin/bash
-# PreToolUse(Bash(git commit:*)) hook: 커밋 전 Gradle 검증
+# 수동 실행용: 커밋 전 Gradle 검증
+#
+# ⚠ 훅이 아니다. 2026-09-25 에 커밋 훅에서 뺐다 — open-questions.md Q-10.
+#   빌드 게이트는 CI(.github/workflows/build.yml)가 ./gradlew build 로 직접 돌린다.
+#   커밋마다 스위트 전체를 기다리지 않기 위해서다. 로컬 자동 피드백은 Stop 훅 impl-test-loop.sh.
+#
+# 푸시 전에 손으로 한 번 돌려보고 싶을 때 쓴다:
+#   .claude/scripts/pre-commit-check.sh
+#
 # 스테이징에 src/** 또는 빌드 스크립트 변경이 있을 때만 ./gradlew check 를 돌린다.
 # 검증을 한 건도 실행하지 않았으면 「통과」라고 말하지 않는다.
 

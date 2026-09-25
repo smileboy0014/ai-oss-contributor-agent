@@ -1,6 +1,7 @@
 package com.ossagent.support.github;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -381,6 +382,32 @@ class GitHubApiClientTest {
         client.get(GitHubRequest.of("/repos/o/n"));
 
         server.verify();
+    }
+
+    @Test
+    @DisplayName("🔴 임계 미만이면 다음 호출을 하지 않고 던진다 — 소진 전 선제 지연 (#8)")
+    void 임계_미만이면_다음_호출을_하지_않는다() {
+        // 남은 예산을 끝까지 태우면 같은 토큰을 쓰는 다른 작업(규약 수집 #7 · 코드 검색 #15)이
+        // 전부 막힌다. 스캐너가 가장 많이 호출하므로 스캐너가 먼저 양보한다.
+        GitHubApiClient limited = clientWith(properties(FAKE_TOKEN, 0, Duration.ZERO, 100));
+        Instant resetAt = clock.instant().plusSeconds(600);
+
+        // 1회차 — 응답은 정상이고 남은 예산이 임계(100) 미만이다
+        server.expect(once(), requestTo(BASE_URL + "/repos/o/n"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON)
+                        .headers(rateLimitHeaders(5000, 99, resetAt)));
+
+        assertThatCode(() -> limited.get(GitHubRequest.of("/repos/o/n")))
+                .as("받아온 응답은 버리지 않는다 — 이미 지불한 호출이다")
+                .doesNotThrowAnyException();
+
+        // 2회차 — 서버 기대를 등록하지 않았다. 호출이 나가면 MockRestServiceServer 가 실패시킨다
+        assertThatThrownBy(() -> limited.get(GitHubRequest.of("/repos/o/n")))
+                .isInstanceOf(GitHubRateLimitException.class)
+                .satisfies(e -> assertThat(((GitHubRateLimitException) e).scope())
+                        .isEqualTo(GitHubRateLimitException.Scope.PRIMARY));
+
+        server.verify();   // 호출은 딱 1회만 나갔다
     }
 
     private GitHubApiClient clientWith(GitHubProperties properties) {

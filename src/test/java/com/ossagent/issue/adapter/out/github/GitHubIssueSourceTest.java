@@ -180,4 +180,27 @@ class GitHubIssueSourceTest {
         assertThat(issue.body()).isEmpty();
         assertThat(issue.labels()).isEmpty();
     }
+
+    @Test
+    @DisplayName("🔴 updated_at 오름차순을 실제로 요청한다 — 증분 수집의 전제다")
+    void 오름차순_정렬을_요청한다() {
+        // IssueSource 계약이 보장하는 것이고, 스캐너의 커서 전진이 여기에 기댄다.
+        //
+        // 스캐너는 리밋에 걸리면 앞 N 페이지만 읽고 「본 것의 최대 updatedAt」으로 커서를
+        // 전진시킨다. 그게 안전한 유일한 이유는 앞 페이지가 가장 오래된 것들이어서
+        // 안 읽은 구간이 뒤에 남기 때문이다.
+        //
+        // ⚠ GitHub 기본값은 desc 다. 내림차순으로 바뀌면 앞 N 페이지가 「가장 최근」이 되고
+        //   커서를 거기로 전진시키는 순간 안 읽은 오래된 이슈 전부를 영구히 건너뛴다.
+        //
+        // ⚠ 페이크로는 이 위반이 절대 잡히지 않는다 — 넣어 준 순서를 돌려줄 뿐이다.
+        //   실제로 보내는 쿼리 파라미터를 고정하는 이 테스트가 유일한 방어다.
+        server.expect(once(), queryParam("sort", "updated"))
+                .andExpect(queryParam("direction", "asc"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        source.fetchOpenIssues(IssueQuery.firstPage(new RepositoryCoordinates("spring-projects", "spring-kafka")));
+
+        server.verify();
+    }
 }

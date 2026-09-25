@@ -56,8 +56,20 @@ public record IssueQuery(
         return new IssueQuery(coordinates, updatedSince, value, page, perPage);
     }
 
+    /**
+     * 다음 페이지. 🔴 <b>ETag 를 승계하지 않는다</b> — #8.
+     *
+     * <p>ETag 는 <b>URL 단위</b>로 유효한데 {@code page} 가 URL 에 들어간다.
+     * 1페이지 응답의 ETag 를 2페이지 요청에 붙이면 서버가 다른 리소스를 비교하게 된다.
+     *
+     * <p>⚠ 틀려도 대개는 조용하다 — 매치되지 않아 200 을 받고 성능만 손해다.
+     * 그러나 <b>우연히 매치되어 304 를 받으면 그 페이지를 통째로 건너뛴다.</b>
+     * 조용한 데이터 손실이라 값을 넘기지 않는 것으로 막는다.
+     *
+     * <p>커서에 저장하는 ETag 는 <b>page 1 응답의 것</b>이다 — {@code PLAN-8.md} §3.2.
+     */
     public IssueQuery nextPage() {
-        return new IssueQuery(coordinates, updatedSince, etag, page + 1, perPage);
+        return new IssueQuery(coordinates, updatedSince, null, page + 1, perPage);
     }
 
     public boolean isConditional() {

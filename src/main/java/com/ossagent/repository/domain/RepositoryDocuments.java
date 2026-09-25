@@ -64,9 +64,15 @@ public record RepositoryDocuments(List<FetchedDocument> documents) {
         return documents.stream().filter(FetchedDocument::isRead).toList();
     }
 
-    /** 보류 사유를 사람이 읽을 형태로. <b>우리 어휘만</b> 들어간다 — S-4. */
-    public String pendingReason() {
+    /**
+     * 보류 사유를 사람이 읽을 형태로. <b>우리 어휘만</b> 들어간다 — S-4.
+     *
+     * <p><b>필수 경로만</b> 담는다. 보류를 만드는 근거가 필수 경로뿐인데 부가 경로(README 등)
+     * 실패까지 섞으면, #24 가 「레이트리밋으로 보류된 것만 재시도」를 고를 때 노이즈가 된다.
+     */
+    public String requiredPendingReason() {
         return documents.stream()
+                .filter(d -> d.path().isRequired())
                 .filter(FetchedDocument::isUnreadable)
                 .map(d -> d.path().path() + "=" + d.reason())
                 .reduce((a, b) -> a + "; " + b)

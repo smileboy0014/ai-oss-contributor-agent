@@ -42,8 +42,18 @@ public class AgentRun {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidate.id}. <b>다른 애그리거트</b>로의 ID 참조 — architecture.md 규율 ④ */
-    @Column(name = "candidate_id", nullable = false)
+    /**
+     * {@code contribution_candidate.id}. <b>다른 애그리거트</b>로의 ID 참조 — architecture.md 규율 ④.
+     *
+     * <p>🔴 <b>{@code POLICY} 단계에서만 {@code null}</b> 이다 (V5 · #7). 규약 판정은 저장소 단위라
+     * 후보가 만들어지기 전에 일어난다. 매핑에 {@code nullable = false} 를 남겨 두면 스키마와
+     * 어긋난다 — 지금 터지지 않는 것은 Hibernate 의 {@code check_nullability} 가 꺼져 있기
+     * 때문이고, {@code ddl-auto: validate} 는 nullability 를 보지 않는다. <b>의존성 하나에
+     * 기대는 상태</b>를 두지 않는다.
+     *
+     * <p>「POLICY 만 NULL」은 {@link #start} 가 양방향으로 강제한다.
+     */
+    @Column(name = "candidate_id")
     private Long candidateId;
 
     @Enumerated(EnumType.STRING)

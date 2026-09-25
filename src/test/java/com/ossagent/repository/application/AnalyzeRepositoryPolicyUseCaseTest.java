@@ -241,6 +241,27 @@ class AnalyzeRepositoryPolicyUseCaseTest {
                 .hasSize(1);
     }
 
+    @Test
+    void 나중에_금지로_바뀌면_DB_에_반영된다_S5() {
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        // 저장소가 AGENTS.md 로 AI 기여를 금지했다
+        documents.reset().givenRead("AGENTS.md", "AI 기여 금지");
+        interpreter.reset().given(forbidden());
+        useCase.analyze(repositoryId);
+
+        assertThat(policies.findByRepositoryId(repositoryId).orElseThrow()
+                .isAiContributionForbidden())
+                .as("반환 객체만 FORBIDDEN 이고 DB 가 TRUE 로 남으면 게이트가 계속 통과시킨다 — FR-2 붕괴")
+                .isTrue();
+
+        assertThatThrownBy(() -> useCase.assertContributionAllowed(repositoryId))
+                .as("게이트는 DB 를 다시 읽는다 — 영속되지 않으면 여기서 드러난다")
+                .isInstanceOf(ContributionNotAllowedException.class);
+    }
+
     // ── 게이트 (FR-4) ──────────────────────────────────────
 
     @Test

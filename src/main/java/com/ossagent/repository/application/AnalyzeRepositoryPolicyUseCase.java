@@ -14,7 +14,6 @@ import com.ossagent.repository.domain.RepositoryNotFoundException;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.repository.domain.RuleReading;
-import java.time.Clock;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,18 +41,18 @@ public class AnalyzeRepositoryPolicyUseCase {
     private final RepositorySource repositorySource;
     private final PolicyDocumentSource documentSource;
     private final ContributionRuleInterpreter interpreter;
-    private final Clock clock;
+    private final RepositoryPolicyWriter writer;
 
     public AnalyzeRepositoryPolicyUseCase(OssRepositoryRepository repositories,
             RepositoryPolicyRepository policies, RepositorySource repositorySource,
             PolicyDocumentSource documentSource, ContributionRuleInterpreter interpreter,
-            Clock clock) {
+            RepositoryPolicyWriter writer) {
         this.repositories = repositories;
         this.policies = policies;
         this.repositorySource = repositorySource;
         this.documentSource = documentSource;
         this.interpreter = interpreter;
-        this.clock = clock;
+        this.writer = writer;
     }
 
     /**
@@ -96,20 +95,23 @@ public class AnalyzeRepositoryPolicyUseCase {
 
             // ④ 영구적으로 못 읽었다 → 보류. 사람이 봐야 풀린다
             if (documents.hasPermanentlyUnreadableRequired()) {
-                return Optional.of(savePending(snapshot, documents.pendingReason()));
+                return Optional.of(writer.savePending(
+                        snapshot.repository(), snapshot.policy(), documents.requiredPendingReason()));
             }
 
             // ⑤ 필수 경로가 전부 404 → 허용. 금지 표기가 존재할 수 없다 (Q-8 확정 ①).
             //    LLM 을 부르지 않는다 — 판정할 텍스트가 없는데 토큰을 쓸 이유가 없다
-            RuleReading reading = documents.allRequiredAbsent()
+            RuleReading reading = documents.readDocuments().isEmpty()
                     ? RuleReading.allowedByAbsence()
                     : interpreter.interpret(snapshot.coordinates(), documents);
 
             // ⑥ 판정이 서지 않았다 → 보류
             if (reading.isUndetermined()) {
-                return Optional.of(savePending(snapshot, "LLM_UNDETERMINED"));
+                return Optional.of(writer.savePending(
+                        snapshot.repository(), snapshot.policy(), "LLM_UNDETERMINED"));
             }
-            return Optional.of(saveAnalyzed(snapshot, reading));
+            return Optional.of(writer.saveAnalyzed(snapshot.repository(),
+                    snapshot.policy() == null ? null : snapshot.policy().getId(), reading));
 
         } catch (LlmTransientException e) {
             // LLM 쪽 일시적 실패도 ③과 같다 — 기록 없이 중단
@@ -157,46 +159,7 @@ public class AnalyzeRepositoryPolicyUseCase {
                 policies.findByRepositoryId(repositoryId).orElse(null));
     }
 
-    /**
-     * 보류를 기록한다.
-     *
-     * <p>🔴 <b>이미 판정이 선 정책을 보류로 되돌리지 않는다.</b> 두 가지 이유가 겹친다.
-     *
-     * <ol>
-     *   <li><b>불법 상태</b> — {@code RepositoryPolicy.pending()} 은 새 엔티티를 만드는데
-     *       {@code UNIQUE(repository_id)} 가 있다. 그대로 저장하면 제약 위반으로 터진다</li>
-     *   <li><b>되돌릴 수 없는 보류를 만든다</b> — 한 번 읽어서 판정이 선 저장소를, 나중에
-     *       문서가 상한을 넘었다는 이유로 보류로 떨어뜨리면 사람이 풀어야 하는 상태가 된다
-     *       (#24 미구현). 이미 확인한 판정을 지울 이유가 없다</li>
-     * </ol>
-     *
-     * <p>기존 판정을 유지하고 사실만 남긴다. 규약이 실제로 바뀌었다면 사람이 다시 볼 일이다.
-     */
-    @Transactional
-    protected RepositoryPolicy savePending(Snapshot snapshot, String reason) {
-        if (snapshot.policy() != null) {
-            log.warn("규약을 다시 읽지 못했다 repo={} reason={} — 기존 판정을 유지한다",
-                    snapshot.coordinates().fullName(), reason);
-            return snapshot.policy();
-        }
-        log.info("규약 판정 보류 repo={} reason={} — 사람이 해소한다 (#24)",
-                snapshot.coordinates().fullName(), reason);
-        return policies.save(RepositoryPolicy.pending(snapshot.repository(), reason, clock));
-    }
 
-    @Transactional
-    protected RepositoryPolicy saveAnalyzed(Snapshot snapshot, RuleReading reading) {
-        log.info("규약 판정 완료 repo={} aiAllowed={}",
-                snapshot.coordinates().fullName(), reading.aiContributionAllowed());
-        if (snapshot.policy() == null) {
-            return policies.save(RepositoryPolicy.analyzed(snapshot.repository(), reading, clock));
-        }
-        // 🔴 보류·금지면 엔티티가 거부한다. UseCase 의 if 로 두지 않는 이유는
-        //    조건문은 다음 사람이 지우지만 엔티티 불변식은 못 지우기 때문이다
-        RepositoryPolicy existing = policies.findById(snapshot.policy().getId()).orElseThrow();
-        existing.reanalyze(reading, clock);
-        return existing;
-    }
 
     /** 트랜잭션 밖으로 들고 나가는 값. 엔티티를 LAZY 인 채로 끌고 다니지 않는다. */
     protected record Snapshot(OssRepository repository, RepositoryCoordinates coordinates,

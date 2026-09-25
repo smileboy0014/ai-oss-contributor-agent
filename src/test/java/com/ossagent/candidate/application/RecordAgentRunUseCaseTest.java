@@ -56,6 +56,28 @@ class RecordAgentRunUseCaseTest {
     }
 
     @Test
+    void 후보가_없는_POLICY_실행도_DB_에_적재된다() {
+        var model = new RecordingLanguageModel(
+                (ctx, request) -> new LlmResponse("판정", new LlmUsage(5, 6)), recorder);
+
+        model.complete(AgentRunContext.forRepository(LlmCallSite.POLICY),
+                new LlmRequest(null, "규약 문서", 100));
+
+        AgentRun saved = agentRuns.findAll().stream()
+                .filter(run -> run.getStage() == AgentRun.Stage.POLICY)
+                .reduce((first, second) -> second)
+                .orElseThrow();
+
+        assertThat(saved.getCandidateId())
+                .as("규약 판정은 저장소 단위다 — 붙일 후보가 없다 (V5 에서 NOT NULL 을 풀었다)")
+                .isNull();
+        assertThat(saved.getStatus()).isEqualTo(AgentRun.RunStatus.SUCCEEDED);
+        assertThat(saved.getOutputTokens())
+                .as("후보가 없어도 비용은 장부에 남아야 한다")
+                .isEqualTo(6);
+    }
+
+    @Test
     void 시작과_종료가_각각_커밋되어_조회된다() {
         var model = new RecordingLanguageModel(
                 (ctx, request) -> new LlmResponse("응답", new LlmUsage(13, 17)), recorder);

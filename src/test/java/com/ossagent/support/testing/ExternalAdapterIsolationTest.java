@@ -87,16 +87,20 @@ class ExternalAdapterIsolationTest {
     }
 
     /**
-     * 합성 애노테이션의 {@code @Import} 가 <b>실제로 먹는지</b> 확인한다.
+     * {@code @FakeAdapter} 의 <b>자동 등록이 실제로 먹는지</b> 확인한다.
      *
-     * <p>메타 애노테이션을 통한 {@code @Import} 가 인식되지 않으면 페이크가 등록되지 않는다.
-     * 위 테스트가 그것을 잡지만, 원인을 「페이크를 안 만들었나」가 아니라 「이음매가 안 먹나」로
-     * 바로 읽히게 하려고 따로 둔다.
+     * <p>대역은 중앙 등록 없이 컴포넌트 스캔으로 올라온다 — test 클래스 디렉토리가
+     * 런타임 클래스패스에 있고 스캔 베이스가 {@code com.ossagent} 루트이기 때문이다.
+     * <b>이 전제가 깨지면 조용히 아무 페이크도 등록되지 않는다.</b> 위 테스트가 결과를
+     * 잡지만, 원인을 「페이크를 안 만들었나」가 아니라 「자동 등록이 안 먹나」로 바로
+     * 읽히게 하려고 따로 둔다.
      */
     @Test
-    void 합성_애노테이션이_페이크_조립지점을_실제로_등록한다() {
-        assertThat(context.getBeanNamesForType(FakeExternalDependencies.class))
-                .as("@AgentIntegrationTest 의 @Import(FakeExternalDependencies) 가 먹지 않았다")
+    void 페이크가_자동_등록된다() {
+        assertThat(context.getBeanNamesForAnnotation(FakeAdapter.class))
+                .as("""
+                        @FakeAdapter 가 붙은 빈이 하나도 없다 — 컴포넌트 스캔이 test 클래스를
+                        집지 못한 것이다. 대역이 전부 빠진 상태이므로 UseCase 테스트가 전부 깨진다.""")
                 .isNotEmpty();
     }
 

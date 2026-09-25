@@ -1,5 +1,6 @@
 package com.ossagent.repository.adapter.out.github;
 
+import com.ossagent.support.ExternalAdapter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryFile;
@@ -15,7 +16,6 @@ import java.util.Base64;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -28,9 +28,7 @@ import org.springframework.stereotype.Component;
  * <p>읽기만 한다. Fork 생성·push 는 이 어댑터에 없다 — S-1.
  */
 @Component
-// 테스트 컨텍스트에서는 올라오지 않는다 — 대역은 페이크다(Q-9 · #4).
-// 빼면 ExternalAdapterIsolationTest 가 RED 로 잡는다
-@Profile("!test")
+@ExternalAdapter
 public class GitHubRepositorySource implements RepositorySource {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubRepositorySource.class);

@@ -1,5 +1,6 @@
 package com.ossagent.issue.domain;
 
+import com.ossagent.support.testing.FakeAdapter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -11,6 +12,7 @@ import java.util.List;
  * <p>페이지를 큐로 넣어 두면 호출 순서대로 돌려준다. 증분 수집(#8)의 커서 진전과
  * 멱등성(스캔 재실행이 중복 후보를 만들지 않는다)을 검증할 때 이 순서가 필요하다.
  */
+@FakeAdapter
 public class FakeIssueSource implements IssueSource {
 
     private final Deque<IssuePage> pages = new ArrayDeque<>();

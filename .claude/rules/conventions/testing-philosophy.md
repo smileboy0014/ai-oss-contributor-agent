@@ -106,16 +106,33 @@ class ScanIssuesIntegrationTest {
 | | 장치 | 하는 일 |
 |---|---|---|
 | 1 | **`@AgentIntegrationTest`** | 통합 테스트의 표준 진입점. `@SpringBootTest` + `@ActiveProfiles("test")` + `FakeExternalDependencies` 조립 |
-| 2 | **`@Profile("!test")`** | 실제 대외 어댑터가 테스트 프로필에서 **스스로 빠진다** |
+| 2 | **`@ExternalAdapter` / `@FakeAdapter`** | 실물은 테스트에서 **빠지고**, 대역은 테스트에서만 **뜬다** |
 | 3 | **`ExternalAdapterIsolationTest`** | 그래도 올라온 것이 있으면 **잡는다** |
 
-**새 대외 어댑터를 만드는 사람이 할 일은 둘이다** — 어댑터(또는 그 `@Configuration`)에
-`@Profile("!test")` 를 달고, 같은 능력의 페이크를 `FakeExternalDependencies` 에 등록한다.
-빠뜨리면 장치 3 이 RED 로 잡는다.
+### 대외 어댑터를 만들 때 할 일 — 애노테이션 둘
 
-⚠ 어댑터에만 빠뜨리면 **가드 메시지가 아니라 스프링 배선 오류**(`No qualifying bean of type
-GitHubApiClient`)가 먼저 터진다. 전송 클라이언트 조립이 `test` 에서 빠지기 때문이다.
-증상만 보고 「페이크를 잘못 등록했나」로 가지 말 것 — 어댑터 쪽 애노테이션을 먼저 본다.
+```java
+// 실물 (src/main) — 테스트에서 빠진다
+@Component
+@ExternalAdapter
+public class GitHubIssueSource implements IssueSource { … }
+
+// 대역 (src/test) — 테스트에서만 뜬다
+@FakeAdapter
+public class FakeIssueSource implements IssueSource { … }
+```
+
+**이게 전부다.** 대역은 컴포넌트 스캔으로 **자동 등록**되므로 중앙 등록 지점이 없다 —
+「등록을 깜빡해서 빈이 없다」는 경로 자체를 없앴다.
+
+`@ExternalAdapter` 는 스테레오타입을 **대신하지 않는다.** `@Component`·`@Configuration` 은
+그대로 두고 더한다. `@Configuration` 에도 똑같이 붙일 수 있게 하기 위해서다 —
+전송 클라이언트를 조립하는 `@Configuration` 도 테스트에서 빠져야 한다.
+
+⚠ **대역은 싱글턴이고 컨텍스트는 테스트 클래스 사이에 캐시된다.** 덮어쓰는 상태
+(`given(page)`)는 대체로 안전하지만 **누적되는 것**(`queries()`·`fetchedPaths()`)은
+앞 테스트의 흔적을 본다. 호출 기록을 단언하는 테스트는 `@BeforeEach` 에서 초기화한다.
+중앙 등록이었어도 싱글턴이라 같은 문제지만, 자동 등록은 그 사실이 눈에 덜 띈다.
 
 ### 판정 규칙 — 두 신호
 
@@ -148,7 +165,7 @@ GitHubApiClient`)가 먼저 터진다. 전송 클라이언트 조립이 `test` �
 
 | 종류 | 이름 | 위치 |
 |---|---|---|
-| 능력 대역 | **`Fake{능력이름}`** | 능력 인터페이스와 **같은 패키지**의 `src/test` |
+| 능력 대역 | **`Fake{능력이름}`** + `@FakeAdapter` | 능력 인터페이스와 **같은 패키지**의 `src/test` |
 | 값 픽스처 | `{타입}Fixtures` | 그 타입과 같은 패키지. static factory 만, 상태 없음 |
 | 리소스 픽스처 | — | `src/test/resources/{github,policy,llm}/…` |
 

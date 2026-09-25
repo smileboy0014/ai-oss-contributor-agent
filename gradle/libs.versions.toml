@@ -2,6 +2,12 @@
 [versions]
 springBoot = "3.5.0"
 springDependencyManagement = "1.1.7"
+# 전송 계약 검증용 — Q-9 3계층의 세 번째 층. 4.0 은 beta 라 쓰지 않는다
+wiremock = "3.13.1"
+
+[libraries]
+# standalone(shaded) 을 쓴다. 일반 배포판은 Jetty 를 끌고 와 Boot 의 서블릿 컨테이너와 충돌한다
+wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }

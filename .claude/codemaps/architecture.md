@@ -93,7 +93,8 @@ com.ossagent.{도메인}
 |---|---|---|---|---|
 | GitHub — 저장소·파일 | `RepositorySource` | `GitHubRepositorySource` | `repository` | ✅ **존재** (#6) |
 | GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` | ✅ **존재** (#6) |
-| GitHub — 규약 판정 | `PolicySource` (제안) | — | `repository` | ❌ #7 — `RepositorySource.fetchFile` 위에 올린다 |
+| GitHub — 규약 문서 수집 | `PolicyDocumentSource` | `GitHubPolicyDocumentSource` | `repository` | ✅ **존재** (#7) — `RepositorySource` 위에 얹고 **예외를 `UnreadableReason` 으로 번역**한다 |
+| LLM — 규약 판정 | `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | `repository` | ✅ **존재** (#7) — `LanguageModel` 위에 얹는다 |
 | GitHub — Fork·PR | `ForkRegistry` · `DraftPrPublisher` (제안) | `GitHubDraftPrPublisher` | `pullrequest` | ❌ #22 · #23 |
 | LLM — 전송 (1층) | `LanguageModel` · `PromptScrubber` · `AgentRunRecorder` | `AnthropicLanguageModel`(+`RecordingLanguageModel` 데코레이터) · `TokenRedactingPromptScrubber` · `RecordAgentRunUseCase`(candidate) | `agent` | ✅ **존재** (#10) |
 | LLM — 도메인 능력 (2층) | `IssueAnalyst` · `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | — | `agent` | ❌ 소비자 이슈 |
@@ -146,7 +147,7 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | **GitHub 읽기 클라이언트** | ✅ | `support/github` — 타임아웃·재시도 명시 · **403 을 권한/1차/2차 리밋으로 구분** · 레이트리밋 헤더 노출 · 자격증명 공급자 이음매. **쓰기 메서드 없음(S-1)** |
 | **GitHub 능력 인터페이스** | ✅ | `RepositorySource`(repository) · `IssueSource`(issue) + 어댑터 2 + 테스트 페이크 2 |
 | 시크릿 스크럽 | ⚠️ 부분 | `support/secret/TokenRedactor` — 토큰 패턴 치환만. LLM 프롬프트 단위 배제는 #28 |
-| `RepositoryPolicy` 수집 | ❌ | 능력(`fetchFile`)은 있다. 규약 판정 로직이 없다 — #7 |
+| **`RepositoryPolicy` 수집·판정** | ✅ | `AnalyzeRepositoryPolicyUseCase` — 「읽었는가」 3분류(READ·ABSENT·UNREADABLE) · 확장자 변종 8경로 · 일시적 실패는 **기록 없이 중단** · 보류·금지는 **엔티티가 재분석을 거부** · `assertContributionAllowed` 단언 (#7) |
 | `issue` 수집 UseCase | ❌ | 능력(`IssueSource`)은 있다. 커서·지연·멱등 저장이 없다 — #8 |
 | **LLM 능력·어댑터** | ✅ | `LanguageModel`(agent/domain) + `AnthropicLanguageModel` — 송신 전 스크럽 필수(S-4) · 타임아웃·전송 재시도 명시 · 절단·거부는 예외 · **노출 빈은 기록 데코레이터 하나뿐** (#10) |
 | **LLM 토큰·비용 기록** | ✅ | `AgentRunRecorder`(agent/domain) ← `RecordAgentRunUseCase`(candidate/application). 실패도 남긴다 |

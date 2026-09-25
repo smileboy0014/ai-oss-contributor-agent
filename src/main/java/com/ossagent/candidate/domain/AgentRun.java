@@ -42,8 +42,18 @@ public class AgentRun {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** {@code contribution_candidate.id}. <b>다른 애그리거트</b>로의 ID 참조 — architecture.md 규율 ④ */
-    @Column(name = "candidate_id", nullable = false)
+    /**
+     * {@code contribution_candidate.id}. <b>다른 애그리거트</b>로의 ID 참조 — architecture.md 규율 ④.
+     *
+     * <p>🔴 <b>{@code POLICY} 단계에서만 {@code null}</b> 이다 (V5 · #7). 규약 판정은 저장소 단위라
+     * 후보가 만들어지기 전에 일어난다. 매핑에 {@code nullable = false} 를 남겨 두면 스키마와
+     * 어긋난다 — 지금 터지지 않는 것은 Hibernate 의 {@code check_nullability} 가 꺼져 있기
+     * 때문이고, {@code ddl-auto: validate} 는 nullability 를 보지 않는다. <b>의존성 하나에
+     * 기대는 상태</b>를 두지 않는다.
+     *
+     * <p>「POLICY 만 NULL」은 {@link #start} 가 양방향으로 강제한다.
+     */
+    @Column(name = "candidate_id")
     private Long candidateId;
 
     @Enumerated(EnumType.STRING)
@@ -95,11 +105,16 @@ public class AgentRun {
      *                같은 사이클의 여러 행이 같은 값을 갖는다. <b>전송 재시도 횟수를 더하지 않는다</b>
      */
     public static AgentRun start(Long candidateId, Stage stage, int attempt, Clock clock) {
-        if (candidateId == null) {
-            throw new IllegalArgumentException("candidateId 는 필수다");
-        }
         if (stage == null) {
             throw new IllegalArgumentException("stage 는 필수다");
+        }
+        // 🔴 POLICY 만 저장소 단위라 후보가 없다. 나머지는 여전히 필수다 —
+        //    전면 허용으로 풀면 「기록을 붙일 대상이 없는」 행이 조용히 늘어난다
+        if (stage.requiresCandidate() && candidateId == null) {
+            throw new IllegalArgumentException("candidateId 는 필수다: stage=" + stage);
+        }
+        if (!stage.requiresCandidate() && candidateId != null) {
+            throw new IllegalArgumentException("저장소 단위 기록에 candidateId 를 붙일 수 없다: stage=" + stage);
         }
         if (attempt < 1) {
             throw new IllegalArgumentException("attempt 는 1 부터다: " + attempt);
@@ -176,7 +191,23 @@ public class AgentRun {
         PLAN,
         CODE,
         VERIFY,
-        REVIEW
+        REVIEW,
+
+        /**
+         * 대상 저장소 기여 규약 판정 — 이슈 #7.
+         *
+         * <p>⚠️ <b>후보가 없는 유일한 단계</b>다. 저장소 단위로 일어나고 후보보다 먼저다.
+         * 그래서 이 행만 {@code candidate_id} 가 {@code NULL} 이다.
+         *
+         * <p>{@code CODE → VERIFY → REVIEW} 루프 밖이라 {@code attempt} 는 항상 1 이다 —
+         * {@code ANALYZE}·{@code PLAN} 과 같은 취급 (Q-6).
+         */
+        POLICY;
+
+        /** 이 단계가 특정 후보에 속하는가. */
+        public boolean requiresCandidate() {
+            return this != POLICY;
+        }
     }
 
     public enum RunStatus {

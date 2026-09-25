@@ -23,6 +23,8 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 
 | 용어 | 뜻 |
 |---|---|
+| **Policy Analysis** | 대상 저장소의 기여 규약을 수집·판정해 `RepositoryPolicy` 로 고정. **후보보다 먼저**이고 저장소 단위다 |
+| **보류** (pending) | 규약을 **읽지 못해** 판정이 서지 않은 상태. `aiContributionAllowed = NULL`. 🔴 **「허용」이 아니다**(S-5) — 자동으로 풀리지 않고 사람이 해소한다(#24) |
 | **Scan** | 대상 저장소의 open 이슈를 수집해 저장 |
 | **Filter** | 규칙 기반 1차 배제 — 종료됨 · 활성 PR 존재 · 요구사항 불명확 · 대규모 아키텍처 변경 |
 | **Analysis** | LLM 기반 기여 가능성 판정. 산출물은 category · difficulty · feasible · confidence 등 |
@@ -52,6 +54,8 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `IssueSource` | `GitHubIssueSource` | 대상 저장소의 open 이슈를 **읽는다**. 코멘트 경로 없음(S-2) |
 | `GitHubCredentials` | `StaticTokenCredentials` | 호출마다 자격증명을 공급한다. 단수명 토큰으로 갈아끼울 이음매 — Q-1 |
 | `LanguageModel` | `AnthropicLanguageModel` | LLM 호출. **4개 지점이 공유하는 1층 능력** — 그 위에 `IssueAnalyst` 등 2층이 얹힌다 |
+| `PolicyDocumentSource` | `GitHubPolicyDocumentSource` | 규약 후보 문서 수집. **실패를 예외가 아니라 값으로** 돌려준다 — 무엇을 못 읽었는지가 곧 보류 사유다 |
+| `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | 규약 판정. `LanguageModel` 위에 얹히는 2층 |
 | `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
 | `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |

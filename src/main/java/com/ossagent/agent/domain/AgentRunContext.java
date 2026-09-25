@@ -16,11 +16,19 @@ package com.ossagent.agent.domain;
 public record AgentRunContext(Long candidateId, LlmCallSite callSite, int attempt) {
 
     public AgentRunContext {
-        if (candidateId == null) {
-            throw new IllegalArgumentException("candidateId 는 필수다 — 기록을 붙일 대상이 없다");
-        }
         if (callSite == null) {
             throw new IllegalArgumentException("callSite 는 필수다");
+        }
+        // 🔴 「후보가 없어도 된다」를 전면 허용하지 않는다. POLICY 하나만 저장소 단위이고,
+        //    나머지는 여전히 필수다. 여기를 통째로 nullable 로 풀면 「기록을 붙일 대상이 없는」
+        //    호출이 조용히 늘어난다
+        if (callSite.requiresCandidate() && candidateId == null) {
+            throw new IllegalArgumentException(
+                    "candidateId 는 필수다 — 기록을 붙일 대상이 없다: callSite=" + callSite);
+        }
+        if (!callSite.requiresCandidate() && candidateId != null) {
+            throw new IllegalArgumentException(
+                    "저장소 단위 호출에 candidateId 를 붙일 수 없다: callSite=" + callSite);
         }
         if (attempt < 1) {
             throw new IllegalArgumentException("attempt 는 1 부터다: " + attempt);
@@ -37,5 +45,25 @@ public record AgentRunContext(Long candidateId, LlmCallSite callSite, int attemp
      */
     public static AgentRunContext firstAttempt(Long candidateId, LlmCallSite callSite) {
         return new AgentRunContext(candidateId, callSite, 1);
+    }
+
+    /**
+     * 저장소 단위 호출용 — 후보가 아직 없다.
+     *
+     * <p>규약 판정(#7)이 유일한 경우다. 후보가 만들어지기 <b>전에</b> 일어나므로 붙일
+     * {@code candidateId} 가 존재하지 않는다. 비용은 그대로 기록된다 —
+     * {@code agent_run} 행의 {@code candidate_id} 만 {@code NULL} 이다.
+     */
+    public static AgentRunContext forRepository(LlmCallSite callSite) {
+        if (callSite.requiresCandidate()) {
+            throw new IllegalArgumentException(
+                    "후보가 필요한 호출 지점이다 — firstAttempt 를 쓴다: callSite=" + callSite);
+        }
+        return new AgentRunContext(null, callSite, 1);
+    }
+
+    /** 이 호출이 특정 후보에 속하는가. 로깅 MDC 와 기록 매핑이 이것으로 갈린다. */
+    public boolean hasCandidate() {
+        return candidateId != null;
     }
 }

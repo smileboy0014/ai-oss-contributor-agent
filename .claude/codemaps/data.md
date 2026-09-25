@@ -100,11 +100,25 @@ oss_repository ──1:1──▶ repository_policy
 | `issue_reference_required` | BOOLEAN | 커밋/PR 에 이슈 참조 필수 |
 | `signoff_required` | BOOLEAN | DCO sign-off 필수 |
 | `tests_required` | BOOLEAN | 테스트 동반 필수 |
-| `ai_contribution_allowed` | BOOLEAN NULL | **PRD 에 없지만 추가해야 한다.** NULL = 판정 실패 = **보류**(허용 아님) — Q-8 |
-| `contribution_rules` | TEXT | 원문 요약. **대용량 · 스크럽 대상** |
+| `ai_contribution_allowed` | BOOLEAN NULL | NULL = 판정 실패 = **보류**(허용 아님) — Q-8 |
+| `contribution_rules` | TEXT | **판정의 정규화 결과(JSON)와 근거 경로.** 원문을 넣지 않는다 — 아래 |
+| `pending_reason` | VARCHAR(1024) NULL | **왜 보류됐나** (V5 · #7). `경로=사유코드` 목록 |
 | `analyzed_at` | TIMESTAMP | 규약은 바뀐다. 재분석 주기 판단 근거 |
 
 **`ai_contribution_allowed` 를 NOT NULL DEFAULT true 로 두지 않는다.** 기본 허용은 S-5 위반을 기본값으로 만드는 것이다.
+
+🔴 **`contribution_rules` 에 대상 저장소 원문을 넣지 않는다** (#7). `@ExternalText` 는 **표시만** 하고
+스크럽을 실행하지 않으며, `PromptScrubber` 는 **LLM 송신 경로 전용**이다. 원문을 그대로 넣으면
+스크럽을 한 번도 타지 않고 앉는다. 게다가 이 컬럼은 PR 본문 조립(#23)의 입력이 될 수 있어
+**유출 종착지가 대상 저장소의 공개 PR** 이다. `ScrubbedRules` 값 타입을 거쳐야만 값이 들어간다.
+
+⚠️ `pending_reason` 이 `TEXT` 가 아닌 이유 — 이 프로젝트에서 `TEXT` 는 「외부 텍스트」를 뜻하고
+`@ExternalText` 가 강제된다(`ExternalTextMarkerTest`). 여기 들어가는 것은 **우리가 만든 사유 문자열**
+이고 길이도 유계다(후보 경로 13개 × `경로=사유코드; `).
+
+⚠️ `java_version`·`build_command`·`test_command` 는 **#7 이후에도 대체로 NULL 이다.**
+문서 본문에서만 오고 빌드 설정 파싱은 #15 다. 「NULL 인 정책으로 샌드박스에 진입할 수 있는가」는
+#15·#17 의 선결 과제다.
 
 ### `issue` ✅ 실재 (V2)
 
@@ -154,13 +168,23 @@ oss_repository ──1:1──▶ repository_policy
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
 | `id` | BIGINT PK | |
-| `candidate_id` | BIGINT FK | |
-| `stage` | VARCHAR | `ANALYZE` / `PLAN` / `CODE` / `VERIFY` / `REVIEW` |
+| `candidate_id` | BIGINT **NULL** | 🔴 `POLICY` 단계만 NULL — 아래 (V5 · #7) |
+| `stage` | VARCHAR | `ANALYZE` / `PLAN` / `CODE` / `VERIFY` / `REVIEW` / **`POLICY`** |
 | `attempt` | INT | **`CODE→VERIFY→REVIEW` 한 바퀴** — Q-6 확정. `ANALYZE`·`PLAN`·`POLICY` 행은 항상 1 이다(루프 밖) |
 | `input_tokens` · `output_tokens` | INT | 비용 집계 |
 | `status` | VARCHAR | `RUNNING` / `SUCCEEDED` / `FAILED` |
 | `error_message` | TEXT | **스크럽 대상** — 스택트레이스에 토큰이 섞인다 |
 | `started_at` · `finished_at` | TIMESTAMP | 단계별 소요 시간 |
+
+🔴 **`candidate_id` 가 NULL 일 수 있다 — `POLICY` 단계뿐이다** (V5 · #7).
+
+「모든 LLM 호출은 후보에 속한다」는 전제가 틀렸다. **규약 판정은 저장소 단위**이고 후보가
+만들어지기 전에 일어난다. 가짜 `candidate_id`(0·-1)로 채우면 비용 장부와 MDC 가 오염되므로
+전제를 고쳤다.
+
+**전면 허용이 아니다** — 엔티티가 「`POLICY` 만 NULL, 나머지는 필수」를 양방향으로 강제한다
+(`POLICY` 에 `candidate_id` 를 붙여도 거부). DB `CHECK` 로 쓰지 않은 이유는 스키마가
+stage enum 문자열에 묶이기 때문이다.
 
 인덱스 후보 — `INDEX(candidate_id, stage, attempt)`.
 

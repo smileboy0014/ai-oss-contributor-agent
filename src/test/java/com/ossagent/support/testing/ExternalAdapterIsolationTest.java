@@ -2,7 +2,10 @@ package com.ossagent.support.testing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Arrays;
+import com.ossagent.issue.domain.IssueSource;
+import com.ossagent.repository.domain.RepositorySource;
+import com.ossagent.support.testing.probe.adapter.out.github.ProbePackageAdapter;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,9 +22,9 @@ import org.springframework.context.ApplicationContext;
  * 테스트가 레이트리밋을 태우고, 쓰기 어댑터(#22 · #23)가 올라오면 <b>대상 저장소로 나가는
  * 호출</b>이 된다(S-1 · S-2). 샌드박스라면 신뢰할 수 없는 코드를 실제로 실행한다(S-3).
  *
- * <p>⚠ 오늘 아래 단언은 <b>0건을 검사한다</b> — {@code main} 에 대외 어댑터가 아직 없다(#6 미머지).
- * 그 사실을 숨기지 않고, 판정기가 실제로 물어뜯는지는 {@link ExternalAdapterPackagesTest} 가
- * 따로 증명한다. <b>둘이 한 쌍</b>이다.
+ * <p>판정 규칙 자체가 살아 있는지는 {@link ExternalAdaptersTest} 가 따로 증명한다.
+ * <b>둘이 한 쌍</b>이다 — 이 클래스는 「컨텍스트에 무엇이 올라왔나」를, 저쪽은
+ * 「판정기가 무는가」를 본다.
  */
 @AgentIntegrationTest
 class ExternalAdapterIsolationTest {
@@ -31,72 +34,96 @@ class ExternalAdapterIsolationTest {
 
     @Test
     void 스프링_컨텍스트에_대외_어댑터_빈이_없다_S1_S2_S3() {
-        List<String> external = Arrays.stream(context.getBeanDefinitionNames())
-                .filter(name -> {
-                    Class<?> type = context.getType(name);
-                    return type != null && ExternalAdapterPackages.isExternalAdapter(type);
-                })
-                .toList();
+        List<String> external = new ArrayList<>();
+        List<String> unresolved = new ArrayList<>();
+
+        for (String name : context.getBeanDefinitionNames()) {
+            Class<?> type = context.getType(name);
+            if (type == null) {
+                // 타입을 못 읽은 빈을 조용히 건너뛰면 「0건 검사」와 구분되지 않는다.
+                // 세어서 아래에서 드러낸다
+                unresolved.add(name);
+            } else if (ExternalAdapters.isExternalAdapter(type)) {
+                external.add(name + " (" + type.getName() + ")");
+            }
+        }
 
         assertThat(external)
                 .as("""
                         대외 어댑터가 테스트 컨텍스트에 올라왔다 — 이 테스트는 네트워크·컨테이너를 탄다.
                         금지 기술: %s (persistence 는 제외 — DB 는 Testcontainers 로 실제로 띄운다)
 
-                        고치는 법 — 둘 중 하나다.
-                          · 어댑터에 @Profile("!test") 를 달아 테스트 프로필에서 빠지게 한다
-                          · 능력 인터페이스의 페이크를 FakeExternalDependencies 에 @Bean 으로 등록한다
+                        고치는 법 — 둘 다 해야 한다.
+                          1. 어댑터(또는 그 @Configuration)에 @Profile("!test") 를 단다
+                          2. 같은 능력의 페이크를 FakeExternalDependencies 에 @Bean 으로 등록한다
 
                         근거: .claude/rules/conventions/testing-philosophy.md · safety-boundaries S-1·S-2·S-3""",
-                        ExternalAdapterPackages.externalTechnologies())
+                        ExternalAdapters.externalTechnologies())
                 .isEmpty();
+
+        assertThat(unresolved)
+                .as("""
+                        타입을 해석하지 못한 빈이 있다. 이 빈들은 검사에서 빠졌으므로
+                        「대외 어댑터가 없다」가 그만큼 덜 검사된 것이다 — 조용히 넘기지 않는다.""")
+                .isEmpty();
+    }
+
+    /**
+     * 능력 인터페이스로 주입되는 것이 <b>페이크인지</b> 본다.
+     *
+     * <p>빈이 없는 것과 「대역이 제자리에 있는 것」은 다른 문제다. 실어댑터를
+     * {@code @Profile("!test")} 로 빼기만 하고 페이크를 등록하지 않으면, 컨텍스트는 초록인데
+     * <b>UseCase 가 주입받을 것이 없는</b> 상태가 된다.
+     */
+    @Test
+    void 능력_인터페이스는_페이크로_주입된다() {
+        assertThat(context.getBean(IssueSource.class).getClass().getName())
+                .as("IssueSource 가 페이크가 아니다 — FakeExternalDependencies 를 확인하라")
+                .startsWith("com.ossagent.issue.domain.Fake");
+
+        assertThat(context.getBean(RepositorySource.class).getClass().getName())
+                .as("RepositorySource 가 페이크가 아니다 — FakeExternalDependencies 를 확인하라")
+                .startsWith("com.ossagent.repository.domain.Fake");
     }
 
     /**
      * 합성 애노테이션의 {@code @Import} 가 <b>실제로 먹는지</b> 확인한다.
      *
-     * <p>{@link FakeExternalDependencies} 는 오늘 비어 있다. 그래서 {@code @Import} 가
-     * 메타 애노테이션을 통해 인식되지 않아도 <b>아무 테스트도 실패하지 않는다</b> —
-     * 페이크를 처음 등록하는 사람이 「왜 주입이 안 되지」로 그때 발견하게 된다.
-     *
-     * <p>이음매가 비어 있을 때 이음매 자체를 검증해 두는 것이 그 함정을 막는다.
+     * <p>메타 애노테이션을 통한 {@code @Import} 가 인식되지 않으면 페이크가 등록되지 않는다.
+     * 위 테스트가 그것을 잡지만, 원인을 「페이크를 안 만들었나」가 아니라 「이음매가 안 먹나」로
+     * 바로 읽히게 하려고 따로 둔다.
      */
     @Test
     void 합성_애노테이션이_페이크_조립지점을_실제로_등록한다() {
         assertThat(context.getBeanNamesForType(FakeExternalDependencies.class))
-                .as("""
-                        @AgentIntegrationTest 의 @Import(FakeExternalDependencies) 가 먹지 않았다.
-                        지금은 그 클래스가 비어 있어 증상이 없지만, 페이크를 등록하는 순간
-                        컨텍스트에 주입되지 않는다.""")
+                .as("@AgentIntegrationTest 의 @Import(FakeExternalDependencies) 가 먹지 않았다")
                 .isNotEmpty();
     }
 
     /**
-     * <b>양성 대조</b> — 검사 모수가 0 이 아님을 증명한다.
+     * <b>검사 모수가 0 이 아님</b>을 증명한다.
      *
-     * <p>위 단언은 오늘 <b>0건을 검사하고</b> 초록이다({@code main} 에 대외 어댑터가 없다).
-     * 판정기가 항상 {@code false} 를 돌려주거나 빈 목록을 훑어도 똑같이 초록이므로,
-     * 「검사했다」를 따로 증명해야 한다.
+     * <p>위 「대외 어댑터 빈이 없다」는 판정기가 빈 목록을 훑어도, 항상 {@code false} 를
+     * 돌려줘도 똑같이 초록이다. 그래서 두 가지를 함께 단언한다.
      *
-     * <p>가짜 어댑터를 {@code @Component} 로 심는 방법은 <b>쓰지 않는다</b> — 스캔 베이스가
+     * <ol>
+     *   <li>판정기가 <b>어댑터 모양의 실제 빈</b>({@code adapter/out/persistence})을 훑었다 —
+     *       모수가 0 이 아니다</li>
+     *   <li>같은 판정기가 미끼를 <b>문다</b> — 항상 {@code false} 인 고장이 아니다</li>
+     * </ol>
+     *
+     * <p>가짜 어댑터를 {@code @Component} 로 심는 방법은 쓰지 않는다 — 스캔 베이스가
      * {@code com.ossagent} 루트라 그런 미끼는 모든 컨텍스트에 올라와 가드를 영구 RED 로 만든다.
-     * 대신 <b>이미 있는 어댑터 빈</b>({@code adapter/out/persistence})을 실제로 찾아내고
-     * 「허용」으로 판정했음을 단언한다. 컨텍스트를 오염시키지 않으면서 모수를 증명한다.
      */
     @Test
-    void 판정기가_실제_어댑터_빈을_검사했다_양성대조() {
-        List<Class<?>> ourBeans = Arrays.stream(context.getBeanDefinitionNames())
-                .<Class<?>>map(context::getType)
-                .filter(type -> type != null && type.getName().startsWith("com.ossagent."))
-                .toList();
-
-        assertThat(ourBeans)
-                .as("컨텍스트에서 com.ossagent 빈을 하나도 찾지 못했다 — 위 단언이 0건을 검사한 것이다")
-                .isNotEmpty();
-
-        List<Class<?>> persistenceAdapters = ourBeans.stream()
-                .filter(type -> type.getName().contains(".adapter.out.persistence."))
-                .toList();
+    void 판정기가_실제_빈을_훑었고_미끼를_문다() {
+        List<Class<?>> persistenceAdapters = new ArrayList<>();
+        for (String name : context.getBeanDefinitionNames()) {
+            Class<?> type = context.getType(name);
+            if (type != null && type.getName().contains(".adapter.out.persistence.")) {
+                persistenceAdapters.add(type);
+            }
+        }
 
         assertThat(persistenceAdapters)
                 .as("""
@@ -106,6 +133,12 @@ class ExternalAdapterIsolationTest {
 
         assertThat(persistenceAdapters)
                 .as("영속 어댑터를 대외로 잘못 판정했다 — DB 는 Testcontainers 로 실제로 띄운다(Q-2b)")
-                .noneMatch(ExternalAdapterPackages::isExternalAdapter);
+                .noneMatch(ExternalAdapters::isExternalAdapter);
+
+        assertThat(ExternalAdapters.isExternalAdapter(ProbePackageAdapter.class))
+                .as("""
+                        판정기가 미끼(%s)를 놓쳤다 — 항상 false 를 돌려주는 고장이면
+                        위 단언들이 전부 의미 없이 초록이 된다.""", ProbePackageAdapter.class.getName())
+                .isTrue();
     }
 }

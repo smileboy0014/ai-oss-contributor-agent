@@ -1,6 +1,11 @@
 package com.ossagent.support.testing;
 
+import com.ossagent.issue.domain.FakeIssueSource;
+import com.ossagent.issue.domain.IssueSource;
+import com.ossagent.repository.domain.FakeRepositorySource;
+import com.ossagent.repository.domain.RepositorySource;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 
 /**
  * 대외 의존 페이크의 <b>조립 지점</b>이다 — Q-9 확정(2026-09-25).
@@ -28,8 +33,20 @@ import org.springframework.boot.test.context.TestConfiguration;
  *       「timeout 후 remove 가 불렸는가」를 본다. 실제 컨테이너는 띄우지 않는다</li>
  * </ul>
  *
- * <p><b>지금 비어 있는 것이 정상이다.</b> {@code main} 에 대외 능력 인터페이스가 아직 없다
- * (#6 이 열려 있고 미머지). 능력이 생기면 그 페이크를 여기에 {@code @Bean} 으로 등록한다.
+ * <p>실제 어댑터는 {@code @Profile("!test")} 로 <b>컨텍스트에 올라오지 않는다.</b> 여기서 같은
+ * 능력의 페이크를 채워 넣어야 UseCase 가 주입받을 것이 생긴다. 새 대외 능력을 만드는 사람은
+ * <b>어댑터에 {@code @Profile("!test")} 를 달고 여기에 페이크를 등록</b>한다 — 빠뜨리면
+ * {@code ExternalAdapterIsolationTest} 가 RED 로 잡는다.
+ *
+ * <h2>⚠ 「No qualifying bean of type GitHubApiClient」가 떴다면</h2>
+ *
+ * <p>어댑터에 {@code @Profile("!test")} 를 <b>빠뜨린 것</b>이다. 전송 클라이언트를 조립하는
+ * {@code GitHubClientConfig} 는 {@code test} 프로필에서 빠지는데, 그것을 주입받는 어댑터가
+ * 남아 있으면 <b>의존성을 찾지 못해 컨텍스트가 아예 뜨지 않는다.</b>
+ *
+ * <p>가드의 친절한 실패 메시지 대신 스프링 배선 오류가 먼저 터지므로 원인이 한눈에 보이지
+ * 않는다. 증상만 보고 「페이크를 잘못 등록했나」로 가지 말 것 — <b>어댑터 쪽 애노테이션을
+ * 먼저 본다.</b> 조용히 통과하는 것보다는 낫지만 읽기 어려운 실패라 여기 적어 둔다.
  *
  * <p>페이크를 여기 등록할 때 지킬 것 — 상세는 {@code testing-philosophy.md} 「픽스처 규약」.
  * <ul>
@@ -68,4 +85,18 @@ import org.springframework.boot.test.context.TestConfiguration;
  */
 @TestConfiguration(proxyBeanMethods = false)
 public class FakeExternalDependencies {
+
+    /**
+     * 기본 페이크는 <b>비어 있는 응답</b>을 준다. 특정 테스트가 다른 동작을 원하면
+     * 그 테스트에서 주입받아 {@code given…()} 으로 채우거나 {@code failWith()} 로 실패시킨다.
+     */
+    @Bean
+    public IssueSource issueSource() {
+        return new FakeIssueSource();
+    }
+
+    @Bean
+    public RepositorySource repositorySource() {
+        return new FakeRepositorySource();
+    }
 }

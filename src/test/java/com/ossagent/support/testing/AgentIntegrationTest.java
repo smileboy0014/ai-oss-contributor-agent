@@ -26,9 +26,18 @@ import org.springframework.test.context.ActiveProfiles;
  *   <li>{@link FakeExternalDependencies} — 페이크 조립 지점</li>
  * </ul>
  *
- * <p>⚠ 이 애노테이션을 쓰는 것만으로는 보장이 되지 않는다. 우회할 수 있기 때문에
- * {@code ExternalAdapterIsolationTest}(올라온 것을 잡는다)와
- * {@code SpringBootTestUsageTest}(우회를 잡는다)가 함께 지킨다.
+ * <p>⚠ <b>이 애노테이션이 보장의 전부가 아니다.</b> 실제 보장은
+ * {@code ExternalAdapterIsolationTest} 가 한다 — 어떤 경로로 올라왔든 컨텍스트에 실어댑터
+ * 빈이 있으면 잡는다. 이 애노테이션은 <b>편의</b>이지 게이트가 아니다.
+ *
+ * <p>🕳 <b>열려 있는 구멍 — 숨기지 않는다.</b> {@code @SpringBootTest} 를 직접 쓰는 것을
+ * 막는 장치는 <b>없다.</b> 그런 테스트는 페이크 조립도 {@code test} 프로필도 받지 않는다.
+ * 다만 실제 대외 어댑터는 {@code @Profile("!test")} 라 <b>그 컨텍스트에서는 오히려 올라온다</b> —
+ * 즉 우회는 「대역이 빠지는」 것이 아니라 「실물이 들어오는」 형태로 나타난다.
+ * 정적 스캔으로 막는 방안은 검토했으나
+ * {@code ClassPathScanningCandidateComponentProvider} 가 메타 애노테이션을 따라가
+ * <b>준수 클래스까지 전부 적발</b>하는 함정이 있어 이번에는 넣지 않았다.
+ * 필요해지면 별도 이슈로 다룬다.
  *
  * <p>DB 는 차단 대상이 아니다 — PostgreSQL 은 Testcontainers 로 <b>실제로</b> 띄운다(Q-2b).
  * 트랜잭션 경계·동시성은 실 DB 가 아니면 검증되지 않는다.

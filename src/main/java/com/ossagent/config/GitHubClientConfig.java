@@ -10,6 +10,7 @@ import java.time.Clock;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
@@ -25,6 +26,10 @@ import org.springframework.web.client.RestClient;
  * {@code .claude/rules/conventions/architecture.md} 「재시도·타임아웃은 adapter/out 에 명시」.
  */
 @Configuration
+// 테스트 컨텍스트에서는 실제 전송 클라이언트를 조립하지 않는다 — 대역은 페이크다(Q-9 · #4).
+// FakeExternalDependencies 가 같은 능력의 페이크를 등록하고, ExternalAdapterIsolationTest 가
+// 실어댑터 빈이 없음을 단언한다. 이 애노테이션을 빼면 그 가드가 RED 로 잡는다
+@Profile("!test")
 @EnableConfigurationProperties(GitHubProperties.class)
 public class GitHubClientConfig {
 

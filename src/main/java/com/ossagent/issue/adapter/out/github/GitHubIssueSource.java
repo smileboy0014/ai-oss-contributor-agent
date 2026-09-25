@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 /**
@@ -30,6 +31,9 @@ import org.springframework.stereotype.Component;
  * </ol>
  */
 @Component
+// 테스트 컨텍스트에서는 올라오지 않는다 — 대역은 페이크다(Q-9 · #4).
+// 빼면 ExternalAdapterIsolationTest 가 RED 로 잡는다
+@Profile("!test")
 public class GitHubIssueSource implements IssueSource {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubIssueSource.class);

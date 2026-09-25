@@ -125,4 +125,9 @@ src/test/resources/{github,policy,llm}/                        리소스 픽스�
 |---|---|
 | `AgentIntegrationTest` | 통합 테스트의 표준 진입점. **`@SpringBootTest` 를 직접 쓰지 않는다** |
 | `FakeExternalDependencies` | 페이크 조립 지점 + 픽스처 규약 |
+| `ExternalAdapters` | 「이 클래스가 대외 어댑터인가」 판정기 — 패키지 + 네트워크 클라이언트 보유 |
 | `ExternalAdapterIsolationTest` | 컨텍스트에 실어댑터가 없음을 **강제**하는 가드 |
+| `probe/` | 판정기가 실제로 무는지 확인하는 미끼 2종. **스테레오타입을 붙이지 않는다** |
+
+실제 대외 어댑터는 `@Profile("!test")` 로 테스트 컨텍스트에서 빠진다. 새 어댑터를 만들면
+그 애노테이션을 달고 페이크를 등록한다 — 빠뜨리면 가드가 RED 로 잡는다.

@@ -106,17 +106,40 @@ class ScanIssuesIntegrationTest {
 | | 장치 | 하는 일 |
 |---|---|---|
 | 1 | **`@AgentIntegrationTest`** | 통합 테스트의 표준 진입점. `@SpringBootTest` + `@ActiveProfiles("test")` + `FakeExternalDependencies` 조립 |
-| 2 | **`ExternalAdapterIsolationTest`** | 컨텍스트에 `github`·`llm`·`sandbox` 패키지 세그먼트를 가진 빈이 **0개**임을 단언 |
+| 2 | **`@Profile("!test")`** | 실제 대외 어댑터가 테스트 프로필에서 **스스로 빠진다** |
+| 3 | **`ExternalAdapterIsolationTest`** | 그래도 올라온 것이 있으면 **잡는다** |
+
+**새 대외 어댑터를 만드는 사람이 할 일은 둘이다** — 어댑터(또는 그 `@Configuration`)에
+`@Profile("!test")` 를 달고, 같은 능력의 페이크를 `FakeExternalDependencies` 에 등록한다.
+빠뜨리면 장치 3 이 RED 로 잡는다.
+
+⚠ 어댑터에만 빠뜨리면 **가드 메시지가 아니라 스프링 배선 오류**(`No qualifying bean of type
+GitHubApiClient`)가 먼저 터진다. 전송 클라이언트 조립이 `test` 에서 빠지기 때문이다.
+증상만 보고 「페이크를 잘못 등록했나」로 가지 말 것 — 어댑터 쪽 애노테이션을 먼저 본다.
+
+### 판정 규칙 — 두 신호
+
+| # | 신호 | 왜 |
+|---|---|---|
+| 1 | 패키지가 `adapter.out.{github·llm·sandbox}` | 규율 ③ 이 기술 어댑터를 기술 이름 패키지에 두게 한다 |
+| 2 | 필드로 **네트워크 클라이언트를 (전이적으로) 보유** | 이름이 아니라 **능력**으로 본다 |
+
+신호 2 가 없으면 **패키지 이름을 바꾸는 것만으로 가드를 통과**할 수 있다. 반대로 신호 1 이
+없으면 우리가 모르는 클라이언트를 쓰는 어댑터를 놓친다. 둘을 함께 쓴다.
 
 `persistence` 는 금지 목록에 **없다** — DB 는 대역 대상이 아니다(Q-2b).
+`GitHubErrorTranslator`(순수 변환)·`GitHubProperties`(설정값)처럼 **호출하지 않는 것은 통과**한다.
 
-⚠ **0건 검사로 통과하지 않게 한다.** 대외 어댑터가 아직 없는 동안 장치 2 는 0개를 검사하고
-초록이 된다. 그래서 **양성 대조**를 함께 둔다 — 판정기가 `adapter/out/persistence` 의 **실제 빈을
-찾아냈고 「허용」으로 판정**했음을 단언한다. 가짜 어댑터를 `@Component` 로 심는 방법은 쓰지 않는다
-(스캔 베이스가 `com.ossagent` 루트라 모든 컨텍스트가 오염된다).
+⚠ **0건 검사로 통과하지 않게 한다.** 장치 3 은 판정기가 항상 `false` 를 돌려줘도 초록이다.
+그래서 **모수와 물림을 함께 단언**한다 — 판정기가 `adapter/out/persistence` 의 실제 빈을
+훑었고(모수 ≠ 0), 미끼 2종을 **문다**(항상-false 고장이 아니다).
+가짜 어댑터를 `@Component` 로 심는 방법은 쓰지 않는다 — 스캔 베이스가 `com.ossagent` 루트라
+모든 컨텍스트가 오염된다.
 
-⚠ **남는 구멍을 숨기지 않는다.** 테스트가 실어댑터를 `@Import` 로 직접 끼우면 놓칠 수 있다.
-현실적 누출 경로인 `@Component` 스캔은 잡힌다.
+🕳 **남는 구멍을 숨기지 않는다.** `@SpringBootTest` 를 **직접 쓰는 것**을 막는 장치는 없다.
+그런 테스트는 페이크도 `test` 프로필도 받지 않으므로, 우회는 「대역이 빠지는」 것이 아니라
+**「실물이 들어오는」** 형태로 나타난다. 정적 스캔은 `ClassPathScanningCandidateComponentProvider`
+가 메타 애노테이션을 따라가 **준수 클래스까지 적발**하는 함정이 있어 이번에는 넣지 않았다.
 
 **`SchemaMigrationTest` 는 예외다.** 실 의존(PostgreSQL)을 일부러 쓰는 테스트라
 페이크 조립을 끼우지 않는다. 「실 DB 검증」과 「페이크 조립」을 한 애노테이션에 묶지 않는다.
@@ -152,6 +175,11 @@ static final String TOKEN = "ghp_" + "x".repeat(36);                      // ❌
 런타임 조립은 「토큰을 안 쓴다」가 아니라 **「검사를 피한다」**다. 토큰의 길이·문자셋이 실제로
 유의미한 테스트(마스킹 경계 등)에서만 조립하고 **왜 조립했는지를 그 줄에 주석으로 남긴다.**
 
+⚠ **접두어마다 패턴이 다르다.** `ghp_`·`gho_` 는 `[A-Za-z0-9]{36}` 이라 밑줄이 섞이면
+걸리지 않는다. 그러나 fine-grained 접두어는 `[A-Za-z0-9_]{20,}` 로 **밑줄을 허용**하므로
+같은 관용구를 쓰면 **걸린다.** 그 형태가 필요하면 20자 미만으로 짧게 두거나,
+`secret-scan.sh` 가 화이트리스트로 인정하는 `<REPLACE_WITH_SECRET_MANAGER>` 를 쓴다.
+
 ## HTTP 가 아닌 두 경로 — 능력 페이크만으로는 증명되지 않는다
 
 | 경로 | 대역이 해야 할 일 | 조항 |
@@ -162,9 +190,24 @@ static final String TOKEN = "ghp_" + "x".repeat(36);                      // ❌
 「타임아웃 시 컨테이너가 정리된다」는 **능력 페이크로 증명되지 않는다** — 페이크는 컨테이너를
 만들지 않기 때문이다. 층을 하나 더 두는 이유가 이것이다.
 
-🔴 **실제 대외 시스템을 타는 자동 테스트를 만들지 않는다** — GitHub(REST·git) · LLM · Docker 컨테이너.
+🔴 **실제 대외 시스템을 타는 자동 테스트를 만들지 않는다** — GitHub(REST·git) · LLM · **샌드박스** 컨테이너.
+
+⚠ 「컨테이너를 전혀 띄우지 않는다」는 뜻이 **아니다.** 구분해야 한다.
+
+| 컨테이너 | 자동 스위트에서 | 근거 |
+|---|---|---|
+| **샌드박스** — 대상 저장소 코드를 실행 | ❌ 띄우지 않는다 | S-3 · 신뢰할 수 없는 코드다 |
+| **인프라** — Testcontainers PostgreSQL | ✅ **실제로 띄운다** | Q-2b · 트랜잭션 경계는 실 DB 가 아니면 검증되지 않는다 |
+
 테스트 코드의 `ProcessBuilder`·`docker.sock` 은 [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh)
 가 **커밋 시점에 막는다**(#4 에서 검사 범위를 `src/test` 로 확대했다).
+Testcontainers 는 Java API 를 쓰지 프로세스를 띄우지 않으므로 걸리지 않는다.
+우리 저장소의 `.claude/scripts/*.sh` 를 테스트에서 돌리는 것은 S-3 대상이 아니므로
+`// safety-ok: <사유>` 로 예외 처리한다.
+
+⚠ **검사 범위의 사각지대** — 훅은 `src/**/*.java` 만 본다. `docker-compose.yml`·`build.gradle.kts`
+는 여전히 검사되지 않는다. 소켓 마운트가 실제로 적힐 가능성이 가장 높은 곳이 `docker-compose.yml`
+이므로, 거기는 **리뷰가 본다.**
 
 ## 반드시 테스트로 보호할 것
 

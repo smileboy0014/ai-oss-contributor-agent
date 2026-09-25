@@ -13,11 +13,11 @@ import org.springframework.test.context.ActiveProfiles;
 /**
  * 통합 테스트의 <b>표준 진입점</b>이다. {@code @SpringBootTest} 를 직접 쓰지 않는다.
  *
- * <p>하는 일은 하나 — {@code test} 프로필을 켠다. 그러면 배선이 <b>양쪽에서 저절로</b> 맞는다.
+ * <p>하는 일은 하나 — {@code fakes} 프로필을 켠다. 그러면 배선이 <b>양쪽에서 저절로</b> 맞는다.
  *
  * <table border="1">
  *   <caption>프로필로 갈리는 것</caption>
- *   <tr><th></th><th>표시</th><th>{@code test} 프로필에서</th></tr>
+ *   <tr><th></th><th>표시</th><th>{@code fakes} 프로필에서</th></tr>
  *   <tr><td>실물</td><td>{@link ExternalAdapter}</td><td>❌ 빠진다</td></tr>
  *   <tr><td>대역</td><td>{@link FakeAdapter}</td><td>✅ 뜬다</td></tr>
  * </table>
@@ -34,12 +34,12 @@ import org.springframework.test.context.ActiveProfiles;
  * 빈이 있으면 잡는다. 이 애노테이션은 <b>편의</b>이지 게이트가 아니다.
  *
  * <p>🔒 <b>지키는 불변식은 「프로필」이다</b>(#43). 컨텍스트를 어떤 경로로 띄우든
- * {@code test} 프로필이 없으면 <b>실물이 올라오고 대역이 빠진다</b> — 배선이 정확히 반대가 된다.
- * {@code IntegrationTestProfileTest} 가 <b>컨텍스트를 띄우는 모든 클래스에 {@code test} 프로필이
+ * {@code fakes} 프로필이 없으면 <b>실물이 올라오고 대역이 빠진다</b> — 배선이 정확히 반대가 된다.
+ * {@code IntegrationTestProfileTest} 가 <b>컨텍스트를 띄우는 모든 클래스에 {@code fakes} 프로필이
  * 있는지</b>를 단언하며, 예외 목록은 없다.
  *
  * <p>그래서 <b>자기만의 합성 애노테이션을 만드는 것 자체는 막지 않는다.</b> 다만 만들 때
- * {@code @ActiveProfiles("test")} 를 반드시 포함시켜야 한다 — 빠뜨리면 잡힌다.
+ * {@code @ActiveProfiles("fakes")} 를 반드시 포함시켜야 한다 — 빠뜨리면 잡힌다.
  *
  * <p>🕳 <b>남는 구멍은 숨기지 않는다.</b> 검사기는 <b>구체·독립 클래스</b>만 훑으므로
  * 비정적 내부 클래스({@code @Nested})에 <b>직접</b> 컨텍스트 애노테이션을 달면 빠진다
@@ -57,6 +57,6 @@ import org.springframework.test.context.ActiveProfiles;
 @Documented
 @Inherited
 @SpringBootTest
-@ActiveProfiles("test")
+@ActiveProfiles("fakes")
 public @interface AgentIntegrationTest {
 }

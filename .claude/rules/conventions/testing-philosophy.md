@@ -105,7 +105,7 @@ class ScanIssuesIntegrationTest {
 
 | | 장치 | 하는 일 |
 |---|---|---|
-| 1 | **`@AgentIntegrationTest`** | 통합 테스트의 표준 진입점. `@SpringBootTest` + `@ActiveProfiles("test")` + `FakeExternalDependencies` 조립 |
+| 1 | **`@AgentIntegrationTest`** | 통합 테스트의 표준 진입점. `@SpringBootTest` + `@ActiveProfiles("fakes")` |
 | 2 | **`@ExternalAdapter` / `@FakeAdapter`** | 실물은 테스트에서 **빠지고**, 대역은 테스트에서만 **뜬다** |
 | 3 | **`ExternalAdapterIsolationTest`** | 그래도 올라온 것이 있으면 **잡는다** |
 
@@ -155,11 +155,11 @@ public class FakeIssueSource implements IssueSource { … }
 
 ### 장치 4 — 프로필 불변식 (#43)
 
-가드(장치 3)는 **자기가 띄운 컨텍스트만** 본다. 다른 테스트가 `test` 프로필 없이 컨텍스트를
+가드(장치 3)는 **자기가 띄운 컨텍스트만** 본다. 다른 테스트가 대역 프로필(`fakes`) 없이 컨텍스트를
 띄우면 **배선이 정확히 반대**가 된다 — 실물이 올라오고 대역이 빠진다. 우회의 증상이
 「대역이 조용히 빠지는」 것이 아니라 **「실물이 들어오는」** 것이라는 뜻이다.
 
-`IntegrationTestProfileTest` 가 **컨텍스트를 띄우는 모든 클래스에 `test` 프로필이 있는지**
+`IntegrationTestProfileTest` 가 **컨텍스트를 띄우는 모든 클래스에 `fakes` 프로필이 있는지**
 단언한다. 예외 목록은 없다.
 
 #### 왜 「`@SpringBootTest` 직접 사용 금지」가 아닌가 — 실제로 우회가 됐다
@@ -177,11 +177,11 @@ public class FakeIssueSource implements IssueSource { … }
 애노테이트된다) 또는 `@ContextConfiguration` 로 「컨텍스트를 띄우는가」를 판정하고,
 `SearchStrategy.TYPE_HIERARCHY` 로 상위까지 읽는다. 셋이 한 번에 닫힌다.
 
-**자기만의 합성 애노테이션을 만드는 것은 막지 않는다.** 다만 `@ActiveProfiles("test")` 를
+**자기만의 합성 애노테이션을 만드는 것은 막지 않는다.** 다만 `@ActiveProfiles("fakes")` 를
 반드시 포함시켜야 한다 — 빠뜨리면 잡힌다.
 
 ⚠ **물림을 회귀로 고정했다.** 위반이 0건이면 검사기가 아무것도 못 잡아도 초록이다.
-`probe` 패키지에 **프로필 없이 컨텍스트를 띄우는 상시 표본**을 두고 검사기가 그것을
+`probe` 패키지에 **대역 프로필 없이 컨텍스트를 띄우는 상시 표본**을 두고 검사기가 그것을
 잡아내는지 단언한다. 표본은 이름이 `Test` 로 끝나지 않고 `@Test` 메서드도 없어
 **실제로 실행되지 않는다** — 미끼 때문에 실어댑터가 올라오면 본말전도다.
 

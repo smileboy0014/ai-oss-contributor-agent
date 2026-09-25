@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Configuration;
  * LLM 조립. 비즈니스 코드를 두지 않는다.
  *
  * <p>🔴 <b>{@code @ExternalAdapter} 를 클래스에 붙였다.</b> 이 조립이 실제 네트워크를 타는
- * 클라이언트를 만들기 때문이다 — {@code test} 프로필에서 통째로 빠지고, 대신
+ * 클라이언트를 만들기 때문이다 — {@code fakes} 프로필에서 통째로 빠지고, 대신
  * {@code FakeLanguageModel}({@code @FakeAdapter})이 뜬다. 어댑터가 아니라 {@code @Configuration}
  * 에 붙는 것이 맞다 — {@code ExternalAdapter} javadoc 이 그 경우를 명시한다.
  *

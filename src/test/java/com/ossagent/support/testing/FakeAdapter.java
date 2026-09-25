@@ -48,6 +48,6 @@ import org.springframework.stereotype.Component;
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 @Component
-@Profile("test")
+@Profile("fakes")
 public @interface FakeAdapter {
 }

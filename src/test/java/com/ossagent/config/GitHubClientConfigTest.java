@@ -5,11 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ossagent.support.github.GitHubProperties;
 import java.net.http.HttpClient;
 import java.time.Duration;
-import java.util.Arrays;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.context.annotation.Bean;
-import org.springframework.web.client.RestClient;
 
 /**
  * 전송 설정이 <b>기본값에 맡겨지지 않았는지</b>.
@@ -17,11 +14,12 @@ import org.springframework.web.client.RestClient;
  * <p>JDK {@code HttpClient} 의 기본 연결 타임아웃은 「무제한」이다. 명시하지 않으면
  * 응답 없는 대외 호출이 스레드를 영원히 잡는다.
  *
- * <p>⚠ <b>한계</b> — 읽기 타임아웃은 {@code JdkClientHttpRequestFactory} 가 값을 되읽을 수단을
- * 주지 않아 여기서 확인하지 못한다. 내부 필드를 리플렉션으로 들여다보는 것은
- * 「구현 내부 필드에 의존」 금지에 걸리므로 하지 않는다
- * ({@code .claude/rules/conventions/testing-philosophy.md}). 설정이 전달되는 것은 코드로 보장하고,
- * 실제 동작 확인은 수동 검증 몫으로 남긴다.
+ * <p><b>읽기 타임아웃과 리다이렉트 거부는 여기서 확인하지 않는다.</b>
+ * {@code JdkClientHttpRequestFactory} 가 값을 되읽을 수단을 주지 않고, 내부 필드 리플렉션은
+ * 「구현 내부 필드에 의존」 금지에 걸린다. 대신 <b>실제 소켓을 태워</b> 확인한다 —
+ * {@link com.ossagent.support.github.GitHubTransportContractTest}.
+ * 전송 계약은 WireMock 이 본다는 것이 Q-9 의 3계층 규약이다
+ * ({@code .claude/rules/conventions/testing-philosophy.md}).
  */
 class GitHubClientConfigTest {
 
@@ -44,19 +42,6 @@ class GitHubClientConfigTest {
         GitHubProperties properties = GitHubProperties.defaults();
 
         assertThat(GitHubClientConfig.requestFactory(properties)).isNotNull();
-    }
-
-    @Test
-    @DisplayName("RestClient 를 빈으로 내보내지 않는다")
-    void RestClient를_빈으로_노출하지_않는다_S1() {
-        boolean exposesRestClient = Arrays.stream(GitHubClientConfig.class.getDeclaredMethods())
-                .filter(method -> method.isAnnotationPresent(Bean.class))
-                .anyMatch(method -> RestClient.class.isAssignableFrom(method.getReturnType()));
-
-        assertThat(exposesRestClient)
-                .as("RestClient 빈이 열려 있으면 아무 컴포넌트나 restClient.post() 를 쓸 수 있고, "
-                        + "읽기 전용 표면이 컨텍스트 수준에서 거짓이 된다 — S-1")
-                .isFalse();
     }
 
     @Test

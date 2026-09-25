@@ -35,10 +35,15 @@ public interface AgentRunRecorder {
     void succeeded(Long runId, LlmUsage usage);
 
     /**
-     * 실패를 기록한다.
+     * 실패와 <b>아는 만큼의</b> 토큰을 기록한다.
      *
      * <p>⚠️ {@code reason} 은 <b>우리 어휘</b>다. SDK 예외 메시지를 넘기지 않는다 —
      * {@code AgentRun.errorMessage} 에 토큰이 섞이는 것이 실제로 잦다 (S-4).
+     *
+     * @param usage 알 수 있으면 실제 사용량, 모르면 {@code null}.
+     *              절단은 <b>응답을 받았으므로 사용량을 안다</b> — 실패지만 토큰은 나갔다.
+     *              이것을 성공으로 기록하면 장부가 거짓말을 하고, 사용량을 버리면 비용이 사라진다.
+     *              타임아웃은 응답이 없어 {@code null} 이지만 <b>비용이 0 이라는 뜻은 아니다</b>
      */
-    void failed(Long runId, LlmFailureReason reason);
+    void failed(Long runId, LlmFailureReason reason, LlmUsage usage);
 }

@@ -46,3 +46,24 @@ agent:
   execution:
     max-retries: 3
     timeout-seconds: 1800
+  llm:
+    # 기준 URL 은 환경변수로 빼지 않는다 — github.base-url 과 같은 이유다.
+    # ⚠ SDK 의 fromEnv() 를 쓰지 않는 이유가 여기 있다. 그쪽은 ANTHROPIC_BASE_URL 과
+    #   ANTHROPIC_AUTH_TOKEN 까지 함께 읽어, 환경변수 하나로 프롬프트 송신 대상 호스트가
+    #   바뀔 수 있다. 키만 환경에서 받고 목적지는 우리가 고정한다 — S-4
+    base-url: https://api.anthropic.com
+    api-key: ${ANTHROPIC_API_KEY:}
+    # external-deps.md 가 정한 기본 모델
+    model: ${ANTHROPIC_MODEL:claude-sonnet-5}
+    # 비스트리밍 요청이 SDK HTTP 타임아웃을 넘지 않는 범위의 상한.
+    # 상한에서 잘리면 성공이 아니라 TRUNCATED 예외다
+    max-output-tokens: 16000
+    # Q-3(프로필 미분리)을 감안해 보수적으로 잡았다. 코딩 단계 diff 가 가장 길어
+    # 호출 지점별로 달리 줄 여지가 있으나, 실측 전에는 나누지 않는다
+    timeout-seconds: 120
+    # 전송 계층 재시도 상한 — github.max-retries 와 같은 축이다.
+    # ⚠ agent.execution.max-retries(3) 와는 다른 축이다. Q-6 확정:
+    #   그쪽은 CODE→VERIFY→REVIEW 한 바퀴를 세고 AgentRun.attempt 에 기록된다.
+    #   곱셈 예산 3 × (1 + 2) = 후보 1건당 대외 호출 최대 9회
+    max-retries: 2
+    retry-backoff: 500ms

@@ -21,7 +21,12 @@ upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md
 
 **설계 제약**
 - 이슈 수집은 `updated_at` 커서 + `ETag` 조건부 요청으로 증분화한다. 매 스캔 전량 조회는 레이트리밋을 태운다
-- `X-RateLimit-Remaining` 이 임계 미만이면 **작업을 실패시키지 말고 지연**시킨다. 리밋 소진은 정상 운영 상황이다
+- `X-RateLimit-Remaining` 이 임계 미만이면 **작업을 실패시키지 말고 지연**시킨다. 리밋 소진은 정상 운영 상황이다.
+  🔴 **판정은 어댑터가 한다** (#8) — `GitHubApiClient` 가 `github.rate-limit-threshold` 미만이면
+  **호출하지 않고** `GitHubRateLimitException(PRIMARY)` 을 던진다. 소진된 뒤가 아니라 **임계 미만이
+  되는 순간부터**다. 남은 예산을 끝까지 태우면 같은 토큰을 쓰는 다른 작업(규약 수집 · 코드 검색)이 전부 막힌다.
+  레이트리밋은 GitHub 의 개념이므로 **도메인 계약(`IssuePage` 등)에 싣지 않는다** — 규율 ①.
+  ⚠️ 던지는 자리는 **다음 호출 진입부**다. 응답을 받은 뒤에 던지면 **이미 지불한 호출의 결과를 버린다**
 - 2차 레이트리밋(abuse detection)은 429 가 아니라 403 으로 온다. 403 을 권한 오류로만 처리하면 무한 재시도에 빠진다
 - 🔴 **읽기 타임아웃은 두 갈래로 온다.** 보통은 `ResourceAccessException` 이지만, 취소가 레이스를
   이기면 **`CancellationException` 이 맨몸으로** 올라온다. 그것은 `RestClientException` 계열이 아니라

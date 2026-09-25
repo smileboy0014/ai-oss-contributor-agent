@@ -53,6 +53,25 @@ class ExternalAdapterIsolationTest {
     }
 
     /**
+     * 합성 애노테이션의 {@code @Import} 가 <b>실제로 먹는지</b> 확인한다.
+     *
+     * <p>{@link FakeExternalDependencies} 는 오늘 비어 있다. 그래서 {@code @Import} 가
+     * 메타 애노테이션을 통해 인식되지 않아도 <b>아무 테스트도 실패하지 않는다</b> —
+     * 페이크를 처음 등록하는 사람이 「왜 주입이 안 되지」로 그때 발견하게 된다.
+     *
+     * <p>이음매가 비어 있을 때 이음매 자체를 검증해 두는 것이 그 함정을 막는다.
+     */
+    @Test
+    void 합성_애노테이션이_페이크_조립지점을_실제로_등록한다() {
+        assertThat(context.getBeanNamesForType(FakeExternalDependencies.class))
+                .as("""
+                        @AgentIntegrationTest 의 @Import(FakeExternalDependencies) 가 먹지 않았다.
+                        지금은 그 클래스가 비어 있어 증상이 없지만, 페이크를 등록하는 순간
+                        컨텍스트에 주입되지 않는다.""")
+                .isNotEmpty();
+    }
+
+    /**
      * <b>양성 대조</b> — 검사 모수가 0 이 아님을 증명한다.
      *
      * <p>위 단언은 오늘 <b>0건을 검사하고</b> 초록이다({@code main} 에 대외 어댑터가 없다).

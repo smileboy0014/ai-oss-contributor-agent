@@ -42,6 +42,15 @@ github:
   # 남은 호출이 이 값 미만이면 경고만 남긴다. 지연 정책은 이슈 #8
   rate-limit-threshold: 100
 
+repository:
+  policy:
+    # 문서 하나의 상한. 넘으면 자르지 않고 보류한다 — 잘린 뒷부분에 금지 문구가
+    # 있었는지 판정할 방법이 없다 (S-5). GitHubRepositorySource 가 1MB 초과를 이미
+    # 거르므로 이 상한은 그 아래 구간에 작동하고, README 를 넣으면 실제로 걸린다
+    max-document-chars: 40000
+    # 판정 응답은 짧은 JSON 이다. 크게 잡을 이유가 없다
+    max-output-tokens: 2000
+
 agent:
   execution:
     max-retries: 3

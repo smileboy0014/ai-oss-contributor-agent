@@ -8,7 +8,6 @@ import com.ossagent.repository.domain.RepositoryDocuments;
 import com.ossagent.repository.domain.RepositoryFile;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.repository.domain.UnreadableReason;
-import com.ossagent.support.ExternalAdapter;
 import com.ossagent.support.github.GitHubRateLimitException;
 import com.ossagent.support.github.GitHubTransientException;
 import com.ossagent.support.github.GitHubUnreadableContentException;
@@ -17,7 +16,6 @@ import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
 /**
  * 규약 후보 문서를 모으고 <b>실패를 우리 어휘로 번역</b>한다 — S-5.
@@ -28,11 +26,10 @@ import org.springframework.stereotype.Component;
  * <p>번역을 어댑터에 두는 이유는 UseCase 가 GitHub 예외 타입에 묶이지 않게 하기 위해서다 —
  * #10 이 SDK 예외를 {@code LlmFailureReason} 으로 옮긴 것과 같다.
  *
- * <p>🔴 {@code @ExternalAdapter} — 실제 네트워크를 탄다. {@code fakes} 프로파일에서 빠지고
- * {@code FakePolicyDocumentSource} 가 대신 뜬다.
+ * <p>🔴 실제 네트워크를 탄다. 컴포넌트 스캔으로 올라오지 않고 {@code PolicyAnalysisConfig}
+ * 가 만든다 — 그쪽에 {@code @ExternalAdapter} 가 붙어 있어 {@code fakes} 프로파일에서 함께
+ * 빠지고 {@code FakePolicyDocumentSource} 가 대신 뜬다.
  */
-@Component
-@ExternalAdapter
 public class GitHubPolicyDocumentSource implements PolicyDocumentSource {
 
     private static final Logger log = LoggerFactory.getLogger(GitHubPolicyDocumentSource.class);

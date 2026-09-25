@@ -87,18 +87,84 @@ void 활성_PR이_있는_이슈는_후보에서_제외한다() {
 ## 통합 — Testcontainers
 
 ```java
-@SpringBootTest
+@AgentIntegrationTest          // @SpringBootTest 를 직접 쓰지 않는다 — 아래 절
 @Testcontainers
 class ScanIssuesIntegrationTest {
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17-alpine");
 
-    // GitHub·LLM·샌드박스는 페이크 빈으로 주입한다 — @TestConfiguration
+    // GitHub·LLM·샌드박스는 페이크 빈으로 주입한다 — FakeExternalDependencies
 }
 ```
 
-`@SpringBootTest` 가 붙은 테스트는 **대외 의존을 실제로 타지 않는지** 먼저 확인한다.
-컨텍스트에 실제 어댑터가 올라오면 테스트가 네트워크를 탄다.
+## 실어댑터가 컨텍스트에 올라오지 않는 것을 무엇이 보장하나 — #4 (2026-09-25)
+
+여기 원래 「`@SpringBootTest` 가 붙은 테스트는 대외 의존을 실제로 타지 않는지 **먼저 확인한다**」고
+적혀 있었다. **확인의 주체가 사람**이었다는 것이 문제다. 어댑터가 늘어나면 지켜지지 않고,
+지켜지지 않은 순간의 증상은 「테스트가 조용히 네트워크를 탄다」라 **눈에 띄지 않는다.**
+
+| | 장치 | 하는 일 |
+|---|---|---|
+| 1 | **`@AgentIntegrationTest`** | 통합 테스트의 표준 진입점. `@SpringBootTest` + `@ActiveProfiles("test")` + `FakeExternalDependencies` 조립 |
+| 2 | **`ExternalAdapterIsolationTest`** | 컨텍스트에 `github`·`llm`·`sandbox` 패키지 세그먼트를 가진 빈이 **0개**임을 단언 |
+
+`persistence` 는 금지 목록에 **없다** — DB 는 대역 대상이 아니다(Q-2b).
+
+⚠ **0건 검사로 통과하지 않게 한다.** 대외 어댑터가 아직 없는 동안 장치 2 는 0개를 검사하고
+초록이 된다. 그래서 **양성 대조**를 함께 둔다 — 판정기가 `adapter/out/persistence` 의 **실제 빈을
+찾아냈고 「허용」으로 판정**했음을 단언한다. 가짜 어댑터를 `@Component` 로 심는 방법은 쓰지 않는다
+(스캔 베이스가 `com.ossagent` 루트라 모든 컨텍스트가 오염된다).
+
+⚠ **남는 구멍을 숨기지 않는다.** 테스트가 실어댑터를 `@Import` 로 직접 끼우면 놓칠 수 있다.
+현실적 누출 경로인 `@Component` 스캔은 잡힌다.
+
+**`SchemaMigrationTest` 는 예외다.** 실 의존(PostgreSQL)을 일부러 쓰는 테스트라
+페이크 조립을 끼우지 않는다. 「실 DB 검증」과 「페이크 조립」을 한 애노테이션에 묶지 않는다.
+
+## 픽스처 규약 — #4 (2026-09-25)
+
+| 종류 | 이름 | 위치 |
+|---|---|---|
+| 능력 대역 | **`Fake{능력이름}`** | 능력 인터페이스와 **같은 패키지**의 `src/test` |
+| 값 픽스처 | `{타입}Fixtures` | 그 타입과 같은 패키지. static factory 만, 상태 없음 |
+| 리소스 픽스처 | — | `src/test/resources/{github,policy,llm}/…` |
+
+`Mock`·`Stub` 을 이름에 쓰지 않는다 — Mockito 의 mock 과 섞인다.
+
+🔴 **값 픽스처를 애그리거트 너머로 공유하지 않는다.** `candidate` 테스트가 `IssueFixtures` 를 쓰면
+[`architecture.md`](./architecture.md) 규율 ④ 가 막는 의존이 **테스트를 통해 되살아난다.**
+필요하면 자기 테스트 패키지에서 자기가 만든다 — 중복이 결합보다 싸다.
+
+🔴 **페이크는 `src/test` 에만 존재한다.** `src/main` 에 두면 운영 조립에서 선택될 수 있다.
+
+🔴 **실패 모드를 재현할 수 있어야 한다** — 예외 · 빈 결과 · 깨진 LLM 출력 · 타임아웃.
+「항상 성공만 반환하는 페이크」는 게이트를 검증하지 못한다. 이 제품의 품질 축은
+**「나쁜 결과를 걸러내는가」**다. S-6(재시도 상한 소진 → `FAILED`)도 이 전제 위에 선다.
+
+🔴 **픽스처에 실제 토큰을 넣지 않는다 (S-4).** 토큰 *형태*가 필요하면
+**패턴에 매칭되지 않고 가짜임이 눈에 보이는 고정 상수**를 쓴다.
+
+```java
+static final String FAKE_TOKEN = "ghp_NOT_A_REAL_TOKEN_FOR_TESTS_ONLY";   // ✅
+static final String TOKEN = "ghp_" + "x".repeat(36);                      // ❌ 스캐너 회피
+```
+
+런타임 조립은 「토큰을 안 쓴다」가 아니라 **「검사를 피한다」**다. 토큰의 길이·문자셋이 실제로
+유의미한 테스트(마스킹 경계 등)에서만 조립하고 **왜 조립했는지를 그 줄에 주석으로 남긴다.**
+
+## HTTP 가 아닌 두 경로 — 능력 페이크만으로는 증명되지 않는다
+
+| 경로 | 대역이 해야 할 일 | 조항 |
+|---|---|---|
+| **git 전송** (clone·branch·**push**) | 실제 원격이 아니라 **push 시도를 기록**한다. 「upstream 좌표면 중단, Fork 좌표면 위임」을 원격 없이 검증 | 🔴 S-1 |
+| **컨테이너 제어** (docker 호출) | 제어 호출을 기록해 **「timeout 후 remove 가 불렸는가」**를 본다 | 🔴 S-3 |
+
+「타임아웃 시 컨테이너가 정리된다」는 **능력 페이크로 증명되지 않는다** — 페이크는 컨테이너를
+만들지 않기 때문이다. 층을 하나 더 두는 이유가 이것이다.
+
+🔴 **실제 대외 시스템을 타는 자동 테스트를 만들지 않는다** — GitHub(REST·git) · LLM · Docker 컨테이너.
+테스트 코드의 `ProcessBuilder`·`docker.sock` 은 [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh)
+가 **커밋 시점에 막는다**(#4 에서 검사 범위를 `src/test` 로 확대했다).
 
 ## 반드시 테스트로 보호할 것
 

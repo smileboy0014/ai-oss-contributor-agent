@@ -107,5 +107,22 @@ Spring Data 인터페이스가 같은 이름이 되어 더 헷갈린다 — [`gl
 src/test/java/com/ossagent/{도메인}/...
 ```
 
-프로덕션 패키지 구조를 따라간다. 대외 의존(GitHub·LLM·샌드박스)은 **페이크로 대체**한다 —
+프로덕션 패키지 구조를 따라간다. 대외 의존(GitHub·LLM·샌드박스)은 **대역으로 갈음**한다 —
 [`testing-philosophy.md`](../rules/conventions/testing-philosophy.md).
+
+대역은 **층마다 다르다**(Q-9) — 능력은 자체 페이크, 어댑터 매핑은 `MockRestServiceServer`,
+전송 계약은 WireMock. 「페이크로 대체」 한 마디로 뭉치면 층이 하나 빠진다.
+
+```
+src/test/java/com/ossagent/{도메인}/domain/Fake{능력이름}.java   능력 대역 — 능력과 같은 패키지
+src/test/java/com/ossagent/support/testing/                    통합 테스트 하네스 (아래)
+src/test/resources/{github,policy,llm}/                        리소스 픽스처
+```
+
+`support/testing` 만 프로덕션 구조를 따라가지 않는다. **하네스**이지 어느 도메인의 테스트가 아니다.
+
+| 파일 | 역할 |
+|---|---|
+| `AgentIntegrationTest` | 통합 테스트의 표준 진입점. **`@SpringBootTest` 를 직접 쓰지 않는다** |
+| `FakeExternalDependencies` | 페이크 조립 지점 + 픽스처 규약 |
+| `ExternalAdapterIsolationTest` | 컨텍스트에 실어댑터가 없음을 **강제**하는 가드 |

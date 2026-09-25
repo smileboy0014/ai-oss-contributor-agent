@@ -165,7 +165,30 @@ Q5. DB·GitHub·LLM·Docker 기술인가?
 | **HTTP 상태 매핑은 `support/web` 한 곳** | 도메인 예외에 `@ResponseStatus` 를 달면 domain 이 HTTP 를 알게 되고, 같은 예외를 스케줄러가 던질 때 의미가 없어진다 |
 | **시각은 `Clock` 주입** | 만료·타임아웃·재시도 경계를 테스트로 고정해야 한다. `Instant.now()` 직접 호출 금지 |
 | **LLM·GitHub 응답 파싱은 adapter/out 에서 끝낸다** | 원시 JSON·모델 원문이 application 으로 올라오면 도메인이 외부 스키마에 묶인다 |
-| **재시도·타임아웃은 adapter/out 에 명시** | 기본값에 맡기면 무한 대기가 생긴다. 상한은 `agent.execution.max-retries` |
+| **재시도·타임아웃은 adapter/out 에 명시** | 기본값에 맡기면 무한 대기가 생긴다. **상한은 두 축이다** — 아래 |
+
+### 재시도 상한이 두 축인 이유 (2026-09-22 개정 · #6)
+
+원래 이 표는 「상한은 `agent.execution.max-retries`」 하나로 적혀 있었다. 그 문장으로는
+**전송 계층 실패**를 다룰 수 없다.
+
+| 축 | 설정 키 | 무엇을 세나 | 소진하면 |
+|---|---|---|---|
+| **파이프라인** | `agent.execution.max-retries` (3) | PRD §17 의 「구현→테스트」 루프. `AgentRun.attempt` 에 기록 | 후보가 `FAILED` — **사람에게 넘기는 신호** (S-6) |
+| **전송 계층** | `github.max-retries` (2) | HTTP 5xx·연결 실패·타임아웃 | 그 호출 1회가 실패. 파이프라인 카운터는 그대로 |
+
+가르지 않으면 **HTTP 5xx 한 번이 파이프라인 카운터를 태운다.** 후보가 코드 문제 없이
+`FAILED` 로 떨어지고, 사람은 「AI 가 못 고쳤다」로 읽는다.
+
+⚠️ 두 예산은 **곱해진다.** 3 × 2 = 논리적 1회 시도당 대외 호출 최대 6회다.
+전송 상한을 올릴 때는 이 곱셈을 먼저 계산한다.
+
+⚠️ 무엇을 몇 번 세는지(`AgentRun.attempt` 의 의미)는 **여전히 미결이다** —
+[`../context/open-questions.md`](../context/open-questions.md) Q-6. 위 구분은 Q-6 의 답이 아니라,
+**어느 답을 택하더라도 전송 계층은 별개**라는 것까지만 정한 것이다.
+
+🔴 **레이트리밋은 재시도 대상이 아니다.** 지연이다. 즉시 다시 걸면 남은 예산만 더 태우고
+2차 리밋에서는 차단이 길어진다 — [`../context/external-deps.md`](../context/external-deps.md).
 
 ## 체크리스트
 

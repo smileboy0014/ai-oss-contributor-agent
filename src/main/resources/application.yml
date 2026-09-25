@@ -25,6 +25,23 @@ management:
       exposure:
         include: health,info
 
+github:
+  # 기준 URL 은 환경변수로 빼지 않는다. 바꿀 일이 테스트뿐이고, 테스트는 프로퍼티로 덮는다
+  base-url: https://api.github.com
+  # classic PAT · 스코프 public_repo — Q-1 확정. 비어 있으면 미인증(60 req/h)으로 동작한다
+  token: ${GITHUB_TOKEN:}
+  # ⚠ 기본값에 맡기지 않는다. JDK HttpClient 의 기본 연결 타임아웃은 무제한이다
+  connect-timeout: 5s
+  read-timeout: 10s
+  # 전송 계층 재시도 상한 — 5xx·타임아웃에만 적용된다.
+  # ⚠ agent.execution.max-retries 와 다른 축이다. 그쪽은 「구현→테스트」 루프 카운터이고
+  #   AgentRun.attempt 에 기록된다. HTTP 5xx 한 번으로 그 카운터를 태우면
+  #   후보가 코드 문제 없이 FAILED 로 떨어진다 — 재시도 단위의 정의는 미결(Q-6)
+  max-retries: 2
+  retry-backoff: 500ms
+  # 남은 호출이 이 값 미만이면 경고만 남긴다. 지연 정책은 이슈 #8
+  rate-limit-threshold: 100
+
 agent:
   execution:
     max-retries: 3

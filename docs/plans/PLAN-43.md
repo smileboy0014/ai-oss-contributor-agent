@@ -1,4 +1,4 @@
-# PLAN-43: `@SpringBootTest` 우회 차단 + Java 25 함정 기록
+# PLAN-43: `@SpringBootTest` 우회 차단
 
 **이슈**: [#43](https://github.com/smileboy0014/ai-oss-contributor-agent/issues/43)
 **type**: fix
@@ -46,22 +46,6 @@
 예외가 사라지면 **허용 목록 없는 단순한 스캔**이 가능해진다. 순서가 중요하다 —
 이관을 먼저 하고 스캔을 넣는다.
 
-### 1-4. Java 25 함정은 고쳤으나 기록이 없다
-
-#4 가 `gradle/gradle-daemon-jvm.properties` 로 고쳤다. 남은 것은 **기록**뿐인데,
-증상이 원인을 전혀 가리키지 않아 기록 가치가 크다.
-
-```
-* What went wrong:
-  25.0.4.1
-```
-
-⚠️ 헷갈리는 핵심은 **축이 둘**이라는 것이다 — `build.gradle.kts` 의 `toolchain` 은
-**컴파일·테스트가 쓸 JVM** 을 정하고, **데몬이 어느 JVM 에서 도는지는 정하지 않는다.**
-그래서 toolchain 을 21 로 박아 둬도 런처 JVM 이 25 면 그대로 죽는다.
-
----
-
 ## 2. 수정
 
 | # | 무엇 | 파일 |
@@ -70,7 +54,6 @@
 | 2 | raw `@SpringBootTest` 사용 **0건**을 단언하는 정적 스캔 | `SpringBootTestUsageTest.java` (신규) |
 | 3 | 「열려 있는 구멍」 절을 **닫힌 것으로** 갱신 | `testing-philosophy.md:156` |
 | 4 | `@AgentIntegrationTest` javadoc 의 구멍 설명 갱신 | `AgentIntegrationTest.java` |
-| 5 | Java 25 함정을 Q-9b 옆에 기록 | `open-questions.md` |
 
 ### ⚠️ 2번의 구현 함정 — #4 에서 미리 확인한 것
 
@@ -122,8 +105,8 @@
 | 항목 | 처리 |
 |---|---|
 | **Q-3** 프로필 분리 | **닫지 않는다.** `test` 는 `web`/`worker` 와 **직교**하는 축이라 선택지를 줄이지 않는다 |
-| Q-9 · Q-9b | 닫혀 있다. Q-9b 옆에 **함정을 한 건 추가**할 뿐 판단을 바꾸지 않는다 |
-| Q-10 | 닫혀 있다(#27). CI 가 같은 `gradle-daemon-jvm.properties` 로 러너 JVM 을 고정한다는 점만 인용 |
+| Q-9 · Q-9b | 닫혀 있다. 건드리지 않는다 |
+| Q-10 | 닫혀 있다(#27). 건드리지 않는다 |
 
 **닫는 미결 없음. 새로 여는 미결도 없음.**
 
@@ -134,3 +117,4 @@
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-25 | smileboy0014 | 초안 — #4 가 남긴 구멍 2건 |
+| 2026-09-25 | smileboy0014 | **Java 25 함정 기록을 범위에서 제외** — Java 21 고정은 #4 에서 이미 끝났고, 문서 기록은 지금 필요하지 않다고 판단 |

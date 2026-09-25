@@ -36,12 +36,12 @@
                        │  ANALYZED   │──────────────────▶┌────────────┐
                        └──────┬──────┘   breaking=true   │ REJECTED ● │
                               │                          └────────────┘
-                              │ ★사람이 고른다★
+                              │ ★사람이 고른다★ POST /select
                               ▼
-                       ┌─────────────┐
-                       │  SELECTED   │
-                       └──────┬──────┘
-                              │
+                       ┌─────────────┐   ★사람이 취소★
+                       │  SELECTED   │──────────────────▶ (REJECTED ●)
+                       └──────┬──────┘   POST /reject
+                              │ POST /implement
               ┌───────────────▼───────────────┐
               │        ┌──────────────┐       │
               │   ┌───▶│ IMPLEMENTING │       │
@@ -79,17 +79,33 @@
 | `DISCOVERED` | `ANALYZING` | 분석 요청 (`POST /candidates/{id}/analyze`) | 시스템 |
 | `ANALYZING` | `ANALYZED` | LLM 분석 산출물 저장 | 시스템 |
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` 또는 `breaking_change=true` | 시스템 |
-| `ANALYZED` | `SELECTED` | **사람이 고른다** | **사람** |
-| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`) | 시스템 |
+| `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
+| `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject` | **사람** |
+| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`) | **사람이 트리거** |
 | `IMPLEMENTING` | `TESTING` | 코드 생성 완료 | 시스템 |
 | `TESTING` | `REVIEWING` | 빌드·테스트 통과 | 시스템 |
 | `TESTING` | `IMPLEMENTING` | 테스트 실패 → 에러 분석 후 재시도 | 시스템 |
 | `REVIEWING` | `READY_FOR_PR` | AI 리뷰 통과 | 시스템 |
 | `REVIEWING` | `IMPLEMENTING` | 리뷰 실패 → 재시도 | 시스템 |
 | `IMPLEMENTING`·`TESTING`·`REVIEWING` | `FAILED` ● | **재시도 상한 소진** | 시스템 |
-| `READY_FOR_PR` | `PR_CREATED` ● | Fork push + **draft** PR 생성 성공 | 시스템 |
+| `READY_FOR_PR` | `PR_CREATED` ● | PR 생성 요청 (`POST /candidates/{id}/pull-request`) → Fork push + **draft** PR | **사람이 트리거** |
 
 ● = **종단 상태**. `PR_CREATED` · `REJECTED` · `FAILED` 셋이다.
+
+### 사람이 눌러야만 넘어가는 지점 셋 — Q-5 확정 (2026-09-25 · #24)
+
+S-6 이 요구하는 승인 지점이다. **스케줄러·워커가 이 선을 넘지 않는다.**
+
+| 게이트 | 엔드포인트 | 넘으면 |
+|---|---|---|
+| 선정 | `POST /candidates/{id}/select` | 자동 선정 — 제품 정의 붕괴 |
+| 착수 | `POST /candidates/{id}/implement` | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
+| **PR 생성** | `POST /candidates/{id}/pull-request` | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
+
+⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스는 `implement` 한 번으로
+Draft PR 까지 그렸는데, 그대로 구현하면 위 세 번째 게이트가 사라진다 — PRD 결함이다(#30).
+
+선택 취소(`SELECTED → REJECTED`)도 **사람 행위로만** 일어난다. 자동 취소 경로를 만들지 않는다.
 
 ---
 

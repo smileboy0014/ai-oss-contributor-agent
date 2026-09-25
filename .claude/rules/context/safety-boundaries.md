@@ -138,6 +138,17 @@ Phase 1 대상 `spring-kafka` 도 기여 문서 301줄에 AI 언급이 하나도
 PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
 
 - 후보 선정(`SELECTED`) · 구현 착수 · PR 생성은 API 호출로 트리거되는 **명시적 행위**다. 스케줄러가 끝까지 자동으로 흘려보내지 않는다
+
+  | 게이트 | 엔드포인트 | 확정 |
+  |---|---|---|
+  | 선정 | `POST /api/candidates/{id}/select` | Q-5 (2026-09-25) |
+  | 착수 | `POST /api/candidates/{id}/implement` | PRD §23 |
+  | **PR 생성** | `POST /api/candidates/{id}/pull-request` | PRD §23 |
+
+  🔴 **`implement` 가 PR 까지 흘려보내면 반려다.** PRD §24 시퀀스가 그렇게 그려져 있으나
+  **그 다이어그램이 틀렸다**(#30). 그대로 구현하면 세 번째 게이트가 사라지고 S-2 까지 뚫린다.
+
+  선택 취소(`SELECTED` → `REJECTED`)도 사람 행위로만 일어난다. 자동 취소 경로를 만들지 않는다
 - 재시도 상한(`agent.execution.max-retries`)을 코드에서 무한으로 바꾸지 않는다 — 상한 소진은 `FAILED` 이고, 그 자체가 사람에게 넘기는 신호다
 - 상태머신의 종단 상태(`PR_CREATED`·`REJECTED`·`FAILED`)에서 나가는 전이를 만들지 않는다
 

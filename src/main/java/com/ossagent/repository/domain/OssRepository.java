@@ -40,6 +40,21 @@ public class OssRepository {
     private Instant lastScannedAt;
 
     /**
+     * 이슈 증분 수집 커서 — 「데이터를 어디까지 봤나」 (#8).
+     *
+     * <p>🔴 {@link #lastScannedAt} 과 <b>뜻이 다르다.</b> 저쪽은 「우리가 언제 돌렸나」다.
+     * 겹쳐 쓰면 스캔이 실패해도 커서가 전진해 <b>이슈를 영구히 건너뛴다.</b>
+     *
+     * <p>두 값은 항상 함께 움직인다 — ETag 는 {@code since} 와 짝이라
+     * 커서가 전진하면 버려야 한다. 그래서 {@link com.ossagent.issue.domain.IssueScanCursor}
+     * 로 묶어 다루고, 여기에는 풀어서 저장만 한다.
+     */
+    private Instant issueCursorUpdatedAt;
+
+    @Column(length = 255)
+    private String issueCursorEtag;
+
+    /**
      * 이 저장소의 기여 규약. 아직 분석되지 않았으면 {@code null} 이다 — S-5.
      *
      * <p>같은 {@code repository} 도메인 안이라 연관관계를 쓴다. 규율 ④ 가 막는 것은
@@ -98,5 +113,31 @@ public class OssRepository {
 
     public void markScanned(Instant scannedAt) {
         this.lastScannedAt = scannedAt;
+    }
+
+    public Instant getIssueCursorUpdatedAt() {
+        return issueCursorUpdatedAt;
+    }
+
+    public String getIssueCursorEtag() {
+        return issueCursorEtag;
+    }
+
+    /**
+     * 이슈 증분 수집 커서를 갱신한다. 🔴 <b>저장이 끝난 뒤에만 부른다</b> — #8.
+     *
+     * <p>조회 직후에 전진시키면 저장에 실패했을 때 그 구간을 영영 다시 읽지 않는다.
+     * 순서가 곧 안전 성질이다.
+     *
+     * <p>두 값을 <b>함께</b> 받는 이유는 ETag 가 {@code since} 와 짝이기 때문이다 —
+     * 따로 세터를 두면 한쪽만 갱신돼 짝이 어긋난다.
+     *
+     * <p>⚠ 원시값으로 받는다. 커서를 묶은 값 타입({@code IssueScanCursor})은
+     * {@code issue} 도메인의 것이고, 이 애그리거트가 <b>남의 도메인 타입을 import 하지
+     * 않는다</b> — architecture 규율 ④. 조립은 {@code issue} 쪽에서 한다.
+     */
+    public void updateIssueScanCursor(Instant updatedSince, String etag) {
+        this.issueCursorUpdatedAt = updatedSince;
+        this.issueCursorEtag = etag;
     }
 }

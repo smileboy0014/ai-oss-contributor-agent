@@ -87,6 +87,8 @@ public class RecordAgentRunUseCase implements AgentRunRecorder {
             case PLAN -> AgentRun.Stage.PLAN;
             case CODE -> AgentRun.Stage.CODE;
             case REVIEW -> AgentRun.Stage.REVIEW;
+            // 저장소 단위 — candidateId 가 null 로 넘어온다 (#7)
+            case POLICY -> AgentRun.Stage.POLICY;
         };
     }
 }

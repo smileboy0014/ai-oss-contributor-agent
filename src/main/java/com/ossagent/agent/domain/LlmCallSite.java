@@ -22,5 +22,24 @@ public enum LlmCallSite {
     CODE,
 
     /** 생성된 diff 리뷰 */
-    REVIEW
+    REVIEW,
+
+    /**
+     * 대상 저장소의 <b>기여 규약 판정</b> — 이슈 #7.
+     *
+     * <p>⚠️ 이것만 <b>후보가 없다.</b> 규약 분석은 저장소 단위이고, 후보가 만들어지기 전에
+     * 일어난다. 그래서 {@link AgentRunContext#candidateId()} 가 이 지점에서만 {@code null} 이다.
+     *
+     * <p>「모든 LLM 호출은 후보에 속한다」는 원래 전제가 틀렸다는 뜻이다. 가짜 {@code candidateId}
+     * 로 때우면 비용 장부와 MDC 가 오염되므로 전제를 고쳤다.
+     *
+     * <p>파이프라인 재시도 루프({@code CODE → VERIFY → REVIEW}) 밖이라 {@code attempt} 는
+     * 항상 1 이다 — {@code ANALYZE}·{@code PLAN} 과 같은 취급 (Q-6).
+     */
+    POLICY;
+
+    /** 이 호출 지점이 특정 후보에 속하는가. {@code POLICY} 만 저장소 단위다. */
+    public boolean requiresCandidate() {
+        return this != POLICY;
+    }
 }

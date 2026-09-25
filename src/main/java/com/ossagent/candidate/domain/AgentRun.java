@@ -95,11 +95,16 @@ public class AgentRun {
      *                같은 사이클의 여러 행이 같은 값을 갖는다. <b>전송 재시도 횟수를 더하지 않는다</b>
      */
     public static AgentRun start(Long candidateId, Stage stage, int attempt, Clock clock) {
-        if (candidateId == null) {
-            throw new IllegalArgumentException("candidateId 는 필수다");
-        }
         if (stage == null) {
             throw new IllegalArgumentException("stage 는 필수다");
+        }
+        // 🔴 POLICY 만 저장소 단위라 후보가 없다. 나머지는 여전히 필수다 —
+        //    전면 허용으로 풀면 「기록을 붙일 대상이 없는」 행이 조용히 늘어난다
+        if (stage.requiresCandidate() && candidateId == null) {
+            throw new IllegalArgumentException("candidateId 는 필수다: stage=" + stage);
+        }
+        if (!stage.requiresCandidate() && candidateId != null) {
+            throw new IllegalArgumentException("저장소 단위 기록에 candidateId 를 붙일 수 없다: stage=" + stage);
         }
         if (attempt < 1) {
             throw new IllegalArgumentException("attempt 는 1 부터다: " + attempt);
@@ -176,7 +181,23 @@ public class AgentRun {
         PLAN,
         CODE,
         VERIFY,
-        REVIEW
+        REVIEW,
+
+        /**
+         * 대상 저장소 기여 규약 판정 — 이슈 #7.
+         *
+         * <p>⚠️ <b>후보가 없는 유일한 단계</b>다. 저장소 단위로 일어나고 후보보다 먼저다.
+         * 그래서 이 행만 {@code candidate_id} 가 {@code NULL} 이다.
+         *
+         * <p>{@code CODE → VERIFY → REVIEW} 루프 밖이라 {@code attempt} 는 항상 1 이다 —
+         * {@code ANALYZE}·{@code PLAN} 과 같은 취급 (Q-6).
+         */
+        POLICY;
+
+        /** 이 단계가 특정 후보에 속하는가. */
+        public boolean requiresCandidate() {
+            return this != POLICY;
+        }
     }
 
     public enum RunStatus {

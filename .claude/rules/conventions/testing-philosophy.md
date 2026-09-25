@@ -19,9 +19,37 @@
 | Docker 샌드박스 | **대체한다** — 실행 결과만 주는 페이크 | 한 번에 수 분. CI 에서 Docker 를 가정할 수 없다 |
 | PostgreSQL | 통합 테스트에서 실제로 (Testcontainers) | 트랜잭션 경계·동시성은 실 DB 가 아니면 검증되지 않는다 |
 
-대체 수단(WireMock · 자체 페이크 · 녹화 응답)은 아직 미정이다 — [`open-questions.md`](../context/open-questions.md) Q-9.
-**정해지기 전까지는 자체 페이크 구현**을 쓴다. 능력 인터페이스가 domain 에 있으므로 페이크를 만들기 쉽다 —
-이것이 [`architecture.md`](./architecture.md) 규율 ③(능력은 domain 이 선언)의 실질적 이득이다.
+### 대역은 3계층이다 — Q-9 확정 (2026-09-25 · #4)
+
+「WireMock 이냐 페이크냐」가 아니다. **층마다 보는 것이 다르다.** 하나로 통일하려 들면 어느 한쪽이 못 본다.
+
+| 층 | 대역 | 무엇을 보나 | 어디에 |
+|---|---|---|---|
+| 능력 소비자 (UseCase) | **자체 페이크** | 계약이 실제로 대체 가능한가 · 업무 흐름 | 능력 인터페이스와 **같은 패키지**의 `src/test` |
+| 어댑터 매핑 | **`MockRestServiceServer`** | 요청 조립 · 응답 파싱 · 오류 변환 | 어댑터와 같은 패키지 |
+| **전송 계약** | **WireMock** | 읽기 타임아웃 · 리다이렉트 거부 · 연결 실패 | 어댑터와 같은 패키지 |
+
+능력 인터페이스가 domain 에 있어 페이크를 만들기 쉬운 것이
+[`architecture.md`](./architecture.md) 규율 ③(능력은 domain 이 선언)의 실질적 이득이다.
+이름은 **`Fake{능력이름}`** — `FakeRepositorySource` · `FakeIssueSource`.
+
+🔴 **전송 계약은 WireMock 이 아니면 검증되지 않는다.** `MockRestServiceServer` 는
+`ClientHttpRequestFactory` 를 통째로 갈아끼우므로 **JDK `HttpClient` 가 아예 돌지 않는다.**
+`read-timeout`·`Redirect.NEVER` 같은 설정이 「프로퍼티에 값이 있다」까지만 확인되고
+**실제로 걸리는지는 알 수 없는 상태**가 된다 — [`external-deps.md`](../context/external-deps.md) 가
+「기본값에 맡기면 무한 대기가 생긴다」를 규율로 둔 이유가 여기서 무력화된다.
+
+소켓이 필요한 것만 WireMock 으로 올린다. **클래스당 1~2건**이면 충분하고, 세 도구가
+서로 다른 것을 보므로 중복이 아니다.
+
+| 대상 | 적용 |
+|---|---|
+| GitHub API | 3계층 전부 |
+| LLM API | 3계층 전부 — #10 |
+| **Docker 샌드박스** | **페이크만.** HTTP 가 아니라 전송 계약 층이 성립하지 않는다 |
+
+❌ **녹화 응답(VCR)은 쓰지 않는다.** 녹화하려면 토큰으로 실 API 를 한 번은 타야 하고,
+녹음본에 토큰·PII 가 섞이면 **저장소에 그대로 커밋된다** — S-4.
 
 ## 테스트 피라미드
 
@@ -126,4 +154,7 @@ void push_대상이_Fork가_아니면_중단한다_S1() { ... }
 - 연속 3회 실패 시 수동 개입 유도
 - **한 건도 실행하지 않았으면 「통과」라고 하지 않는다** (`src/test` 부재·`gradlew` 부재는 사유를 표시하고 건너뜀)
 
-CI 는 아직 없다 — [`open-questions.md`](../context/open-questions.md) Q-10. **로컬 `./gradlew build` 가 유일한 게이트다.**
+**게이트는 CI 다** — Q-10 확정. `./gradlew build` 는 GitHub Actions 에서 돌고, git `pre-commit` 훅에는
+초 단위 검사(`secret-scan.sh` · `safety-boundary-check.sh`)만 남는다.
+Stop 훅 `impl-test-loop.sh` 는 **로컬 피드백** 담당으로 그대로 유지한다 —
+[`commit-convention.md`](./commit-convention.md).

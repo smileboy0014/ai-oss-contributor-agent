@@ -153,13 +153,24 @@ public class FakeIssueSource implements IssueSource { … }
 가짜 어댑터를 `@Component` 로 심는 방법은 쓰지 않는다 — 스캔 베이스가 `com.ossagent` 루트라
 모든 컨텍스트가 오염된다.
 
-🕳 **남는 구멍을 숨기지 않는다.** `@SpringBootTest` 를 **직접 쓰는 것**을 막는 장치는 없다.
-그런 테스트는 페이크도 `test` 프로필도 받지 않으므로, 우회는 「대역이 빠지는」 것이 아니라
-**「실물이 들어오는」** 형태로 나타난다. 정적 스캔은 `ClassPathScanningCandidateComponentProvider`
-가 메타 애노테이션을 따라가 **준수 클래스까지 적발**하는 함정이 있어 이번에는 넣지 않았다.
+### 장치 4 — 우회 차단 (#43 에서 닫았다)
 
-**`SchemaMigrationTest` 는 예외다.** 실 의존(PostgreSQL)을 일부러 쓰는 테스트라
-페이크 조립을 끼우지 않는다. 「실 DB 검증」과 「페이크 조립」을 한 애노테이션에 묶지 않는다.
+가드(장치 3)는 **자기가 띄운 컨텍스트만** 본다. `@SpringBootTest` 를 직접 쓰면 그 컨텍스트는
+`test` 프로필을 받지 못해 **배선이 정확히 반대**가 된다 — 실물이 올라오고 대역이 빠진다.
+우회의 증상이 「대역이 조용히 빠지는」 것이 아니라 **「실물이 들어오는」** 것이라는 뜻이다.
+
+`SpringBootTestUsageTest` 가 `@SpringBootTest` **직접 사용 0건**을 단언한다. **예외 목록은 없다.**
+
+⚠ **메타 애노테이션 함정** — `AnnotationTypeFilter` 는 기본적으로 메타 애노테이션을 따라가
+`@AgentIntegrationTest` 를 **제대로 쓴 클래스까지 전부 적발**한다.
+`considerMetaAnnotations = false` 로 **직접 선언만** 본다. 그 구분이 이 테스트의 전부라
+오탐 방지 케이스를 함께 고정해 뒀다.
+
+**`SchemaMigrationTest` 도 `@AgentIntegrationTest` 를 쓴다.** 한때 예외였다 —
+그 애노테이션이 페이크 조립을 `@Import` 하던 시절, 「실 의존 검증에 페이크를 묶지 말자」는
+이유였다. 지금은 프로필만 켜므로 묶일 것이 없고, 오히려 raw 사용이 **실제 GitHub 어댑터를
+그 컨텍스트에 올리고 있었다.** 스키마 검증에 그것이 필요할 이유가 없다.
+DB 는 차단 대상이 아니므로 Testcontainers 는 그대로다.
 
 ## 픽스처 규약 — #4 (2026-09-25)
 

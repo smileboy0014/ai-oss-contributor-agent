@@ -2,6 +2,7 @@ package com.ossagent;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ossagent.support.testing.AgentIntegrationTest;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.util.ArrayList;
@@ -9,7 +10,6 @@ import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -31,8 +31,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 말하지 않는 것이 이 저장소의 규율이다 — {@code .claude/rules/conventions/testing-philosophy.md}.
  *
  * <p>Docker 는 이 프로젝트의 전제다. 로컬 DB(`docker compose`)도, 샌드박스(S-3)도 Docker 를 쓴다.
+ *
+ * <p><b>실 DB 를 쓰지만 진입점은 다른 테스트와 같다</b>({@code @AgentIntegrationTest}) — #43.
+ * #4 초기에는 그 애노테이션이 페이크 조립을 {@code @Import} 하는 구조여서 「실 의존 검증에
+ * 페이크를 묶지 말자」는 이유로 raw {@code @SpringBootTest} 를 썼다. 지금은 프로필만 켜므로
+ * 묶일 것이 없고, 오히려 raw 사용이 <b>실제 GitHub 어댑터를 이 컨텍스트에 올리고</b> 있었다.
+ * 스키마 검증에 그것이 필요할 이유가 없다.
+ *
+ * <p>DB 는 차단 대상이 아니므로 Testcontainers 는 그대로다 — 막는 것은 <b>샌드박스</b>
+ * 컨테이너이지 인프라 컨테이너가 아니다.
  */
-@SpringBootTest
+@AgentIntegrationTest
 @Testcontainers
 class SchemaMigrationTest {
 

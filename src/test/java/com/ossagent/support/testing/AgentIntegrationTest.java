@@ -33,12 +33,9 @@ import org.springframework.test.context.ActiveProfiles;
  * {@code ExternalAdapterIsolationTest} 가 한다 — 어떤 경로로 올라왔든 컨텍스트에 실어댑터
  * 빈이 있으면 잡는다. 이 애노테이션은 <b>편의</b>이지 게이트가 아니다.
  *
- * <p>🕳 <b>열려 있는 구멍 — 숨기지 않는다.</b> {@code @SpringBootTest} 를 직접 쓰는 것을
- * 막는 장치는 <b>없다.</b> 그런 테스트는 {@code test} 프로필을 받지 않으므로
- * <b>실물이 올라오고 대역이 빠진다.</b> 즉 우회는 「대역이 빠지는」 조용한 형태가 아니라
- * 「실물이 들어오는」 요란한 형태로 나타나고, 그것은 가드가 잡는다.
- * 정적 스캔으로 사용 자체를 막는 방안은 {@code ClassPathScanningCandidateComponentProvider}
- * 가 메타 애노테이션을 따라가 <b>준수 클래스까지 전부 적발</b>하는 함정이 있어 넣지 않았다.
+ * <p>🔒 <b>우회는 막혀 있다</b>(#43). {@code @SpringBootTest} 를 직접 쓰면 {@code test}
+ * 프로필을 받지 못해 <b>실물이 올라오고 대역이 빠진다</b> — 배선이 정확히 반대가 된다.
+ * {@code SpringBootTestUsageTest} 가 직접 사용 <b>0건</b>을 단언하며, <b>예외 목록은 없다.</b>
  *
  * <p>DB 는 차단 대상이 아니다 — PostgreSQL 은 Testcontainers 로 <b>실제로</b> 띄운다(Q-2b).
  *

@@ -284,7 +284,7 @@ public class ContributionCandidate {
      * 그것은 {@code PullRequest} 생성 경로와 같은 곳에 있어야 한다 — <b>#23 이 만든다.</b>
      * 그때 이 메서드가 {@code PullRequest} 를 인자로 받는 형태로 바뀐다.
      *
-     * <p>draft 고정 자체는 {@code PullRequestStatus} 단일값 + DB {@code CHECK} 가 이미
+     * <p>draft 고정 자체는 {@link PullRequest.Status} 단일값 + DB {@code CHECK} 가 이미
      * 보장하므로 이 PR 에서 비는 것은 「PR 행 존재 여부」 하나다.
      */
     public StatusTransition markPrCreated(Clock clock) {
@@ -324,15 +324,6 @@ public class ContributionCandidate {
     }
 
     /**
-     * 🔴 <b>넘겨받은 상한을 검증한다</b> — 불변식 ⑧ · S-6.
-     *
-     * <p>도메인이 설정을 <b>읽는</b> 것이 아니라 호출자가 넘긴 값을 <b>검증</b>하는 것이므로
-     * 규율 ①(domain 에 기술 없음)과 충돌하지 않는다.
-     *
-     * <p>⚠️ 위쪽 경계가 본체다. {@code maxAttempts = 0} 은 무한이 아니라 최강 제약이고
-     * (즉시 {@code FAILED}), 정작 위험한 것은 {@code 10000} 처럼 <b>상한을 사실상 없애는 값</b>이다.
-     */
-    /**
      * 🔴 <b>사람이 고르지 않았으면 구현 단계로 못 간다</b> — 불변식 ② · S-6.
      *
      * <p>지금은 전이표가 이미 막는다({@code SELECTED} 에 닿는 유일한 길이
@@ -355,6 +346,15 @@ public class ContributionCandidate {
         }
     }
 
+    /**
+     * 🔴 <b>넘겨받은 상한을 검증한다</b> — 불변식 ⑧ · S-6.
+     *
+     * <p>도메인이 설정을 <b>읽는</b> 것이 아니라 호출자가 넘긴 값을 <b>검증</b>하는 것이므로
+     * 규율 ①(domain 에 기술 없음)과 충돌하지 않는다.
+     *
+     * <p>⚠️ 위쪽 경계가 본체다. {@code maxAttempts = 0} 은 무한이 아니라 최강 제약이고
+     * (즉시 {@code FAILED}), 정작 위험한 것은 {@code 10000} 처럼 <b>상한을 사실상 없애는 값</b>이다.
+     */
     private void guardAttemptBudget(int maxAttempts) {
         if (maxAttempts < 1 || maxAttempts > MAX_ALLOWED_ATTEMPTS) {
             throw new IllegalArgumentException(

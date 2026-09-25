@@ -11,6 +11,7 @@ import com.ossagent.agent.adapter.out.llm.TokenRedactingPromptScrubber;
 import com.ossagent.agent.domain.AgentRunRecorder;
 import com.ossagent.agent.domain.LanguageModel;
 import com.ossagent.agent.domain.PromptScrubber;
+import com.ossagent.support.ExternalAdapter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -20,6 +21,11 @@ import org.springframework.context.annotation.Configuration;
 /**
  * LLM 조립. 비즈니스 코드를 두지 않는다.
  *
+ * <p>🔴 <b>{@code @ExternalAdapter} 를 클래스에 붙였다.</b> 이 조립이 실제 네트워크를 타는
+ * 클라이언트를 만들기 때문이다 — {@code test} 프로필에서 통째로 빠지고, 대신
+ * {@code FakeLanguageModel}({@code @FakeAdapter})이 뜬다. 어댑터가 아니라 {@code @Configuration}
+ * 에 붙는 것이 맞다 — {@code ExternalAdapter} javadoc 이 그 경우를 명시한다.
+ *
  * <p>🔴 <b>{@link LanguageModel} 빈은 {@link RecordingLanguageModel} 하나뿐이다.</b>
  * 속 구현({@code AnthropicLanguageModel} · {@code DisabledLanguageModel})을 빈으로 내보내지
  * 않으므로, 소비자가 주입받을 수 있는 것은 <b>항상 기록을 타는 쪽</b>이다.
@@ -27,6 +33,7 @@ import org.springframework.context.annotation.Configuration;
  * 규약이 아니라 구조로 만드는 지점이다.
  */
 @Configuration
+@ExternalAdapter
 @EnableConfigurationProperties(AnthropicProperties.class)
 public class LanguageModelConfig {
 

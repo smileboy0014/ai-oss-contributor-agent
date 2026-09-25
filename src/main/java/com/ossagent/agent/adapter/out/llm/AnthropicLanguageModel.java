@@ -147,7 +147,7 @@ public class AnthropicLanguageModel implements LanguageModel {
     private long cappedMaxTokens(LlmRequest request) {
         int capped = Math.min(request.maxOutputTokens(), properties.maxOutputTokens());
         if (capped < request.maxOutputTokens()) {
-            log.warn("출력 예산을 설정 상한으로 깎았다 callSite=요청={} 상한={}",
+            log.warn("출력 예산을 설정 상한으로 깎았다 requested={} cap={}",
                     request.maxOutputTokens(), properties.maxOutputTokens());
         }
         return capped;

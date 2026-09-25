@@ -1,6 +1,7 @@
 package com.ossagent.candidate.domain;
 
 import com.ossagent.support.ExternalText;
+import com.ossagent.support.secret.TokenRedactor;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -146,7 +147,10 @@ public class AgentRun {
         if ((inputTokens != null && inputTokens < 0) || (outputTokens != null && outputTokens < 0)) {
             throw new IllegalArgumentException("토큰 수는 음수일 수 없다");
         }
-        this.errorMessage = reason;
+        // 🔴 마지막 그물이다. 호출자가 「우리 어휘만 넣는다」는 규약을 지키는 것이 1차 방어이나,
+        // 규약은 언젠가 깨진다 — #17 샌드박스 단계가 예외 메시지를 그대로 넘기면 요청 URL 과
+        // 토큰이 이 컬럼에 적재된다. 구조로 막는 비용이 한 줄이다 (S-4)
+        this.errorMessage = TokenRedactor.redact(reason);
         this.inputTokens = inputTokens;
         this.outputTokens = outputTokens;
         this.status = RunStatus.FAILED;

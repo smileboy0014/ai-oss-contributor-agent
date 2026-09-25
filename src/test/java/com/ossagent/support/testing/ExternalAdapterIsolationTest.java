@@ -2,6 +2,7 @@ package com.ossagent.support.testing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ossagent.agent.domain.LanguageModel;
 import com.ossagent.issue.domain.IssueSource;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.support.testing.probe.adapter.out.github.ProbePackageAdapter;
@@ -84,6 +85,10 @@ class ExternalAdapterIsolationTest {
         assertThat(context.getBean(RepositorySource.class).getClass().getName())
                 .as("RepositorySource 가 페이크가 아니다 — FakeExternalDependencies 를 확인하라")
                 .startsWith("com.ossagent.repository.domain.Fake");
+
+        assertThat(context.getBean(LanguageModel.class).getClass().getName())
+                .as("LanguageModel 이 페이크가 아니다 — 실물이 뜨면 테스트가 LLM 을 실제로 호출하고 돈을 태운다")
+                .startsWith("com.ossagent.agent.domain.Fake");
     }
 
     /**

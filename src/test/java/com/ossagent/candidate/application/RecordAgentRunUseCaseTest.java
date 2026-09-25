@@ -11,13 +11,12 @@ import com.ossagent.agent.domain.LlmResponse;
 import com.ossagent.agent.domain.LlmUsage;
 import com.ossagent.candidate.adapter.out.persistence.AgentRunRepository;
 import com.ossagent.candidate.domain.AgentRun;
+import com.ossagent.support.testing.AgentIntegrationTest;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
@@ -27,8 +26,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * 지점</b>이다. 샌드박스는 최대 30분이고 LLM 도 분 단위가 될 수 있다. 기록을 한 트랜잭션으로
  * 감싸면 그 시간 내내 DB 커넥션이 잡힌다.
  */
-@SpringBootTest
-@TestPropertySource(properties = "agent.llm.api-key=")
+@AgentIntegrationTest
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class RecordAgentRunUseCaseTest {
 

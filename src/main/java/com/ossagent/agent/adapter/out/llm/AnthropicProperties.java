@@ -39,6 +39,8 @@ public record AnthropicProperties(
     private static final int DEFAULT_MAX_OUTPUT_TOKENS = 16000;
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(120);
     private static final int DEFAULT_MAX_RETRIES = 2;
+    /** 파이프라인 상한(3)과 곱해진다 — 5 면 후보 1건당 18회다. */
+    private static final int MAX_ALLOWED_RETRIES = 5;
     private static final Duration DEFAULT_RETRY_BACKOFF = Duration.ofMillis(500);
 
     public AnthropicProperties {
@@ -48,8 +50,12 @@ public record AnthropicProperties(
         maxOutputTokens = maxOutputTokens <= 0 ? DEFAULT_MAX_OUTPUT_TOKENS : maxOutputTokens;
         timeout = timeout == null ? DEFAULT_TIMEOUT : timeout;
         retryBackoff = retryBackoff == null ? DEFAULT_RETRY_BACKOFF : retryBackoff;
-        if (maxRetries < 0) {
-            throw new IllegalArgumentException("agent.llm.max-retries 는 음수일 수 없습니다: " + maxRetries);
+        if (maxRetries < 0 || maxRetries > MAX_ALLOWED_RETRIES) {
+            // 상한을 두는 이유 — 파이프라인 재시도(3)와 곱해진다. 전송 5 면 후보 1건당
+            // 대외 호출 18회다. 「조용히 돈을 태우는」 경로를 설정으로도 만들 수 없게 한다 (S-6)
+            throw new IllegalArgumentException(
+                    "agent.llm.max-retries 는 0~%d 이어야 합니다: %d"
+                            .formatted(MAX_ALLOWED_RETRIES, maxRetries));
         }
         if (timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("agent.llm.timeout 은 0 보다 커야 합니다");

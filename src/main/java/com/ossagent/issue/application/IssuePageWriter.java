@@ -33,24 +33,29 @@ public class IssuePageWriter {
     }
 
     /**
-     * 한 페이지를 저장하고 <b>본 것 중 가장 늦은 {@code updatedAt}</b> 을 돌려준다.
+     * 한 페이지를 저장한다.
      *
-     * <p>돌려준 값이 커서의 다음 워터마크가 된다. 저장이 끝난 뒤에 커서를 전진시키기 위해
-     * 이 메서드가 값을 <b>반환</b>한다 — 여기서 직접 커서를 건드리면 다른 애그리거트를
-     * 같은 트랜잭션에 끌어들이게 된다.
+     * <p>⚠ <b>커서를 여기서 건드리지 않는다.</b> 다른 애그리거트를 같은 트랜잭션에
+     * 끌어들이게 되고, 무엇보다 커서 전진은 「읽은 것 전체」 기준이라
+     * 「저장한 것」만 아는 이 클래스가 정할 수 없다 — PR 은 저장하지 않지만
+     * 같은 {@code since} 순서를 차지한다.
      *
-     * @return 이 페이지의 최대 {@code updatedAt}. 저장할 이슈가 없었으면 {@code null}
+     * <p>⚠ <b>알려진 공백 — 동시 스캔.</b> 조회 후 insert 라 같은 저장소를 두 스캔이
+     * 동시에 돌면 경합이 난다. 중복 행은 {@code uk_issue_repository_number} 가 막지만
+     * {@code DataIntegrityViolationException} 으로 <b>페이지 전체가 롤백</b>되고 스캔이
+     * 예외로 끝난다. 커서가 전진하지 않아 <b>유실은 없고</b> 다음 스캔이 다시 읽는다.
+     * 지금은 스케줄러가 없어 동시 실행 경로 자체가 없다 — 스케줄러를 붙이는 <b>#14 가
+     * 저장소별 동시 실행을 막거나</b> 행 단위 재시도를 넣어야 한다.
+     *
+     * @return 저장(신규+갱신)한 이슈 수
      */
     @Transactional
-    public Instant save(Long repositoryId, String owner, String name, List<IssueSnapshot> snapshots) {
+    public int save(Long repositoryId, String owner, String name, List<IssueSnapshot> snapshots) {
         Instant now = clock.instant();
-        Instant watermark = null;
-
         for (IssueSnapshot snapshot : snapshots) {
             upsert(repositoryId, owner, name, snapshot, now);
-            watermark = later(watermark, snapshot.updatedAt());
         }
-        return watermark;
+        return snapshots.size();
     }
 
     private void upsert(Long repositoryId, String owner, String name, IssueSnapshot snapshot,
@@ -59,12 +64,5 @@ public class IssuePageWriter {
                 .ifPresentOrElse(
                         existing -> existing.updateFrom(snapshot, now),
                         () -> issues.save(Issue.fromSnapshot(repositoryId, owner, name, snapshot, now)));
-    }
-
-    private static Instant later(Instant current, Instant candidate) {
-        if (candidate == null) {
-            return current;
-        }
-        return current == null || candidate.isAfter(current) ? candidate : current;
     }
 }

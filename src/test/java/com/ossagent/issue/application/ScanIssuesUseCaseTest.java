@@ -213,6 +213,61 @@ class ScanIssuesUseCaseTest {
                 .isEqualTo(T2);
     }
 
+    @Test
+    void PR_만_있는_페이지에서도_커서가_전진한다() {
+        // 🔴 워터마크를 「저장한 것」에서만 뽑으면 이 페이지의 워터마크가 null 이라
+        //    커서가 정체하고, 다음 스캔이 같은 페이지를 영원히 다시 읽어
+        //    그 뒤 이슈에 도달하지 못한다. PR 은 저장하지 않지만 같은 since 순서를 차지한다
+        issueSource.given(new IssuePage(
+                List.of(pullRequest(1, T1), pullRequest(2, T2)), null, false, false));
+
+        ScanResult result = scanIssues.scan(repositoryId, coordinates);
+
+        assertThat(result.savedCount()).isZero();
+        assertThat(issues.countByRepositoryId(repositoryId)).isZero();
+        assertThat(reloadRepository().getIssueCursorUpdatedAt())
+                .as("읽은 것 전체 기준으로 전진해야 다음 스캔이 그 뒤로 넘어간다")
+                .isEqualTo(T2);
+    }
+
+    @Test
+    void 커서가_전진하면_ETag_를_버린다() {
+        // since 가 바뀌면 URL 이 달라져 이전 ETag 는 다른 리소스의 것이다
+        issueSource.given(new IssuePage(List.of(issue(1, T1)), "etag-for-null-since", false, false));
+
+        scanIssues.scan(repositoryId, coordinates);
+
+        assertThat(reloadRepository().getIssueCursorUpdatedAt()).isEqualTo(T1);
+        assertThat(reloadRepository().getIssueCursorEtag())
+                .as("커서가 null→T1 로 전진했으므로 since=null 로 받은 ETag 는 무효다")
+                .isNull();
+    }
+
+    @Test
+    void 커서가_그대로면_ETag_를_저장하고_지연에도_지키지_않는다() {
+        // 1) 커서를 T1 까지 올린다
+        issueSource.givenIssues(issue(1, T1));
+        scanIssues.scan(repositoryId, coordinates);
+
+        // 2) 경계 이슈만 재수집 — 커서가 그대로라 ETag 가 저장된다
+        issueSource.given(new IssuePage(List.of(issue(1, T1)), "etag-for-T1", false, false));
+        scanIssues.scan(repositoryId, coordinates);
+        assertThat(reloadRepository().getIssueCursorEtag())
+                .as("커서가 안 움직였으면 그 ETag 는 여전히 유효하다")
+                .isEqualTo("etag-for-T1");
+
+        // 3) 첫 호출부터 리밋 — 커서가 전진하지 않으므로 ETag 를 지키어야 한다
+        issueSource.thenFailWith(rateLimit(GitHubRateLimitException.Scope.PRIMARY, T3, null));
+        ScanResult result = scanIssues.scan(repositoryId, coordinates);
+
+        assertThat(result.isDelayed()).isTrue();
+        assertThat(reloadRepository().getIssueCursorEtag())
+                .as("""
+                        지연마다 ETag 를 지우면 조건부 요청 수단이 사라져
+                        다음 스캔이 304 대신 200 을 받고 리밋을 더 태운다 — 의도와 정반대다.""")
+                .isEqualTo("etag-for-T1");
+    }
+
     // ── 헬퍼 ────────────────────────────────────────────────
 
     private OssRepository reloadRepository() {

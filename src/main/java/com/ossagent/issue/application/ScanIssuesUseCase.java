@@ -84,24 +84,42 @@ public class ScanIssuesUseCase {
             try {
                 page = issueSource.fetchOpenIssues(query);
             } catch (GitHubRateLimitException e) {
-                return delay(repositoryId, coordinates, cursor, watermark, savedCount, pagesRead, e);
+                return delay(repositoryId, coordinates, cursor, watermark,
+                        firstPageEtag != null ? firstPageEtag : cursor.etag(),
+                        savedCount, pagesRead, e);
             }
             pagesRead++;
 
             if (page.unchanged()) {
-                // 304 — 커서도 ETag 도 그대로 둔다. 짝이 유지된다
-                log.info("이슈 스캔 변경 없음 repo={} cursor={}", coordinates.fullName(), cursor.updatedSince());
-                return ScanResult.notModified();
+                if (pagesRead == 1) {
+                    // 304 — 커서도 ETag 도 그대로 둔다. 짝이 유지된다
+                    log.info("이슈 스캔 변경 없음 repo={} cursor={}",
+                            coordinates.fullName(), cursor.updatedSince());
+                    return ScanResult.notModified();
+                }
+                // 2페이지 이후의 304 는 우리 경로에서 나올 수 없다 — nextPage() 가 ETag 를
+                // 싣지 않으므로 조건부 요청이 아니다. 그래도 왔다면 「더 읽을 것이 없다」로
+                // 다루고 지금까지 저장한 것을 지킨다. 여기서 notModified 를 돌려주면
+                // 이미 저장한 페이지들이 결과에서 사라지고 커서도 전진하지 않는다
+                log.warn("이슈 스캔 예상치 못한 304 repo={} page={} — 저장분을 지키고 종료한다",
+                        coordinates.fullName(), pagesRead);
+                commit(repositoryId, cursor, watermark, firstPageEtag);
+                // 끝까지 읽은 것이 아니므로 hasMore 는 true 다 — 「다 읽었다」로 보고하지 않는다
+                return ScanResult.completed(savedCount, pagesRead, true);
             }
             if (pagesRead == 1) {
                 firstPageEtag = page.etag();   // ETag 는 page 1 의 것만 커서에 싣는다
             }
 
             List<IssueSnapshot> snapshots = page.issuesOnly();   // PR 을 이슈로 저장하지 않는다
-            Instant pageWatermark =
-                    pageWriter.save(repositoryId, coordinates.owner(), coordinates.name(), snapshots);
-            savedCount += snapshots.size();
-            watermark = later(watermark, pageWatermark);
+            savedCount += pageWriter.save(
+                    repositoryId, coordinates.owner(), coordinates.name(), snapshots);
+
+            // 🔴 워터마크는 「저장한 것」이 아니라 「읽은 것 전체」에서 뽑는다 — PR 포함.
+            //    PR 은 저장하지 않지만 같은 since 순서를 차지한다. 저장분에서만 뽑으면
+            //    한 페이지가 전부 PR 일 때 워터마크가 null 이라 커서가 정체하고,
+            //    다음 스캔이 같은 페이지를 영원히 다시 읽어 그 뒤 이슈에 도달하지 못한다
+            watermark = later(watermark, maxUpdatedAt(page.issues()));
 
             if (!page.hasNext()) {
                 commit(repositoryId, cursor, watermark, firstPageEtag);
@@ -126,9 +144,12 @@ public class ScanIssuesUseCase {
      * 실패로 처리하면 후보가 코드 문제 없이 죽는다.
      */
     private ScanResult delay(Long repositoryId, RepositoryCoordinates coordinates,
-            IssueScanCursor cursor, Instant watermark, int savedCount, int pagesRead,
+            IssueScanCursor cursor, Instant watermark, String etag, int savedCount, int pagesRead,
             GitHubRateLimitException e) {
-        commit(repositoryId, cursor, watermark, null);
+        // 🔴 ETag 를 살려서 넘긴다. null 로 지우면 리밋에 걸릴 때마다 조건부 요청 수단이
+        //    사라져 다음 스캔이 304 대신 200 을 받고 리밋을 더 태운다 — 의도와 정반대다.
+        //    (커서가 전진했으면 advancedTo 가 알아서 버린다)
+        commit(repositoryId, cursor, watermark, etag);
 
         Instant now = clock.instant();
         Instant resumeAt = e.earliestRetryAt(now);
@@ -158,6 +179,15 @@ public class ScanIssuesUseCase {
     private IssueScanCursor loadCursor(Long repositoryId) {
         return IssueScanCursor.of(
                 cursors.cursorUpdatedAt(repositoryId), cursors.cursorEtag(repositoryId));
+    }
+
+    /** 페이지에서 읽은 <b>모든</b> 아이템의 최대 {@code updatedAt} — PR 포함. */
+    private static Instant maxUpdatedAt(List<IssueSnapshot> all) {
+        Instant max = null;
+        for (IssueSnapshot snapshot : all) {
+            max = later(max, snapshot.updatedAt());
+        }
+        return max;
     }
 
     private static Instant later(Instant current, Instant candidate) {

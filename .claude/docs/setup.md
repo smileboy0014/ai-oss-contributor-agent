@@ -58,7 +58,7 @@ push 직전 owner 어설션이 유일한 방어**다 — [S-1](../rules/context/
 
 | 필요 | 확인 |
 |---|---|
-| JDK 21 | `java -version` — **21 이어야 한다. 더 높아도 안 된다** (아래) |
+| JDK 21 | `java -version`. **기본 JDK 가 더 높아도 된다** — Gradle 이 알아서 21 을 고른다(아래) |
 | Gradle | **설치 불필요** — `./gradlew` 래퍼를 쓴다 |
 | Docker | `docker --version` (로컬 DB · 향후 샌드박스) |
 | `gh` CLI | `gh auth status` (PR·이슈 스킬이 의존) |
@@ -69,10 +69,14 @@ push 직전 owner 어설션이 유일한 방어**다 — [S-1](../rules/context/
 
 ⚠️ `mvn` 은 쓰지 않는다. 2026-09-18 에 Maven → Gradle 로 전환했다.
 
-#### ⚠️ JDK 가 21 보다 높으면 Gradle 이 원인 불명 메시지로 죽는다
+#### 🟢 데몬 JVM 이 고정돼 있다 — `JAVA_HOME` 을 만질 필요 없다
 
-`build.gradle.kts` 의 toolchain 21 은 **컴파일 대상**만 정한다. **Gradle 자신은 기본 JVM 위에서 돈다.**
-Gradle 8.14.3 은 JDK 25 를 지원하지 않는다.
+`gradle/gradle-daemon-jvm.properties` 의 `toolchainVersion=21` 이 **Gradle 데몬이 돌 JVM** 을 정한다.
+기본 JDK 가 25 여도 `./gradlew build` 가 그냥 돈다.
+
+**왜 이 파일이 필요한가** — `build.gradle.kts` 의 toolchain 21 은 **컴파일 대상**만 정하고,
+**Gradle 자신은 기본 JVM 위에서 돈다.** 그래서 이 파일이 없으면 Gradle 8.14.3 이 JDK 25 에서
+아래처럼 죽었다. 버전 번호만 덜렁 나와 원인이 보이지 않는 자리다.
 
 ```
 FAILURE: Build failed with an exception.
@@ -80,15 +84,11 @@ FAILURE: Build failed with an exception.
 25.0.4.1
 ```
 
-버전 번호만 덜렁 나와서 원인이 보이지 않는다. `java -version` 은 「JDK 있음」으로 통과하므로
-위 표만 보고는 걸러지지 않는다 — 2026-09-25 에 실제로 막혔다.
+2026-09-25 에 실제로 막혔고(#38 작업 중), #37 이 이 파일을 추가해 해결했다.
+같은 날 `JAVA_HOME` 오버라이드 없이 `exit=0` 으로 재확인했다.
 
-```bash
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # macOS
-./gradlew build
-```
-
-CI 는 `actions/setup-java` 로 21 을 고정하므로 이 문제가 없다 — **로컬만의 함정**이다.
+⚠️ **이 파일을 지우면 증상이 돌아온다.** `java -version` 은 「JDK 있음」으로 통과하므로
+위 표만 보고는 걸러지지 않는다.
 
 ### 커밋 훅 등록 — 클론 후 1회, 필수
 

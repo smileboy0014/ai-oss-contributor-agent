@@ -200,9 +200,14 @@ static final String TOKEN = "ghp_" + "x".repeat(36);
 
 | # | 장치 | 무엇을 하는가 |
 |---|---|---|
-| 1 | `@AgentIntegrationTest` **합성 애노테이션** | 통합 테스트의 표준 진입점. `@SpringBootTest` + `@ActiveProfiles("test")` + 페이크 조립 |
-| 2 | **`@Profile("!test")`** | 실제 대외 어댑터가 테스트 프로필에서 **스스로 빠진다** |
+| 1 | `@AgentIntegrationTest` **합성 애노테이션** | 통합 테스트의 표준 진입점. `test` 프로필을 켠다 |
+| 2 | **`@ExternalAdapter` / `@FakeAdapter`** | 실물은 빠지고 대역은 뜬다. **대역은 자동 등록** |
 | 3 | **컨텍스트 가드** | 그래도 올라온 것이 있으면 **잡는다** |
+
+⚠ 초안은 어댑터에 `@Profile("!test")` 를 직접 달고 페이크를 `FakeExternalDependencies` 에
+**손으로 등록**하는 방식이었다. 기억할 것이 둘이고 등록을 깜빡하면 배선 오류가 났다.
+**애노테이션 한 쌍으로 바꾸고 중앙 등록 지점을 없앴다** — 깜빡할 자리를 제거하는 편이
+「깜빡하면 잡는다」보다 낫다.
 
 **판정 규칙은 두 신호다** — 초안의 「패키지에 `github` 세그먼트가 있는가」는 `GitHubErrorTranslator`
 (순수 변환)·`GitHubProperties`(설정값)까지 오탐했다.
@@ -259,10 +264,17 @@ Testcontainers 는 Java API 를 쓰지 프로세스를 띄우지 않는다. 의�
 
 ⚠ **`src/main` 을 건드린다** (초안은 「한 줄도 바꾸지 않는다」였다 — 철회).
 #35 머지로 실제 GitHub 어댑터가 생겨, 배제하지 않으면 가드가 RED 다. 추가하는 것은
-**`@Profile("!test")` 3곳뿐**이고 동작은 바뀌지 않는다(운영 프로필에서는 그대로).
+**`@ExternalAdapter` 3곳과 애노테이션 타입 1개**뿐이고 운영 동작은 바뀌지 않는다.
 
-⚠ **이후 모든 대외 어댑터가 같은 애노테이션을 달아야 한다** — 진행 중인 #10(LLM) 포함.
-빠뜨리면 가드가 잡으므로 조용히 새지는 않는다.
+⚠ **이후 모든 대외 어댑터가 `@ExternalAdapter` 를, 그 대역이 `@FakeAdapter` 를 달아야 한다** —
+진행 중인 #10(LLM) 포함. 빠뜨리면 가드가 잡으므로 조용히 새지는 않는다.
+
+**빌드 JVM 고정** — `gradle/gradle-daemon-jvm.properties` (`toolchainVersion=21`).
+Gradle 8.14.3 은 Java 25 를 **데몬 JVM 으로 받지 않는데**, `build.gradle.kts` 의 toolchain 은
+컴파일·테스트만 정하고 데몬을 정하지 않아 기본 JVM 이 25 면 빌드가 죽었다
+(`* What went wrong: 25.0.4.1` — 원인을 전혀 가리키지 않는 메시지다).
+머신별 절대경로(`org.gradle.java.home`)가 아니라 **버전 기준**이라 커밋할 수 있고,
+`JAVA_HOME` 없이도 로컬 설치를 찾아 쓴다. CI(#27)에서도 같은 파일이 러너 JVM 을 고정한다.
 
 ---
 
@@ -406,4 +418,5 @@ Docker 가 필요하다. 기존 조건이고 이 PR 이 바꾸지 않는다.
 | 2026-09-25 | smileboy0014 | 초안 생성 |
 | 2026-09-25 | smileboy0014 | 격리 검토 반영 — git·컨테이너 제어 계층 대역 추가(S-1·S-3) · S-4 「런타임 조립」 철회 · 자기 검증을 양성 대조로 재설계 · 장치 3 기각 · `SchemaMigrationTest` 이관 철회 · Q-3·Q-4·Q-6 인접 기록 · S-3 정적 검사 범위 확대 |
 | 2026-09-25 | smileboy0014 | **병행 작업과 역할 분담** — Q-9 본문(3계층)은 `docs/_open-questions-decisions` 가 닫고, 이 PR 은 그 본문이 「#4 에서 마무리한다」고 남긴 **보장 장치**를 담당한다. WireMock 기각 철회(`MockRestServiceServer` 가 `ClientHttpRequestFactory` 를 갈아끼워 전송 설정을 검증할 수 없다) · `open-questions.md` 수정 대상에서 제외 |
+| 2026-09-25 | smileboy0014 | **배선 단순화 + 빌드 JVM 고정** — ① 어댑터의 `@Profile("!test")` + 중앙 페이크 등록을 **`@ExternalAdapter` / `@FakeAdapter` 한 쌍**으로 교체하고 `FakeExternalDependencies` 를 삭제했다. 대역이 컴포넌트 스캔으로 자동 등록되므로 「등록을 깜빡해서 빈이 없다」는 경로가 사라진다 ② `gradle/gradle-daemon-jvm.properties` 로 데몬 JVM 을 21 로 고정 — 기본 JVM 이 Java 25 면 Gradle 8.14.3 이 거부하던 문제 |
 | 2026-09-25 | smileboy0014 | **#35·#36 머지 후 재작업** (safety-reviewer 지적 반영). 실제 어댑터가 생겨 가드가 RED 였다 — ① `@Profile("!test")` 배제 장치 추가(`src/main` 3곳) + #6 의 페이크를 조립 지점에 등록 ② 판정 규칙을 **두 신호**(패키지 + 네트워크 클라이언트 보유)로 교체 — 기존 규칙은 순수 변환기·설정값을 오탐하고 패키지 개명으로 무력화됐다 ③ 존재하지 않는 `SpringBootTestUsageTest` 를 문서에서 지우고 **열린 구멍으로 명시** ④ 양성 대조의 과장된 이름·주장 정정 + 미끼 물림 단언 추가 ⑤ `type == null` 무음 스킵 제거 ⑥ 「컨테이너를 띄우지 않는다」를 **샌드박스/인프라 구분**으로 정정(Testcontainers 는 실제로 띄운다) ⑦ 훅 메시지에 우리 스크립트 예외·사각지대 명시 |

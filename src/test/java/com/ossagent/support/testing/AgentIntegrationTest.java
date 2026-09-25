@@ -33,12 +33,19 @@ import org.springframework.test.context.ActiveProfiles;
  * {@code ExternalAdapterIsolationTest} 가 한다 — 어떤 경로로 올라왔든 컨텍스트에 실어댑터
  * 빈이 있으면 잡는다. 이 애노테이션은 <b>편의</b>이지 게이트가 아니다.
  *
- * <p>🕳 <b>열려 있는 구멍 — 숨기지 않는다.</b> {@code @SpringBootTest} 를 직접 쓰는 것을
- * 막는 장치는 <b>없다.</b> 그런 테스트는 {@code test} 프로필을 받지 않으므로
- * <b>실물이 올라오고 대역이 빠진다.</b> 즉 우회는 「대역이 빠지는」 조용한 형태가 아니라
- * 「실물이 들어오는」 요란한 형태로 나타나고, 그것은 가드가 잡는다.
- * 정적 스캔으로 사용 자체를 막는 방안은 {@code ClassPathScanningCandidateComponentProvider}
- * 가 메타 애노테이션을 따라가 <b>준수 클래스까지 전부 적발</b>하는 함정이 있어 넣지 않았다.
+ * <p>🔒 <b>지키는 불변식은 「프로필」이다</b>(#43). 컨텍스트를 어떤 경로로 띄우든
+ * {@code test} 프로필이 없으면 <b>실물이 올라오고 대역이 빠진다</b> — 배선이 정확히 반대가 된다.
+ * {@code IntegrationTestProfileTest} 가 <b>컨텍스트를 띄우는 모든 클래스에 {@code test} 프로필이
+ * 있는지</b>를 단언하며, 예외 목록은 없다.
+ *
+ * <p>그래서 <b>자기만의 합성 애노테이션을 만드는 것 자체는 막지 않는다.</b> 다만 만들 때
+ * {@code @ActiveProfiles("test")} 를 반드시 포함시켜야 한다 — 빠뜨리면 잡힌다.
+ *
+ * <p>🕳 <b>남는 구멍은 숨기지 않는다.</b> 검사기는 <b>구체·독립 클래스</b>만 훑으므로
+ * 비정적 내부 클래스({@code @Nested})에 <b>직접</b> 컨텍스트 애노테이션을 달면 빠진다
+ * (바깥 클래스를 통하는 일반적인 경우는 커버된다).
+ * {@code new AnnotationConfigApplicationContext(...)} 처럼 <b>손으로</b> 컨텍스트를 만드는 코드도
+ * 애노테이션이 없어 잡지 못한다.
  *
  * <p>DB 는 차단 대상이 아니다 — PostgreSQL 은 Testcontainers 로 <b>실제로</b> 띄운다(Q-2b).
  *

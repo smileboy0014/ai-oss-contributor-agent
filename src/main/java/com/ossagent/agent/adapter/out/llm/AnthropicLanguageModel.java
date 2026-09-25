@@ -126,12 +126,31 @@ public class AnthropicLanguageModel implements LanguageModel {
         MessageCreateParams.Builder builder = MessageCreateParams.builder()
                 // .model(String) 오버로드를 쓴다 — 타입 상수는 모델 출시보다 늦게 따라온다
                 .model(properties.model())
-                .maxTokens(request.maxOutputTokens())
+                .maxTokens(cappedMaxTokens(request))
                 .addUserMessage(request.userPrompt());
         if (request.hasSystem()) {
             builder.system(request.system());
         }
         return builder.build();
+    }
+
+    /**
+     * 호출자가 요청한 출력 예산을 <b>설정된 상한으로 깎는다.</b>
+     *
+     * <p>{@code agent.llm.max-output-tokens} 는 기본값이 아니라 <b>비용 가드레일</b>이다.
+     * 호출자가 요구하는 대로 다 내주면 프롬프트 조립 버그 하나가 곧바로 청구서가 된다.
+     * 출력 토큰이 입력보다 몇 배 비싸므로 상한이 없는 쪽이 위험하다.
+     *
+     * <p>호출 지점마다 다른 예산이 필요해지면({@code CODE} 의 diff 가 가장 길다) 그때
+     * {@code LlmCallSite} 별로 가른다 — 실측 전에는 하나로 둔다.
+     */
+    private long cappedMaxTokens(LlmRequest request) {
+        int capped = Math.min(request.maxOutputTokens(), properties.maxOutputTokens());
+        if (capped < request.maxOutputTokens()) {
+            log.warn("출력 예산을 설정 상한으로 깎았다 callSite=요청={} 상한={}",
+                    request.maxOutputTokens(), properties.maxOutputTokens());
+        }
+        return capped;
     }
 
     /**

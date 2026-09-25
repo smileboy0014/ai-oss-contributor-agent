@@ -12,7 +12,9 @@ package com.ossagent.agent.domain;
  *
  * @param system          시스템 프롬프트. 없으면 {@code null}
  * @param userPrompt      사용자 프롬프트
- * @param maxOutputTokens 이 호출의 출력 상한. 상한에서 잘리면 <b>성공이 아니다</b>
+ * @param maxOutputTokens 이 호출이 <b>요청하는</b> 출력 예산. 어댑터가 설정 상한
+ *                        ({@code agent.llm.max-output-tokens})으로 <b>깎는다</b> — 여기 적은 값이
+ *                        그대로 나간다고 보지 않는다. 상한에서 잘리면 <b>성공이 아니다</b>
  *                        ({@link LlmFailureReason#TRUNCATED})
  */
 public record LlmRequest(String system, String userPrompt, int maxOutputTokens) {

@@ -43,7 +43,9 @@ description: GitHub 이슈 작업의 단일 진입점 — type(feature/fix/refac
 
 체크아웃이 하나뿐이면 동시에 들어온 두 작업이 서로를 덮어쓴다 — 한쪽의 `git checkout` 이 다른 쪽의
 미커밋 변경을 끌고 다니고, `./gradlew build` 는 같은 `build/` 를 두 세션이 나눠 쓴다.
-빌드 결과가 누구 것인지 알 수 없으면 **로컬 build 가 유일한 게이트**(Q-10)라는 전제가 무너진다.
+빌드 결과가 누구 것인지 알 수 없으면 **로컬 build 로 판정한다**는 전제가 무너진다.
+(⚠️ CI 는 Q-10 으로 구축됐다 — 로컬이 «유일한» 게이트이던 시절의 문장을 정정한다. 다만
+CI 는 PR 을 올린 뒤에야 돌므로 **로컬이 첫 게이트라는 것은 그대로**다.)
 
 | 항목 | 값 |
 |---|---|
@@ -182,15 +184,50 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
     트랜잭션에 들어가면 커넥션이 30분 잡힌다
   - 시각은 `Clock` 주입. `Instant.now()` 직접 호출 금지
 
-  - 테스트 게이트: ./gradlew build   ⚠ CI 미구축(Q-10) — 로컬 build 가 유일한 게이트다
+  - 테스트 게이트: ./gradlew build
+    ℹ️ CI 도 같은 `build` 를 돌린다(Q-10). **CI 는 fresh checkout 이라 아래 ② 의
+    `UP-TO-DATE` 문제가 원천적으로 없다** — 로컬에서 ℹ️ 가 나오면 CI 초록이 근거가 된다
   ⚠ 빌드 판정 (필수) — 파이프로 자른 출력만 보고 성공 판정 금지
-     (파이프 종료 코드는 마지막 명령이 덮어쓴다):
+     (파이프 종료 코드는 마지막 명령이 덮어쓴다).
+     🔴 로그는 **세션 스크래치패드**에 쓴다 (경로는 세션 시스템 프롬프트에 있다) — 아래 ③:
 
-     mkdir -p build && ./gradlew build > build/work-build.log 2>&1; echo "exit=$?"; \
-       grep -c '^BUILD SUCCESSFUL' build/work-build.log
+     LOG=<스크래치패드>/work-build.log
+     ./gradlew build > "$LOG" 2>&1; echo "exit=$?"
+     grep -c '^BUILD SUCCESSFUL' "$LOG"
+     grep -E '^> Task :test( |$)|^> Task :test [A-Z-]+' "$LOG"   # ← 접미사를 본다
+     grep -E '^[0-9]+ actionable tasks' "$LOG"
 
-     exit=0 과 grep 결과 1 이 **둘 다** 나와야 통과다. 하나라도 어긋나면 실패로 취급한다
-     ⚠ 로그는 worktree 안(`build/`)에 쓴다. `/tmp/build.log` 같은 공용 경로는 **동시 작업이 서로 덮어쓴다**
+  ⚠ **세 가지를 다 본다. `exit=0` + `BUILD SUCCESSFUL` 만으로는 부족하다.**
+
+  ① **빌드가 성공했는가** — exit=0 과 grep 결과 1 이 둘 다. 하나라도 어긋나면 실패
+
+  ② 🔴 **테스트가 이번 실행에 돌았는가** — `> Task :test` 의 **접미사**를 본다
+
+     | 접미사 | 뜻 | 보고 |
+     |---|---|---|
+     | 없음 | 실행됨 | ✅ **통과** |
+     | `UP-TO-DATE` | **건너뜀** | ℹ️ **「빌드 초록 · 테스트 미실행」** — 「통과」라고 하지 않는다 |
+     | `FAILED` | 실패 | ❌ |
+     | **줄이 아예 없음** | 도달 못 함 | ℹ️ 위와 같은 취급 — 「초록」과 구분되지 않는다 |
+
+     🔴 **`UP-TO-DATE` 를 실패로 치지 않는다.** 문서만 고친 커밋에서 오탐이 나고,
+     **오탐으로 죽는 게이트는 반드시 꺼진다.** 「실행되지 않았다」와 「통과했다」를
+     **다르게 보고**하면 충분하다 — Stop 훅 [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh)
+     가 이미 그렇게 한다(「한 건도 실행하지 않았으면 「통과」라고 하지 않는다」).
+     ℹ️ 가 나오면 **`clean build` 로 한 번 더 받거나** CI 초록을 근거로 쓴다
+
+     ⚠ **요약 줄(`N actionable tasks: M executed`)은 보조다.** `executed 0` 이면
+     아무것도 안 돈 것이 확실하지만, **`M executed` 는 `:test` 를 이름으로 지목하지 않는다** —
+     `compileTestJava` 만 돌아도 같은 숫자다. **요약 줄은 「0건」을, 태스크 줄은 「그 태스크가」를** 잡는다
+
+     🔴 **소요 시간(`in 1s`)을 판정에 쓰지 않는다.** 오염이 **양방향**이다 —
+     부분 실행(`--tests`)은 **짧게**, 시스템 절전은 **길게** 만든다(실측: 절전 940초가
+     한 빌드에 통째로 들어갔다). 「너무 짧다」도 「너무 길다」도 근거가 아니다
+
+  ③ ⚠ **로그를 `build/` 에 쓰지 않는다.** `clean` 이 지우는데, 위 ℹ️ 에서 빠져나오는 방법이
+     **바로 `clean build`** 다 — 규칙이 자기 탈출로와 부딪힌다.
+     `/tmp/build.log` 같은 공용 경로도 안 된다(동시 작업이 서로 덮어쓴다).
+     **세션 스크래치패드는 세션별로 갈리므로 둘 다 피한다**
 
   - 커밋: /commit (scope = repository·issue·candidate·agent·pr·support·build·infra·docs·claude ·
     한 커밋에 여러 도메인 금지 · 커밋 시 git 훅 2개가 돈다 — secret-scan ·

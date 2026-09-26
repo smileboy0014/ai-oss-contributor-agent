@@ -58,6 +58,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | 규약 판정. `LanguageModel` 위에 얹히는 2층 |
 | `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
 | `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
+| `CodeSandbox` | `DockerCodeSandbox` | 대상 저장소 코드를 **격리 컨테이너 안에서만** 실행. S-3 의 실행체 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
 | `IssueSnapshot` | — | 수집 시점의 이슈 원본 **값**. 영속 엔티티 `Issue` 와 다르다 |
@@ -128,6 +129,21 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | **Fork** | 사용자 계정의 포크. **유일한 쓰기 대상** |
 | **Maintainer** | 대상 저장소의 관리자. 우리가 만든 Draft PR 을 사람이 제출한 뒤에야 마주한다 |
 | **Sandbox** | 대상 저장소 빌드·테스트를 격리 실행하는 Docker 컨테이너 |
+
+## 샌드박스 3단계 — 섞어 부르지 않는다 (#17)
+
+네트워크가 열리는 단계가 하나뿐이라는 것이 S-3 의 실질이다. 「샌드박스 실행」으로 뭉뚱그리면
+그 구분이 사라진다.
+
+| 용어 | 네트워크 | 명령 | 캐시 볼륨 |
+|---|---|---|---|
+| **워밍** (warm) | 전용 네트워크 | **우리 것** | 🔴 **마운트 안 함** |
+| **씨딩** (seed) | 없음 | **우리 `cp`** | RW |
+| **실행** (execute) | 없음 | 대상 저장소 것 | **RO** |
+
+⚠️ 「워밍에서 캐시를 채운다」고 말하지 않는다. 워밍은 **워크스페이스**를 채우고, 볼륨으로
+옮기는 것은 씨딩이다. 뭉뚱그리면 「워밍이 볼륨에 쓴다」로 읽혀, 그 오염 경로를 막은 이유가
+사라진다.
 
 ## 토큰 — 이름이 비슷해서 바꿔 끼우기 쉽다
 

@@ -71,15 +71,48 @@ GitHub App 설치 토큰은 **우리가 멤버가 아닌 upstream 에 PR 을 만
 
 | 제한 | 값 (`.env.example`) |
 |---|---|
-| 네트워크 | `SANDBOX_NETWORK=none` — 의존성 사전 워밍 후 차단 |
-| CPU | `SANDBOX_CPU_LIMIT` |
-| 메모리 | `SANDBOX_MEMORY_LIMIT` |
-| 실행 시간 | `SANDBOX_TIMEOUT_SECONDS` |
-| 파일시스템 | 작업 디렉토리만. 호스트 볼륨·소켓 마운트 금지 |
+| 네트워크 | 🔴 **설정이 아니다** — 아래 |
+| CPU | `SANDBOX_CPU_LIMIT` (코어 수) |
+| 메모리 | `SANDBOX_MEMORY_LIMIT` (`4GB` — 단위 필수) |
+| 프로세스 수 | `SANDBOX_PIDS_LIMIT` — fork 폭탄은 CPU·메모리로 막히지 않는다 |
+| 실행 시간 | `SANDBOX_TIMEOUT_SECONDS` · `SANDBOX_WARM_TIMEOUT_SECONDS` |
+| 파일시스템 | `SANDBOX_WORKSPACE_ROOT` **하위만**. 호스트 볼륨·소켓 마운트 금지 |
 
-- `ProcessBuilder` · `Runtime.exec` 로 호스트에서 대상 저장소 빌드를 돌리는 경로는 반려
+### 🔴 네트워크는 설정 키가 아니다 — 명령 타입이 정한다 (2026-09-26 개정 · #17)
+
+`SANDBOX_NETWORK=none` 이라고 적혀 있던 자리다. **그 변수를 제거했다.**
+설정으로 두면 **실행 단계 격리가 배포 설정 한 줄로 꺼진다** — S-2 의 「draft 플래그를
+두면 언젠가 켜진다」와 같은 문제다.
+
+대신 `SandboxCommand` 를 sealed 로 갈라 **「네트워크 개방 + 대상 저장소 명령」을 표현
+불가능**하게 만들었다.
+
+| 단계 | 네트워크 | 명령 | 캐시 볼륨 |
+|---|---|---|---|
+| `WarmCommand` | 전용 네트워크 | **우리 것** (인자 없음) | 🔴 **마운트 안 함** |
+| `SeedCacheCommand` | **없음** | **우리 `cp`** | RW |
+| `ExecuteCommand` | **없음** (인자 없음) | 대상 저장소 것 | RO |
+
+⚠️ 워밍이 캐시 볼륨을 잡지 않는 것이 핵심이다. 그 단계만 네트워크가 열려 있고 신뢰할 수
+없는 빌드 스크립트가 도는데, 볼륨에 쓸 수 있으면 `init.d/*.gradle` 을 심어 **다음 워밍에서
+자동 실행**시킬 수 있다. 볼륨은 후보 수명을 넘겨 지속되므로 그 오염이 남는다.
+
+⚠️ `SANDBOX_WARM_NETWORK` 도 자유 문자열이 아니다. `host`·`container:<id>`·`bridge` 를
+거부한다 — `host` 는 컨테이너가 **호스트 네트워크 네임스페이스를 공유**하게 만들어,
+전용 네트워크를 둔 목적이 정반대로 뒤집힌다.
+
+- `ProcessBuilder` · `Runtime.exec` 로 호스트에서 대상 저장소 빌드를 돌리는 경로는 반려.
+  ⚠️ 증거는 **문자열 검사 둘**(`safety-boundary-check.sh` · `HostExecutionAbsenceTest`)이고,
+  리플렉션으로 우회하면 둘 다 못 본다. **「구조적으로 불가능」이 아니다**
 - **Docker 소켓(`/var/run/docker.sock`)을 샌드박스에 마운트하지 않는다** — 컨테이너 탈출 경로다
-- 우리 애플리케이션의 시크릿이 담긴 환경변수를 샌드박스에 전달하지 않는다
+- 우리 애플리케이션의 시크릿이 담긴 환경변수를 샌드박스에 전달하지 않는다.
+  🔴 `SandboxCommand` 에 **환경변수를 받는 자리가 없다** — 문서가 아니라 타입이 막는다
+- 🔴 **바인드 대상은 개수가 아니라 경로를 본다.** `SandboxWorkspace` 가 생성 시점에
+  정규화(`toRealPath`) 후 `SANDBOX_WORKSPACE_ROOT` 하위임을 단언한다. 검증 없이
+  `~/` 를 주면 신뢰할 수 없는 코드가 `.ssh`·`.docker/config.json` 을 **RW 로** 잡는다
+- 🔴 **대상 저장소 문자열이 이미지 좌표·볼륨 이름이 되지 않는다.** `javaVersion` 은
+  LLM 이 대상 저장소 문서에서 뽑은 값이라(#7), 그대로 조립하면 **공격자 레지스트리
+  이미지를 우리가 받아 실행**한다. 화이트리스트로만 매핑한다
 
 **어기면** — 악의적 저장소 하나로 개발자 머신 또는 운영 호스트가 장악된다.
 

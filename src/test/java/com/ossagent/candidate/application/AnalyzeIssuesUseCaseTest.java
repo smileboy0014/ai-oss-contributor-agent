@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ossagent.support.observability.PipelineMetricsFixtures;
 import com.ossagent.agent.adapter.out.llm.RecordingLanguageModel;
 import com.ossagent.agent.domain.AgentRunRecorder;
 import com.ossagent.agent.domain.FakeLanguageModel;
@@ -326,7 +327,8 @@ class AnalyzeIssuesUseCaseTest {
                 candidates.save(ContributionCandidate.discover(4242L, CLOCK));
         languageModel.reset().respondWith(analysisJson(), 1200, 300);
 
-        new LlmIssueAnalyst(new RecordingLanguageModel(languageModel, recorder),
+        new LlmIssueAnalyst(new RecordingLanguageModel(languageModel, recorder,
+                        PipelineMetricsFixtures.discarding()),
                 IssueAnalysisProperties.defaults(), objectMapper)
                 .analyze(candidate.getId(), analyzableIssue());
 

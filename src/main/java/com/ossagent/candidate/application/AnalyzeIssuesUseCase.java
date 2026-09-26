@@ -7,6 +7,8 @@ import com.ossagent.candidate.domain.IssueAnalysis;
 import com.ossagent.candidate.domain.IssueAnalyst;
 import com.ossagent.issue.application.FindAnalyzableIssuesUseCase;
 import com.ossagent.issue.domain.AnalyzableIssue;
+import com.ossagent.support.observability.AnalysisOutcome;
+import com.ossagent.support.observability.PipelineMetrics;
 import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
 import java.util.List;
 import java.util.Set;
@@ -61,13 +63,19 @@ public class AnalyzeIssuesUseCase {
     private final CandidateAnalysisWriter writer;
     private final IssueAnalyst analyst;
     private final IssueAnalysisProperties properties;
+    private final PipelineMetrics metrics;
+    private final CandidateStatusGauge statusGauge;
 
     public AnalyzeIssuesUseCase(FindAnalyzableIssuesUseCase analyzableIssues,
             AnalyzeRepositoryPolicyUseCase repositoryPolicy,
             ContributionCandidateRepository candidates,
             CandidateAnalysisWriter writer,
             IssueAnalyst analyst,
-            IssueAnalysisProperties properties) {
+            IssueAnalysisProperties properties,
+            PipelineMetrics metrics,
+            CandidateStatusGauge statusGauge) {
+        this.metrics = metrics;
+        this.statusGauge = statusGauge;
         this.analyzableIssues = analyzableIssues;
         this.repositoryPolicy = repositoryPolicy;
         this.candidates = candidates;
@@ -125,6 +133,16 @@ public class AnalyzeIssuesUseCase {
 
         AnalysisResult result = new AnalysisResult(
                 counter.analyzed, counter.rejected, counter.failed, counter.skipped, hasMore);
+
+        // 🔴 「이슈 N건 중 몇 건이 성공했는가」 — 단계 타이머가 답하지 못하는 질문이다.
+        //    배치가 끝날 때 한 번에 올린다. 건마다 올리면 호출이 N배가 되고 값은 같다
+        metrics.analysisOutcome(AnalysisOutcome.ANALYZED, counter.analyzed);
+        metrics.analysisOutcome(AnalysisOutcome.REJECTED, counter.rejected);
+        metrics.analysisOutcome(AnalysisOutcome.FAILED, counter.failed);
+        metrics.analysisOutcome(AnalysisOutcome.SKIPPED, counter.skipped);
+        // 후보 분포가 실제로 바뀌는 유일한 지점이다 — 여기서 게이지를 다시 읽는다
+        statusGauge.refresh();
+
         // 이슈 본문·판정 내용은 남기지 않는다 — 수치와 우리 어휘만 (logging.md · S-4)
         log.info("이슈 분석 완료 repositoryId={} {}", repositoryId, result);
         return result;

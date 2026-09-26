@@ -80,7 +80,63 @@ try {
 }
 ```
 
-로그 포맷에 `%X{candidateId} %X{stage} %X{attempt}` 를 포함시킨다.
+### ✅ 적용됐다 (2026-09-26 · #25)
+
+⚠️ **오랫동안 요구만 있고 구현이 없었다.** 코드는 MDC 를 성실히 채우는데
+**출력 포맷이 그것을 버리고 있었고, 아무도 몰랐다** — 로그가 그냥 조금 덜 유용했을 뿐이라
+실패로 보이지 않았기 때문이다. `MdcLogPatternTest` 가 **패턴 렌더링 자체**를 고정한다.
+
+`application.yml` 의 **`logging.pattern.correlation`** 에 넣는다.
+
+```yaml
+logging:
+  pattern:
+    correlation: "[%X{repositoryId:-}|%X{candidateId:-}|%X{stage:-}|%X{attempt:-}] "
+```
+
+🔴 **`logback-spring.xml` 을 만들지 않는다.** Boot 기본 패턴에 이미 correlation 자리가
+있고, 직접 어펜더를 정의하면 Boot 가 주는 것(색상·예외 축약·프로퍼티 바인딩)을 조용히 잃는다.
+실제로 처음엔 XML 로 짰다가 `${CONSOLE_LOG_PATTERN:-…}` 의 기본값이 **영영 쓰이지 않는 것**을
+테스트가 잡아냈다 — 그 변수를 Boot 의 `defaults.xml` 이 이미 정의한다.
+
+⚠️ `%X{key:-}` 의 `:-` 를 빠뜨리면 값이 없을 때 리터럴 `key_IS_UNDEFINED` 가 찍힌다.
+
+#### 🔴 MDC 에 넣어도 되는 것
+
+| 키 | 값 | 넣는 곳 |
+|---|---|---|
+| `repositoryId` | 식별자 | `ScanExecutor` |
+| `candidateId` | 식별자 | `AnalyzeIssuesUseCase` · `RecordingLanguageModel` |
+| `stage` | **enum** | `ScanPipelineUseCase`(파이프라인) · `RecordingLanguageModel`(LLM) |
+| `attempt` | 숫자 | `RecordingLanguageModel` |
+
+**로그 포맷은 모든 줄에 붙으므로 여기가 오염되면 전부 오염된다.**
+이슈 제목·본문·LLM 응답·예외 메시지를 넣지 않는다 — `MdcLogPatternTest` 가 소스를 훑어 막는다.
+
+⚠️ **`stage` 는 두 어휘가 섞인다** — LLM 구간은 `LlmCallSite`, 파이프라인은 `PipelineStage` 다.
+「지금 어느 단계인가」는 로그를 읽는 사람에게 하나의 질문이라 같은 키를 쓰기로 했다.
+
+🔴 **중첩되면 안쪽이 바깥을 덮었다가 「되돌아와야」 한다 — 저절로 그렇게 되지 않는다.**
+`finally` 에서 `remove` 로 끝내면 **복원이 아니라 삭제**다. 그러면 바깥이 넣어 둔 값이
+안쪽 호출 이후 사라지고, **식별자가 가장 필요한 줄**(기각·실패 로그)에서 MDC 가 빈다.
+
+```java
+String previous = MDC.get("stage");     // ① 덮기 전에 챙긴다
+MDC.put("stage", …);
+try { … } finally {
+    if (previous == null) { MDC.remove("stage"); } else { MDC.put("stage", previous); }  // ②
+}
+```
+
+⚠️ 실제로 이 저장소가 한 번 그렇게 짰고, **문서에는 「되돌아온다」고 적혀 있었다.**
+동작하지 않는 것이 규약으로 박혀 있으면 다음 리뷰의 판단 근거가 오염된다.
+
+⚠️ **헬퍼로 묶고 싶어지는데, 그러면 키가 변수가 된다.** `MdcLogPatternTest` 의 소스
+스캐너는 키가 리터럴·상수가 아니면 <b>실패</b>로 본다(정적으로 알 수 없으므로).
+가드를 느슨하게 하느니 호출부가 장황한 편이 낫다.
+
+⚠️ **풀 스레드는 재사용된다.** `MDC.remove` 를 빠뜨리면 다음 실행의 로그에 앞 실행의 값이
+찍힌다 — 이어붙이려고 넣은 것이 **잘못 이어붙이게** 만든다.
 
 ## 반드시 남겨야 할 것
 

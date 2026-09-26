@@ -2,6 +2,7 @@ package com.ossagent.candidate.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ossagent.support.observability.PipelineMetricsFixtures;
 import com.ossagent.agent.adapter.out.llm.RecordingLanguageModel;
 import com.ossagent.agent.domain.AgentRunContext;
 import com.ossagent.agent.domain.LanguageModel;
@@ -47,7 +48,7 @@ class RecordAgentRunUseCaseTest {
             return new LlmResponse("응답", new LlmUsage(1, 2));
         };
 
-        new RecordingLanguageModel(probe, recorder)
+        new RecordingLanguageModel(probe, recorder, PipelineMetricsFixtures.discarding())
                 .complete(CTX, new LlmRequest(null, "질문", 100));
 
         assertThat(sawTransaction)
@@ -58,7 +59,8 @@ class RecordAgentRunUseCaseTest {
     @Test
     void 후보가_없는_POLICY_실행도_DB_에_적재된다() {
         var model = new RecordingLanguageModel(
-                (ctx, request) -> new LlmResponse("판정", new LlmUsage(5, 6)), recorder);
+                (ctx, request) -> new LlmResponse("판정", new LlmUsage(5, 6)), recorder,
+                PipelineMetricsFixtures.discarding());
 
         model.complete(AgentRunContext.forRepository(LlmCallSite.POLICY),
                 new LlmRequest(null, "규약 문서", 100));
@@ -80,7 +82,8 @@ class RecordAgentRunUseCaseTest {
     @Test
     void 시작과_종료가_각각_커밋되어_조회된다() {
         var model = new RecordingLanguageModel(
-                (ctx, request) -> new LlmResponse("응답", new LlmUsage(13, 17)), recorder);
+                (ctx, request) -> new LlmResponse("응답", new LlmUsage(13, 17)), recorder,
+                PipelineMetricsFixtures.discarding());
 
         model.complete(CTX, new LlmRequest(null, "질문", 100));
 

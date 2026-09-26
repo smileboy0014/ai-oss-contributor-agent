@@ -4,6 +4,9 @@ import com.ossagent.agent.domain.LlmTransientException;
 import com.ossagent.repository.adapter.out.persistence.OssRepositoryRepository;
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
+import com.ossagent.support.observability.GateOutcome;
+import com.ossagent.support.observability.PipelineMetrics;
+import com.ossagent.support.observability.SafetyClause;
 import com.ossagent.repository.domain.ContributionRuleInterpreter;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.PolicyDocumentPath;
@@ -44,11 +47,13 @@ public class AnalyzeRepositoryPolicyUseCase {
     private final PolicyDocumentSource documentSource;
     private final ContributionRuleInterpreter interpreter;
     private final RepositoryPolicyWriter writer;
+    private final PipelineMetrics metrics;
 
     public AnalyzeRepositoryPolicyUseCase(OssRepositoryRepository repositories,
             RepositoryPolicyRepository policies, RepositorySource repositorySource,
             PolicyDocumentSource documentSource, ContributionRuleInterpreter interpreter,
-            RepositoryPolicyWriter writer) {
+            RepositoryPolicyWriter writer, PipelineMetrics metrics) {
+        this.metrics = metrics;
         this.repositories = repositories;
         this.policies = policies;
         this.repositorySource = repositorySource;
@@ -252,12 +257,27 @@ public class AnalyzeRepositoryPolicyUseCase {
      */
     @Transactional(readOnly = true)
     public PolicyClearance clearanceFor(Long repositoryId) {
-        RepositoryPolicy policy = policies.findByRepositoryId(repositoryId)
-                .orElseThrow(() -> new ContributionNotAllowedException(
-                        repositoryId, ContributionNotAllowedException.Reason.NOT_ANALYZED));
+        // 🔴 계측을 assertContributionAllowed 가 아니라 여기 단다 (#25).
+        //    #24 가 판정을 이쪽으로 옮기면서 두 개의 문이 생겼는데, 바깥 문에만 달면
+        //    이쪽을 직접 부르는 경로(구현 단계 통행증 발급)가 집계에서 통째로 빠진다.
+        //    판정이 일어나는 곳이 하나이므로 여기가 유일하게 중복 없는 지점이다
+        try {
+            RepositoryPolicy policy = policies.findByRepositoryId(repositoryId)
+                    .orElseThrow(() -> new ContributionNotAllowedException(
+                            repositoryId, ContributionNotAllowedException.Reason.NOT_ANALYZED));
 
-        // 보류·금지 판정은 엔티티가 한다 — 여기서 다시 쓰면 두 벌이 된다
-        return policy.clearance();
+            // 보류·금지 판정은 엔티티가 한다 — 여기서 다시 쓰면 두 벌이 된다
+            PolicyClearance clearance = policy.clearance();
+
+            // 🔴 통과도 센다 — logging.md 「통과한 것도 남긴다. 사고 후 「막았는가」를
+            //    증명할 수 있어야 한다」. 차단만 세면 분모가 없어 막힌 비율을 계산할 수 없고,
+            //    「0건 차단」과 「계측 고장」이 구분되지 않는다
+            metrics.safetyGate(SafetyClause.S5, GateOutcome.PASSED, null);
+            return clearance;
+        } catch (ContributionNotAllowedException e) {
+            metrics.safetyGate(SafetyClause.S5, GateOutcome.BLOCKED, e.reason());
+            throw e;
+        }
     }
 
     /**

@@ -7,6 +7,10 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 - OSS 저장소 등록 및 조회: `POST/GET /api/repositories`
 - 스캔 작업 요청 경계: `POST /api/repositories/{id}/scan`
 - 기여 후보 조회 API: `GET /api/candidates` (상태·난이도·신뢰도 필터 + 페이지네이션) · `GET /api/candidates/{id}`
+- **사람의 승인 지점**: `POST /api/candidates/{id}/select`(선정) · `POST /api/candidates/{id}/reject`(선택 취소)
+  · `POST /api/repositories/{id}/policy/resolution`(규약 **보류 해소**).
+  🔴 **스케줄러·워커가 이 선을 넘지 않습니다**(S-6). 착수·PR 생성 엔드포인트는 **아직 없습니다** —
+  실행기 없이 열면 후보가 빠져나올 수 없는 상태에 갇힙니다
 - PostgreSQL/Redis 로컬 개발 환경과 H2 기본 프로필
 - `DISCOVERED`부터 `PR_CREATED`까지의 후보 상태 모델
 - **GitHub 읽기 능력**: 저장소 메타데이터·파일 조회(`RepositorySource`), open 이슈 조회(`IssueSource`).

@@ -58,6 +58,8 @@ com.ossagent.{도메인}
 ├── application/     XxxUseCase — 트랜잭션 경계
 └── adapter/
     ├── in/{web · scheduler · event}/     (+ dto/)
+    │      ⚠ scheduler 는 repository 에 실재한다 — ScanScheduler(#14).
+    │        Q-3 을 닫을 때 @Profile("worker") 가 붙는 자리다
     └── out/{persistence · github · llm · sandbox}/
 ```
 

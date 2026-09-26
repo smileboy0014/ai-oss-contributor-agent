@@ -3,6 +3,8 @@ package com.ossagent.candidate.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ossagent.repository.domain.PolicyClearance;
+import com.ossagent.repository.domain.PolicyClearanceFixtures;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -31,6 +33,11 @@ class ContributionCandidateTest {
         return at(T0);
     }
 
+    /** 정책 통행증. 발급 규칙 자체는 {@code RepositoryPolicyTest} 가 본다 — 여기서는 「있다」만 쓴다. */
+    private static PolicyClearance clearance() {
+        return PolicyClearanceFixtures.any();
+    }
+
     private static ContributionCandidate discovered() {
         return ContributionCandidate.discover(42L, clock());
     }
@@ -50,7 +57,7 @@ class ContributionCandidateTest {
 
     private static ContributionCandidate implementing() {
         ContributionCandidate candidate = selected();
-        candidate.startImplementing(MAX_ATTEMPTS, clock());
+        candidate.startImplementing(clearance(), MAX_ATTEMPTS, clock());
         return candidate;
     }
 
@@ -91,7 +98,7 @@ class ContributionCandidateTest {
         prCreated.markPrCreated(clock());
 
         assertThat(prCreated.isTerminal()).isTrue();
-        assertThatThrownBy(() -> prCreated.startImplementing(MAX_ATTEMPTS, clock()))
+        assertThatThrownBy(() -> prCreated.startImplementing(clearance(), MAX_ATTEMPTS, clock()))
                 .as("PR_CREATED 후보가 다시 구현 루프에 들어가면 같은 PR 을 덮어쓴다 — 불변식 ①")
                 .isInstanceOf(CandidateTransitionException.class);
         assertThatThrownBy(() -> prCreated.fail(clock()))
@@ -150,13 +157,32 @@ class ContributionCandidateTest {
     void 사람이_고르지_않으면_구현할_수_없다_S6() {
         ContributionCandidate candidate = analyzed();
 
-        assertThatThrownBy(() -> candidate.startImplementing(MAX_ATTEMPTS, clock()))
+        assertThatThrownBy(() -> candidate.startImplementing(clearance(), MAX_ATTEMPTS, clock()))
                 .as("selectedAt 이 「NULL 이면 구현 단계로 갈 수 없다」고 문서가 단언한다. "
                         + "전이표가 대신 막고 있다는 사실에 기대지 않는다 — S-1 의 선례")
                 .isInstanceOf(CandidateTransitionException.class)
                 .hasMessageContaining("selectedAt");
 
         assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.ANALYZED);
+        assertThat(candidate.getAttempt()).isZero();
+    }
+
+    @Test
+    @DisplayName("정책 통행증 없이는 구현 단계로 갈 수 없다 — 타입만으로는 게이트가 아니다")
+    void 정책_통행증_없이_구현할_수_없다_S5() {
+        ContributionCandidate candidate = selected();
+
+        // 🔴 이 줄은 정상 컴파일된다. 「시그니처가 PolicyClearance 를 받는다」를 단언하는
+        //    테스트는 컴파일러가 이미 하는 일을 반복할 뿐이고, 정작 뚫리는 구멍인 null 을
+        //    보지 못한다. 단언하는 것은 「null 을 넣으면 예외가 나는가」다
+        assertThatThrownBy(() -> candidate.startImplementing(null, MAX_ATTEMPTS, clock()))
+                .as("RepositoryPolicy 확인 없이 구현 단계로 넘어가지 않는다 — S-5")
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("통행증");
+
+        assertThat(candidate.getStatus())
+                .as("거부는 상태를 남기지 않는다 — 가드가 전이보다 먼저 선다")
+                .isEqualTo(CandidateStatus.SELECTED);
         assertThat(candidate.getAttempt()).isZero();
     }
 
@@ -260,17 +286,17 @@ class ContributionCandidateTest {
     void 상한을_무한으로_만들_수_없다_S6() {
         ContributionCandidate candidate = selected();
 
-        assertThatThrownBy(() -> candidate.startImplementing(10_000, clock()))
+        assertThatThrownBy(() -> candidate.startImplementing(clearance(), 10_000, clock()))
                 .as("설정 한 줄로 상한을 사실상 없애면 LLM 비용이 조용히 폭주하고 "
                         + "FAILED 신호가 사라진다 — 불변식 ⑧. 올리려면 도메인 상수를 고쳐야 한다")
                 .isInstanceOf(IllegalArgumentException.class);
 
         assertThatThrownBy(() -> candidate.startImplementing(
-                ContributionCandidate.MAX_ALLOWED_ATTEMPTS + 1, clock()))
+                clearance(), ContributionCandidate.MAX_ALLOWED_ATTEMPTS + 1, clock()))
                 .as("절대 상한을 1 이라도 넘으면 거부한다")
                 .isInstanceOf(IllegalArgumentException.class);
 
-        assertThatThrownBy(() -> candidate.startImplementing(0, clock()))
+        assertThatThrownBy(() -> candidate.startImplementing(clearance(), 0, clock()))
                 .as("0 은 무한이 아니라 최강 제약이지만, 의도된 값이 아니므로 함께 거부한다")
                 .isInstanceOf(IllegalArgumentException.class);
 

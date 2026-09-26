@@ -19,7 +19,8 @@ src/main/resources/db/migration/
 ├── V4__add_candidate_attempt_and_version.sql
 ├── V5__policy_pending_reason_and_repository_scoped_run.sql
 ├── V6__add_issue_scan_cursor.sql
-└── V7__add_issue_filter_columns.sql
+├── V7__add_issue_filter_columns.sql
+└── V8__policy_resolution.sql
 ```
 
 | 규칙 | 이유 |
@@ -125,7 +126,9 @@ oss_repository ──1:1──▶ repository_policy
 | `tests_required` | BOOLEAN | 테스트 동반 필수 |
 | `ai_contribution_allowed` | BOOLEAN NULL | NULL = 판정 실패 = **보류**(허용 아님) — Q-8 |
 | `contribution_rules` | TEXT | **판정의 정규화 결과(JSON)와 근거 경로.** 원문을 넣지 않는다 — 아래 |
-| `pending_reason` | VARCHAR(1024) NULL | **왜 보류됐나** (V5 · #7). `경로=사유코드` 목록 |
+| `pending_reason` | VARCHAR(1024) NULL | **왜 보류됐나** (V5 · #7). `경로=사유코드` 목록. 🔴 해소 뒤에도 **지우지 않는다** |
+| `resolved_at` | TIMESTAMP NULL | **사람이 언제 보류를 풀었나** (V8 · #24). NULL = 기계 판정 |
+| `resolution_note` | VARCHAR(1024) NULL | **사람이 왜 그렇게 판단했나** (V8 · #24) |
 | `analyzed_at` | TIMESTAMP | 규약은 바뀐다. 재분석 주기 판단 근거 |
 
 **`ai_contribution_allowed` 를 NOT NULL DEFAULT true 로 두지 않는다.** 기본 허용은 S-5 위반을 기본값으로 만드는 것이다.
@@ -138,6 +141,27 @@ oss_repository ──1:1──▶ repository_policy
 ⚠️ `pending_reason` 이 `TEXT` 가 아닌 이유 — 이 프로젝트에서 `TEXT` 는 「외부 텍스트」를 뜻하고
 `@ExternalText` 가 강제된다(`ExternalTextMarkerTest`). 여기 들어가는 것은 **우리가 만든 사유 문자열**
 이고 길이도 유계다(후보 경로 13개 × `경로=사유코드; `).
+
+### 보류 해소 두 컬럼 — V8 · #24
+
+Q-8 이 「보류는 재분석·시간경과·횟수소진으로 풀리지 않는다」를 확정하면서 **푸는 경로가
+하나도 없어졌다.** `POST /repositories/{id}/policy/resolution` 이 그 경로이고,
+이 두 컬럼이 그 행위의 기록이다.
+
+| 물음 | 답 |
+|---|---|
+| `resolved_at` 이 NULL 이면 | **기계 판정**이다. 「보류가 아니다」와 다른 말이다 |
+| 해소가 곧 허용인가 | ❌ **아니다.** 사람이 읽고 「금지」로 닫는 것도 정상적인 해소다 |
+| `pending_reason` 을 비우나 | ❌ **비우지 않는다.** `resolved_at` 이 이미 「보류 아님」을 말하고, 비우면 왜 보류였는지가 사라져 그 판단을 재검토할 수 없다 |
+
+⚠️ **`resolution_note` 에 `@ExternalText` 를 달지 않는다.** 그 마커는 「길어서 따로 둔 외부
+텍스트」(`TEXT` 컬럼)의 표시이고, 여기는 `VARCHAR(1024)` + **대입 지점에서 `TokenRedactor`**
+라 `pending_reason`(#7)과 같은 취급이다. 마커를 달면 `ExternalTextScrubRegistryTest` 의
+유령 행 검사에 걸린다.
+
+⚠️ **입력 상한(1000)이 컬럼(1024)보다 짧다.** 두 축인 이유는 **스크럽이 마스킹하며 길이를
+늘리기** 때문이다. 같은 값으로 두면 딱 맞는 입력이 스크럽 후에 넘친다 — API 가 1000 에서
+400 을 돌려주고, 도메인이 마지막으로 한 번 더 자른다.
 
 ⚠️ `java_version`·`build_command`·`test_command` 는 **#7 이후에도 대체로 NULL 이다.**
 문서 본문에서만 오고 빌드 설정 파싱은 #15 다. 「NULL 인 정책으로 샌드박스에 진입할 수 있는가」는
@@ -272,6 +296,7 @@ stage enum 문자열에 묶이기 때문이다.
 
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
+| 2026-09-26 | smileboy0014 | `repository_policy` 에 보류 해소 2컬럼 (V8 · #24) |
 | 2026-09-26 | smileboy0014 | `issue` 에 필터 4컬럼 (V7 · #9) · `filter_reason` 을 TEXT 에서 VARCHAR 로 |
 | 2026-09-22 | smileboy0014 | 7테이블 실재로 전환 (V2 · #5) · 스키마 정본을 마이그레이션으로 명시 |
 | 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 §22 ERD 기준 · 멱등키·스크럽 대상 컬럼 지정 |

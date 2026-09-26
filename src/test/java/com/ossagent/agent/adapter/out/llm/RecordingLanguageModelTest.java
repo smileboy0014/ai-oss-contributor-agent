@@ -33,6 +33,59 @@ class RecordingLanguageModelTest {
 
     private static final LlmRequest REQUEST = new LlmRequest(null, "질문", 100);
 
+    @org.junit.jupiter.api.AfterEach
+    void MDC_를_비운다() {
+        MDC.clear();
+    }
+
+    @Test
+    void 바깥이_넣어_둔_MDC_를_지우지_않고_복원한다() {
+        // 파이프라인(ScanPipelineUseCase)과 배치(AnalyzeIssuesUseCase)가 넣어 둔 값이다
+        MDC.put("stage", "ANALYZE");
+        MDC.put("candidateId", "7");
+
+        new RecordingLanguageModel(new FakeLanguageModel().respondWith("응답", 1, 1),
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding())
+                .complete(CTX, REQUEST);
+
+        assertThat(MDC.get("stage"))
+                .as("finally 에서 remove 로 끝내면 복원이 아니라 삭제다. 그러면 첫 LLM 호출 "
+                        + "이후 바깥 값이 사라져, 「후보 기각」·「호출 실패」처럼 식별자가 "
+                        + "가장 필요한 줄에서 MDC 가 빈다 — 이 기능이 고치려던 문제를 "
+                        + "그대로 재현하는 셈이다")
+                .isEqualTo("ANALYZE");
+        assertThat(MDC.get("candidateId")).isEqualTo("7");
+    }
+
+    @Test
+    void 바깥에_없던_MDC_는_호출_후에도_없다() {
+        // ⚠ 풀 스레드는 재사용된다. 「없었으면 지운다」를 빠뜨리면 다음 실행의 로그에
+        //   앞 실행의 값이 찍혀, 이어붙이려고 넣은 것이 잘못 이어붙이게 만든다
+        new RecordingLanguageModel(new FakeLanguageModel().respondWith("응답", 1, 1),
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding())
+                .complete(CTX, REQUEST);
+
+        assertThat(MDC.get("stage")).isNull();
+        assertThat(MDC.get("candidateId")).isNull();
+        assertThat(MDC.get("attempt")).isNull();
+    }
+
+    @Test
+    void 실패해도_MDC_가_복원된다() {
+        MDC.put("stage", "ANALYZE");
+
+        assertThatThrownBy(() -> new RecordingLanguageModel(
+                new FakeLanguageModel().failWith(
+                        new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding())
+                .complete(CTX, REQUEST))
+                .isInstanceOf(LlmException.class);
+
+        assertThat(MDC.get("stage"))
+                .as("실패 경로에서 복원이 빠지면 그 뒤 로그가 전부 단계 없이 찍힌다")
+                .isEqualTo("ANALYZE");
+    }
+
     @Test
     void 성공하면_토큰이_장부에_남는다() {
         var recorder = new RecordingAgentRunRecorder();

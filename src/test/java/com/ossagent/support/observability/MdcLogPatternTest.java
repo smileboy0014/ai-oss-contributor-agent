@@ -54,8 +54,18 @@ class MdcLogPatternTest {
     private static final Set<String> ALLOWED_MDC_KEYS =
             Set.of("repositoryId", "candidateId", "stage", "attempt");
 
-    private static final Pattern MDC_PUT =
-            Pattern.compile("MDC\\.put\\(\\s*(?:\"([^\"]+)\"|([A-Z_]+))");
+    /**
+     * 🔴 <b>키를 리터럴·상수로 주지 않는 경로까지 잡는다.</b>
+     *
+     * <p>초안은 리터럴과 대문자 상수만 봐서 <b>소문자 변수로 키를 주면 매치 자체가 안 되어
+     * 조용히 빠졌다.</b> {@code resolveConstant} 의 fail-closed 설계는 「해석 못 했으니
+     * 통과」를 막지만, 그 방어는 <b>매치가 됐을 때만</b> 걸린다 — 「존재를 못 봤다」는
+     * 막지 못한다.
+     *
+     * <p>{@code putCloseable}·{@code setContextMap} 도 같은 이유로 포함한다.
+     */
+    private static final Pattern MDC_WRITE = Pattern.compile(
+            "MDC\\.(put|putCloseable|setContextMap)\\(\\s*([^,)\\s]+)");
 
     @AfterEach
     void clearMdc() {
@@ -74,7 +84,7 @@ class MdcLogPatternTest {
 
         assertThat(rendered)
                 .as("""
-                        MDC 가 출력에 없다 — logback-spring.xml 의 패턴을 확인한다.
+                        MDC 가 출력에 없다 — application.yml 의 logging.pattern.correlation 을 확인한다.
                         코드가 MDC 를 채워도 포맷이 버리면 「한 후보가 여러 단계를 거치므로
                         식별자로 로그를 이어붙인다」(logging.md)가 성립하지 않는다.""")
                 .contains("7")
@@ -145,12 +155,23 @@ class MdcLogPatternTest {
             throw new IllegalStateException("소스를 읽지 못했다: " + path, e);
         }
         List<String> keys = new java.util.ArrayList<>();
-        Matcher matcher = MDC_PUT.matcher(source);
+        Matcher matcher = MDC_WRITE.matcher(source);
         while (matcher.find()) {
-            if (matcher.group(1) != null) {
-                keys.add(matcher.group(1));
+            String method = matcher.group(1);
+            String keyExpression = matcher.group(2).trim();
+
+            if ("setContextMap".equals(method)) {
+                // 🔴 맵을 통째로 넣으면 키를 정적으로 알 수 없다 — 그 자체를 실패로 본다
+                keys.add("setContextMap(" + keyExpression + ")");
+            } else if (keyExpression.startsWith("\"")) {
+                keys.add(keyExpression.substring(1, keyExpression.lastIndexOf('"')));
+            } else if (keyExpression.matches("[A-Z][A-Z0-9_]*")) {
+                keys.add(resolveConstant(source, keyExpression));
             } else {
-                keys.add(resolveConstant(source, matcher.group(2)));
+                // 🔴 소문자 변수·필드·메서드 호출 — 키를 정적으로 알 수 없다.
+                //    「모르면 통과」가 아니라 「모르면 실패」다. 허용 목록에 없는 값을
+                //    돌려주므로 테스트가 빨개지고, 그때 사람이 판단한다
+                keys.add("<동적 키: " + keyExpression + ">");
             }
         }
         return keys.stream();
@@ -193,7 +214,7 @@ class MdcLogPatternTest {
                 context.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME)
                         .getAppender("CONSOLE");
         assertThat(appender)
-                .as("logback-spring.xml 의 CONSOLE 어펜더를 찾지 못했다 — 설정이 적용되지 않았다")
+                .as("Boot 의 CONSOLE 어펜더를 찾지 못했다 — 로깅 초기화가 안 됐다(@AgentIntegrationTest 인가?)")
                 .isNotNull();
         var encoder = ((ch.qos.logback.core.OutputStreamAppender<ch.qos.logback.classic.spi.ILoggingEvent>)
                 appender).getEncoder();

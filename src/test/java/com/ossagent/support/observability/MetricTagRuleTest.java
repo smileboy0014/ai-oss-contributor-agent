@@ -40,9 +40,6 @@ import org.junit.jupiter.api.Test;
  */
 class MetricTagRuleTest {
 
-    /** 소스에 토큰 패턴 리터럴을 두지 않는다 — {@code secret-scan.sh} 가 커밋을 막는다. */
-    private static final String FAKE_TOKEN = "ghp_" + "a".repeat(36);
-
     private SimpleMeterRegistry registry;
     private PipelineMetrics metrics;
 
@@ -76,10 +73,9 @@ class MetricTagRuleTest {
     void 메트릭_태그에_외부_텍스트가_없다_S4() {
         exerciseAll();
 
-        Set<String> allowed = allowedTagValues();
         List<String> unexpected = ourMeters()
                 .flatMap(meter -> meter.getId().getTags().stream())
-                .filter(tag -> !allowed.contains(tag.getValue()))
+                .filter(tag -> !AllowedTagValues.contains(tag.getValue()))
                 .map(tag -> tag.getKey() + "=" + tag.getValue())
                 .distinct()
                 .toList();
@@ -169,27 +165,5 @@ class MetricTagRuleTest {
     private Stream<Meter> ourMeters() {
         return registry.getMeters().stream()
                 .filter(meter -> meter.getId().getName().startsWith(MetricNames.PREFIX));
-    }
-
-    /**
-     * 태그 값으로 허용되는 어휘 — <b>전부 우리가 선언한 enum</b>과 고정 문자열이다.
-     *
-     * <p>새 어휘가 늘면 여기 등록해야 한다. 그 마찰이 의도다 — 태그 어휘가 조용히
-     * 늘어나는 것을 막는 것이 이 가드의 목적이다.
-     */
-    private static Set<String> allowedTagValues() {
-        List<String> values = new ArrayList<>();
-        Stream.of(LlmCallSite.values()).map(Enum::name).forEach(values::add);
-        Stream.of(LlmOutcome.values()).map(Enum::name).forEach(values::add);
-        Stream.of(PipelineStage.values()).map(Enum::name).forEach(values::add);
-        Stream.of(StageOutcome.values()).map(Enum::name).forEach(values::add);
-        Stream.of(SafetyClause.values()).map(Enum::name).forEach(values::add);
-        Stream.of(GateOutcome.values()).map(Enum::name).forEach(values::add);
-        Stream.of(AnalysisOutcome.values()).map(Enum::name).forEach(values::add);
-        Stream.of(ContributionNotAllowedException.Reason.values()).map(Enum::name)
-                .forEach(values::add);
-        // 고정 문자열 — 「사유 없음」과 토큰 방향
-        values.addAll(Arrays.asList("NONE", "input", "output"));
-        return values.stream().collect(Collectors.toUnmodifiableSet());
     }
 }

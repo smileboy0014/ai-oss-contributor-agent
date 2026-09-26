@@ -58,6 +58,9 @@ management:
         # 「켜는 것은 배포 결정이지 코드 기본값이 아니다」):
         #   · management.server.port 를 앱 포트와 분리한다
         #   · 인증을 붙이거나 내부망에만 바인드한다
+        #
+        # 🔴 이 결정은 주석이 아니라 이슈로 세워 뒀다 → #74.
+        #   주석에만 있으면 배포 시 잊히고 그대로 나간다.
         include: health,info,metrics
 
 github:

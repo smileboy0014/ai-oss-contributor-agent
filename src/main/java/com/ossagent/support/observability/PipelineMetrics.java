@@ -4,9 +4,11 @@ import com.ossagent.agent.domain.LlmCallSite;
 import com.ossagent.agent.domain.LlmUsage;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -123,6 +125,23 @@ public class PipelineMetrics {
                 .tag(MetricNames.TAG_OUTCOME, outcome.name())
                 .register(registry)
                 .increment(count));
+    }
+
+    /**
+     * 후보 상태 게이지를 등록한다 — 값은 호출자가 들고 있는 {@link AtomicLong} 을 읽는다.
+     *
+     * <p>🔴 <b>이 메서드가 있는 이유는 「태그를 만드는 유일한 지점」을 사실로 유지하기
+     * 위해서다.</b> 초안에서는 {@code CandidateStatusGauge} 가 {@code MeterRegistry} 를
+     * 직접 받아 등록했는데, 그러면 이 클래스의 javadoc 이 <b>거짓말</b>이 되고
+     * 다음 사람이 같은 패턴을 복제할 근거가 된다.
+     *
+     * <p>{@code CandidateMetricStatus} 를 따로 둔 이유는 {@link PipelineStage} 와 같다 —
+     * {@code support} 가 {@code candidate.domain} 을 import 하지 않게 한다.
+     */
+    public void registerCandidateGauge(String statusName, AtomicLong value) {
+        Gauge.builder(MetricNames.CANDIDATE_COUNT, value, AtomicLong::doubleValue)
+                .tag(MetricNames.TAG_STATUS, statusName)
+                .register(registry);
     }
 
     private void tokens(LlmCallSite site, String direction, int amount) {

@@ -2,9 +2,7 @@ package com.ossagent.candidate.application;
 
 import com.ossagent.candidate.adapter.out.persistence.ContributionCandidateRepository;
 import com.ossagent.candidate.domain.CandidateStatus;
-import com.ossagent.support.observability.MetricNames;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tags;
+import com.ossagent.support.observability.PipelineMetrics;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -43,16 +41,23 @@ public class CandidateStatusGauge {
     private final ContributionCandidateRepository candidates;
     private final Map<CandidateStatus, AtomicLong> values = new EnumMap<>(CandidateStatus.class);
 
+    /**
+     * ⚠️ {@code MeterRegistry} 를 직접 받지 <b>않는다.</b> {@link PipelineMetrics} 가
+     * 「태그를 만드는 유일한 지점」이라는 주장이 사실이려면 여기서도 그것을 거쳐야 한다 —
+     * 초안은 레지스트리를 직접 받아 그 주장을 거짓으로 만들고 있었다.
+     *
+     * <p>⚠️ 등록 실패는 <b>흡수하지 않는다</b>(fail-fast). 기동이 실패하면 사람이 바로
+     * 알아차리는 반면, 흡수하면 「게이지가 없는 채로 도는」 상태가 조용히 계속된다.
+     * 이것은 {@link #refresh()} 의 방어(업무를 죽이지 않는다)와 <b>다른 판단</b>이고,
+     * 의도한 것이다.
+     */
     public CandidateStatusGauge(ContributionCandidateRepository candidates,
-            MeterRegistry registry) {
+            PipelineMetrics metrics) {
         this.candidates = candidates;
         for (CandidateStatus status : CandidateStatus.values()) {
             AtomicLong holder = new AtomicLong();
             values.put(status, holder);
-            registry.gauge(MetricNames.CANDIDATE_COUNT,
-                    Tags.of(MetricNames.TAG_STATUS, status.name()),
-                    holder,
-                    AtomicLong::doubleValue);
+            metrics.registerCandidateGauge(status.name(), holder);
         }
     }
 

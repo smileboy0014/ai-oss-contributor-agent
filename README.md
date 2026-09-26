@@ -6,7 +6,7 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 
 - OSS 저장소 등록 및 조회: `POST/GET /api/repositories`
 - 스캔 작업 요청 경계: `POST /api/repositories/{id}/scan`
-- 기여 후보 조회 API 경계: `GET /api/candidates`
+- 기여 후보 조회 API: `GET /api/candidates` (상태·난이도·신뢰도 필터 + 페이지네이션) · `GET /api/candidates/{id}`
 - PostgreSQL/Redis 로컬 개발 환경과 H2 기본 프로필
 - `DISCOVERED`부터 `PR_CREATED`까지의 후보 상태 모델
 - **GitHub 읽기 능력**: 저장소 메타데이터·파일 조회(`RepositorySource`), open 이슈 조회(`IssueSource`).
@@ -19,7 +19,8 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 
 구현 순서는 Issue Scanner → 정책/이슈 분석 → Candidate 영속화 → Sandbox 기반 구현·검증 → 사용자 Fork의 Draft PR 생성입니다. 원본 저장소 직접 push와 자동 merge는 지원하지 않습니다.
 
-> ⚠️ 이슈 수집·샌드박스 실행·PR 생성은 **아직 구현되지 않았습니다.** `scan`은 요청 사실만 기록하고 `GET /api/candidates`는 빈 배열을 반환합니다.
+> ⚠️ 샌드박스 실행·PR 생성은 **아직 구현되지 않았습니다.** `scan`은 요청 사실만 기록합니다.
+> 후보 조회 API 는 동작하지만 **후보를 만드는 경로(#11)가 없어 결과는 아직 비어 있습니다.**
 
 ## 시작하기
 

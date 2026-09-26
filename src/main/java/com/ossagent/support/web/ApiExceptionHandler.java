@@ -1,5 +1,6 @@
 package com.ossagent.support.web;
 
+import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.repository.domain.RepositoryAlreadyRegisteredException;
 import com.ossagent.repository.domain.RepositoryNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -19,6 +20,11 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(RepositoryNotFoundException.class)
     public ProblemDetail handleNotFound(RepositoryNotFoundException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+
+    @ExceptionHandler(CandidateNotFoundException.class)
+    public ProblemDetail handleCandidateNotFound(CandidateNotFoundException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
     }
 

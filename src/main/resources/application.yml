@@ -35,8 +35,10 @@ spring:
 #   여기가 오염되면 전부 오염된다 — MdcLogPatternTest 가 그것을 고정한다.
 #
 # ⚠ stage 는 두 어휘가 섞인다 — LLM 구간은 LlmCallSite, 파이프라인은 PipelineStage.
-#   중첩되면 안쪽이 바깥을 덮었다가 되돌아온다. 「지금 어느 단계인가」는 읽는 사람에게
-#   하나의 질문이라 같은 키를 쓴다.
+#   「지금 어느 단계인가」는 읽는 사람에게 하나의 질문이라 같은 키를 쓴다.
+#   🔴 중첩 시 안쪽이 바깥을 덮었다가 되돌아오는 것은 저절로 되지 않는다 —
+#      RecordingLanguageModel 이 이전 값을 챙겨 복원한다. remove 로 끝내면 삭제가 되어
+#      바깥이 넣어 둔 값이 사라진다. 자세한 것은 logging.md
 logging:
   pattern:
     # %X{key:-} 의 ':-' 는 「없으면 빈 문자열」이다. 없으면 'key_IS_UNDEFINED' 가 찍힌다

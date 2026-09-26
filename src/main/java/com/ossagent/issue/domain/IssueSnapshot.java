@@ -1,5 +1,6 @@
 package com.ossagent.issue.domain;
 
+import com.ossagent.support.secret.TokenRedactor;
 import java.time.Instant;
 import java.util.List;
 
@@ -31,12 +32,38 @@ public record IssueSnapshot(
         Instant updatedAt,
         boolean pullRequest) {
 
+    /**
+     * 🔴 <b>여기가 시크릿 스크럽의 강제 지점이다</b> — S-4 · 이슈 #28.
+     *
+     * <p>이슈 본문·제목은 대상 저장소 사용자가 쓴 <b>임의 텍스트</b>다. 로그를 붙여넣으며
+     * 토큰이 섞이는 일이 흔하고, 그 값은 DB({@code issue.body})로도 가고 LLM 프롬프트로도
+     * 간다. 호출자마다 스크럽을 기억하게 하면 언젠가 빠진다 — 실제로
+     * {@code Issue.applySnapshot} 이 원문을 그대로 대입하고 있었다.
+     *
+     * <p>모든 이슈 본문이 이 생성자를 통과하므로, 여기서 가리면 <b>스크럽되지 않은 본문이
+     * 존재할 수 없다.</b> {@code AgentRun.fail} · {@code ScrubbedRules} 와 같은 수법이다 —
+     * 이 저장소가 시크릿을 막는 방식은 「잊지 않고 부른다」가 아니라 <b>「부를 수밖에 없는
+     * 자리에 둔다」</b>이다.
+     *
+     * <p>{@code labels} 는 가리지 않는다. 라벨 이름은 메인테이너가 정한 짧은 식별자이지
+     * 자유 텍스트가 아니고, 후보 판정이 {@code good first issue} 같은 값을 그대로 비교한다.
+     *
+     * <p>{@code title} 에 {@code @ExternalText} 마커가 없는 것은 {@code TEXT} 컬럼이
+     * 아니기 때문이지 외부 텍스트가 아니어서가 아니다 — <b>컬럼 길이는 보안 경계가 아니다.</b>
+     *
+     * <p>⚠️ 스크럽은 <b>멱등</b>이라 재수집으로 같은 값이 여러 번 지나도 이중 마스킹이
+     * 생기지 않는다({@code TokenRedactorTest} 가 고정한다). 대신 <b>되돌릴 수 없다</b> —
+     * 원문이 필요한 소비자를 만들지 않는다.
+     *
+     * <p>{@code support.secret.TokenRedactor} 는 순수 문자열 유틸이라 규율 ①(도메인에 기술
+     * import 금지)에 걸리지 않는다. 도메인 엔티티 {@code AgentRun} 도 같은 것을 쓴다.
+     */
     public IssueSnapshot {
         if (number <= 0) {
             throw new IllegalArgumentException("이슈 번호는 1 이상이어야 합니다: " + number);
         }
-        title = title == null ? "" : title;
-        body = body == null ? "" : body;
+        title = TokenRedactor.redact(title == null ? "" : title);
+        body = TokenRedactor.redact(body == null ? "" : body);
         labels = labels == null ? List.of() : List.copyOf(labels);
     }
 

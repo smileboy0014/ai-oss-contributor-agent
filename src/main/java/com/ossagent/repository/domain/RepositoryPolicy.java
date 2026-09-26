@@ -177,8 +177,11 @@ public class RepositoryPolicy {
      */
     public void resolvePending(boolean allowed, String note, Clock clock) {
         if (isAiContributionForbidden()) {
+            // ⚠️ 메시지가 우회법을 안내하지 않는다. 「DB 를 고치면 된다」 같은 문장을 넣으면
+            //    막힌 사람에게 게이트를 돌아가는 법을 알려주는 꼴이고, 그것이 관행이 되면
+            //    S-5 게이트는 있으나 마나다. 막혔다는 사실과 근거만 남긴다
             throw new PolicyResolutionRejectedException(
-                    "금지 판정은 해소로 뒤집을 수 없다 — 사람이 DB 를 고쳐야 한다 (S-5 · FR-2)");
+                    "AI 기여 금지 판정은 해소로 뒤집지 않는다 (S-5 · FR-2)");
         }
         if (allowsContribution() && allowed) {
             // 이미 허용인데 또 허용하는 것은 아무것도 바꾸지 않는다.

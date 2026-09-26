@@ -16,6 +16,33 @@ cd "$ROOT" || exit 0
 # tree          — CI. 추적 파일 전체를 본다. --no-verify 우회가 여기서 잡힌다
 SCAN_MODE="${SCAN_MODE:-staged}"
 
+# 🔴 어느 grep 으로 돌았는지 남긴다.
+#
+#   #64 에서 이것 때문에 구멍을 못 볼 뻔했다 — 개발 머신의 grep 이 ugrep 이었고,
+#   그것은 BOM 을 알아서 건너뛴다. 프로브가 차단되길래 「이슈가 틀렸나」 했는데
+#   /usr/bin/grep(BSD)으로 돌리니 그대로 샜다. CI 의 GNU grep 도 샌다.
+#
+#   즉 로컬 게이트가 구멍을 가리고 있었다. 훅은 PATH 에서 찾은 grep 을 쓰므로
+#   사람마다 다른 구현으로 돈다. 반대 방향도 있다 — 로컬에서만 빨개지는 오탐.
+#
+#   ⚠ 구현을 강제하지 않는다. macOS 기본에 GNU grep 이 없고 개발 환경을 못 정한다.
+#     대신 **보이게** 한다. 「초록이었다」가 어느 구현의 초록인지 알 수 있어야
+#     다른 환경의 결과와 대조할 수 있다.
+GREP_IMPL=$(grep --version 2>&1 | head -1)
+
+# 🔴 sed 도 함께 남긴다 — 이제 sed 가 **판정에 개입**한다.
+#
+#   LC_ALL=C 를 빼면 BSD sed 가 BOM 을 「부정한 바이트열」로 보고 exit 1 · 0바이트를
+#   내보낸다(실측). 즉 구현·로케일 차이가 결과를 바꾸므로, grep 만 남기면
+#   「어느 조합의 초록인가」가 절반만 기록된다.
+#   ⚠ BSD sed 에는 --version 이 없다. 출력 문자열로 가르지 않는다(거부목록이 된다) —
+#   **종료코드**로 가른다. GNU·busybox 는 0, BSD 는 비 0 이다.
+if SED_IMPL=$(sed --version 2>/dev/null | head -1) && [ -n "$SED_IMPL" ]; then
+  :
+else
+  SED_IMPL="BSD 계열 (--version 미지원)"
+fi
+
 list_files() {
   if [ "$SCAN_MODE" = "tree" ]; then
     git ls-files
@@ -23,6 +50,48 @@ list_files() {
     git diff --cached --name-only --diff-filter=ACMR
   fi
 }
+
+# 🔴 UTF-8 BOM(EF BB BF)을 벗긴다 — 첫 줄에만.
+#
+#   BOM 3바이트가 줄 시작을 차지하면 개인키 검사의 ^ 뒤 대시에 닿지 않는다.
+#   .pem 은 헤더가 1행이라 BOM 하나에 파일 전체가 샌다(#64).
+#   OpenSSL 은 BOM 을 만들지 않지만 PowerShell 5.1 의 Out-File 기본값이 UTF-8 BOM 이라
+#   `openssl genrsa | Out-File key.pem` 경로가 존재한다.
+#
+#   ⚠ 정규식이 아니라 여기서 고치는 이유 — read_file 은 모든 패턴이 통과하는 단일
+#   지점이다. 정규식 7개를 각각 넓히는 대신 입력을 정규화한다.
+#
+#   ⚠ 첫 줄에만 적용한다. 파일 중간의 EF BB BF 는 BOM 이 아니라 정상 문자(U+FEFF)다.
+#   ⚠ LC_ALL=C 를 붙인다. UTF-8 로케일의 sed 는 BOM 을 「부정한 바이트열」로 보고
+#     거부할 수 있고, 그러면 게이트가 조용히 빈 출력을 내보낸다.
+strip_bom() {
+  LC_ALL=C sed $'1s/^\xef\xbb\xbf//'
+}
+
+# 🔴 strip_bom 이 동작하는지 기동 시 한 번 확인한다.
+#
+#   이 sed 가 실패하면 파이프가 빈 출력을 내고 **그 검사가 히트 0건**이 된다 —
+#   게이트가 「✅ 통과」를 찍으며 진짜 개인키를 그대로 커밋시킨다. 실측으로 재현했다.
+#
+#   ⚠ 이것은 이 스크립트가 고치려던 것과 **같은 종류의 실패**다. 구멍을 닫으면서
+#   「조용히 꺼지는 게이트」를 새로 만들었다 — 리뷰가 🔴 로 잡았다.
+#
+#   ⚠ 실패 범위가 「검사 하나」인 것은 strip_bom 을 **PEM 호출부로 좁힌 뒤**의 이야기다.
+#   처음에는 read_file 에 걸어서 **7개 검사 전부**가 함께 눈을 감았다. 좁혔어도
+#   이 점검은 그대로 둔다 — 하나가 조용히 꺼지는 것도 막아야 할 것은 같다.
+#
+#   파이프 안에서 개별 실패를 잡으려 하지 않는다 — $(…) 안의 pipefail 은 grep 의
+#   「매치 없음(1)」과 구분되지 않아서, 탐지기를 만들면 오히려 오탐으로 게이트가 죽는다.
+#   대신 **여기서 한 번, 실제 동작으로** 확인하고 안 되면 멈춘다.
+#   sed 부재·로케일 거부 같은 현실적 실패는 전부 여기서 걸린다.
+#
+#   ⚠ 「sed 가 돌았는가」가 아니라 「BOM 이 실제로 벗겨지는가」를 본다.
+if [ "$(printf '\xef\xbb\xbfx' | strip_bom)" != "x" ]; then
+  echo "❌ 게이트가 고장났습니다 — strip_bom 이 BOM 을 벗기지 못합니다."
+  echo "   이대로 두면 개인키 검사가 히트 0건이 되어 키 파일이 그대로 통과합니다."
+  echo "   sed 가 있는지, LC_ALL=C 가 먹는지 확인하세요."
+  exit 1
+fi
 
 read_file() {
   if [ "$SCAN_MODE" = "tree" ]; then
@@ -170,7 +239,21 @@ for f in $files; do
   #   🕳 그래서 javadoc 이어짐 줄(「 * -----BEGIN …」)은 탈출구 없이 막힌다.
   #     지금 저장소에 그런 줄은 없지만, 생기면 예시 쪽을 고쳐라 —
   #     화이트리스트를 되살리는 것은 위에 적은 이유로 답이 아니다.
-  pk_hits=$(read_file "$f" \
+  # 🔴 BOM 을 여기서만 벗긴다 — 이 검사가 유일하게 ^ 앵커를 쓰기 때문이다.
+  #
+  #   위 scan_pattern 6개는 전부 비앵커라 BOM 3바이트가 앞에 붙어도 그대로 매치된다.
+  #   실측으로 확인했다(#64) — strip_bom 을 떼고 BOM 붙은 표본 7종을 돌리면
+  #   **PEM 하나만 샌다.**
+  #
+  #   ⚠ 처음에는 read_file 전체에 걸었다. 그랬더니 그 sed 가 **7개 검사 전부의
+  #   단일 실패점**이 되어, 죽는 순간 히트 0건으로 게이트가 통과해 버렸다.
+  #   자가 점검으로 그 통과는 막았지만, 애초에 **필요한 것보다 넓은 수정**이었다.
+  #   여기로 좁히면 sed 가 죽어도 실명하는 것은 이 검사 하나다.
+  #   덤으로 sed 기동이 파일당 8회 → 1회가 된다(tree 모드 23.7s → 19.5s, 실측).
+  #
+  # 🔴 **앵커(^)를 쓰는 패턴을 새로 추가하면 그 호출부에도 strip_bom 을 걸어야 한다.**
+  #   위 scan_pattern 은 BOM 을 벗기지 않는다 — 비앵커라 필요가 없어서다.
+  pk_hits=$(read_file "$f" | strip_bom \
     | grep -nE '^[[:space:]]*([-*>][[:space:]]+)?-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?' \
     || true)
   if [ -n "$pk_hits" ]; then
@@ -191,8 +274,12 @@ if [ "$found" -gt 0 ]; then
   echo "  1. 실제 값을 <REPLACE_WITH_SECRET_MANAGER> 플레이스홀더로 바꾸고 .env.example 에만 남깁니다."
   echo "  2. 실행 시 값은 환경변수 또는 Secret Manager 에서 주입합니다."
   echo "  3. 이미 유출된 크리덴셜은 파일을 지우는 것으로 끝나지 않습니다 — 즉시 폐기·재발급하세요."
+  echo ""
+  echo "  (grep: ${GREP_IMPL} · sed: ${SED_IMPL})"
   exit 1
 fi
 
 echo "✅ 시크릿 검사 통과 (SCAN_MODE=${SCAN_MODE} · 파일 $(echo "$files" | wc -l | tr -d ' ')개)"
+echo "   grep: ${GREP_IMPL}"
+echo "   sed:  ${SED_IMPL}"
 exit 0

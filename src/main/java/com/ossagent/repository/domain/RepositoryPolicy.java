@@ -1,6 +1,7 @@
 package com.ossagent.repository.domain;
 
 import com.ossagent.support.ExternalText;
+import com.ossagent.support.secret.TokenRedactor;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -88,11 +89,39 @@ public class RepositoryPolicy {
      *
      * <p>보류는 <b>자동으로 풀리지 않고 사람이 본다.</b> 근거가 없으면 판단할 수가 없다.
      *
+     * <p>⚠️ <b>해소된 뒤에도 보존된다</b>(#24). {@code resolvedAt} 이 이미 「보류 아님」을
+     * 말해 주므로 비울 이유가 없고, 비우면 <b>왜 보류였는지가 DB 에서 사라진다.</b>
+     *
      * <p>⚠️ <b>우리 어휘만</b> 들어간다 — 경로 + 사유 코드. 예외 원문을 넣지 않는다 (S-4).
      * {@code TEXT} 가 아니라 {@code VARCHAR} 인 것도 같은 이유다 — 외부 텍스트가 아니다.
      */
     @Column(length = 1024)
     private String pendingReason;
+
+    /**
+     * 사람이 보류를 해소한 시각 — Q-8 · #24. 비어 있으면 <b>기계 판정</b>이다.
+     *
+     * <p>🔴 이것이 있어야 {@code aiContributionAllowed = TRUE} 가 「LLM 이 문서를 읽고
+     * 판정한 것」인지 「사람이 보류를 풀어 준 것」인지 구분된다. 로그로만 남기면
+     * <b>S-5 판정의 출처가 사라진다.</b>
+     *
+     * <p>🔴 {@link #reanalyze} 가 사람 판단을 <b>허용 방향으로</b> 덮어쓰지 못하게 하는
+     * 근거다. 금지 방향은 막지 않는다 — {@link #reanalyze} javadoc 참조.
+     */
+    private Instant resolvedAt;
+
+    /**
+     * 사람이 쓴 판단 근거 — Q-8 · #24.
+     *
+     * <p>⚠️ {@link #pendingReason} 과 <b>다른 정보다.</b> 저쪽은 기계가 기록한 보류 원인
+     * (어느 경로를 왜 못 읽었는가)이고 이쪽은 사람이 무엇을 보고 그렇게 판단했는가다.
+     * 그래서 해소해도 저쪽을 비우지 않는다.
+     *
+     * <p>⚠️ {@code @ExternalText} 를 달지 않는다. 대입 지점이 {@link #resolvePending} 하나뿐이고
+     * 거기서 스크럽하므로 외부 텍스트가 아니다 — {@code pendingReason}(V5)과 같은 취급이다.
+     */
+    @Column(length = 1024)
+    private String resolutionNote;
 
     /** 판정이 서지 않았는가. NULL 은 「허용」이 아니라 「보류」다 — S-5. */
     public boolean isAiContributionUndetermined() {
@@ -111,6 +140,98 @@ public class RepositoryPolicy {
      */
     public boolean allowsContribution() {
         return Boolean.TRUE.equals(aiContributionAllowed);
+    }
+
+    /** 사람이 판단한 정책인가. 비어 있으면 기계 판정이다 — Q-8 · #24. */
+    public boolean isHumanResolved() {
+        return resolvedAt != null;
+    }
+
+    /**
+     * 🔴 사람이 보류를 해소한다 — Q-8 · #24. {@link #reanalyze} 와 <b>다른 문</b>이다.
+     *
+     * <p>Q-8 이 「보류는 자동으로 풀리지 않고 사람이 명시적으로 푼다」고 정했고,
+     * 이것이 그 유일한 경로다.
+     *
+     * <h2>무엇을 허용하고 무엇을 막는가</h2>
+     *
+     * <table border="1">
+     *   <caption>현재 상태별</caption>
+     *   <tr><td>{@code NULL} (보류)</td><td>✅ <b>양방향</b> — 허용·금지 어느 쪽으로도</td></tr>
+     *   <tr><td>{@code FALSE} (금지)</td><td>❌ 🔴 API 로 뒤집으면 「AI 기여 금지 저장소 제외」가
+     *       호출 한 번으로 풀린다</td></tr>
+     *   <tr><td>{@code TRUE} (허용)</td><td>⚠️ <b>금지 방향만</b> — 조이는 것은 언제든 가능하다</td></tr>
+     * </table>
+     *
+     * <p>🔴 <b>「해소」가 「허용」이 아니다.</b> 사람이 문서를 읽고 「이 저장소는 AI 기여
+     * 금지다」라고 판단하는 것도 보류 해소의 정상적인 결과다. {@code TRUE} 전용으로 두면
+     * 금지 판정을 내리려고 DB 를 손으로 고치게 되고, 그쪽이 더 위험하다.
+     *
+     * <p>⚠️ {@code pendingReason} 을 <b>비우지 않는다.</b> {@code resolvedAt} 이 이미 「보류
+     * 아님」을 말해 주고, 비우면 왜 보류였는지가 DB 에서 사라진다.
+     *
+     * @param allowed 사람의 판정. {@code true} 면 허용, {@code false} 면 금지
+     * @param note    판단 근거. <b>여기서 스크럽된다</b> — 사람이 대상 저장소 원문을
+     *                붙여넣을 수 있다 (S-4)
+     * @throws PolicyResolutionRejectedException 해소할 수 없는 상태
+     */
+    public void resolvePending(boolean allowed, String note, Clock clock) {
+        if (isAiContributionForbidden()) {
+            throw new PolicyResolutionRejectedException(
+                    "금지 판정은 해소로 뒤집을 수 없다 — 사람이 DB 를 고쳐야 한다 (S-5 · FR-2)");
+        }
+        if (allowsContribution() && allowed) {
+            // 이미 허용인데 또 허용하는 것은 아무것도 바꾸지 않는다.
+            // 조이는 방향(allowed == false)은 아래로 통과한다
+            throw new PolicyResolutionRejectedException("이미 허용된 정책이다 — 해소할 것이 없다");
+        }
+        this.aiContributionAllowed = allowed;
+        this.resolutionNote = truncate(TokenRedactor.redact(requireNote(note)));
+        this.resolvedAt = clock.instant();
+        this.updatedAt = clock.instant();
+    }
+
+    private static String requireNote(String note) {
+        if (note == null || note.isBlank()) {
+            // 🔴 근거 없는 해소를 남기지 않는다. 나중에 왜 그렇게 판단했는지 알 수 없으면
+            //    그 판정은 재검토도 못 한다 — pending(reason) 이 같은 이유로 사유를 요구한다
+            throw new PolicyResolutionRejectedException("해소 근거는 필수다 — 사람이 판단한 이유가 남아야 한다");
+        }
+        return note;
+    }
+
+    /**
+     * 🔴 구현 단계로 넘어가도 좋다는 <b>통행증</b>을 발급한다 — S-5 · #24.
+     *
+     * <p>발급하는 유일한 곳이다. {@link PolicyClearance} 의 생성자가 패키지 가시성이라
+     * 이 패키지 밖에서는 만들 수 없고, 그래서 <b>정책을 읽지 않고 통행증을 손에 넣는
+     * 경로가 없다.</b>
+     *
+     * <p>⚠️ <b>엔티티가 자기 통행증을 발급하는 이유</b> — 팩토리를 {@code PolicyClearance}
+     * 쪽에 {@code of(RepositoryPolicy)} 로 두면, 그것을 부르려고 {@code candidate} 가
+     * <b>이 엔티티를 import</b> 하게 된다. 규율 ④ 가 막는 바로 그 의존이다.
+     * 여기서 발급하면 바깥은 {@code PolicyClearance} 만 보면 된다.
+     *
+     * <p>⚠️ <b>보류({@code NULL})도 거부한다.</b> {@link #allowsContribution()} 이
+     * {@code Boolean.TRUE.equals(...)} 라 보류와 금지를 함께 막는다 — Q-8 · S-5 의
+     * 「판정 불가를 통과로 처리하지 않는다」.
+     *
+     * <p>⚠️ 트랜잭션 안에서 부른다. {@link #repository} 가 LAZY 라 밖에서 부르면
+     * {@code LazyInitializationException} 이 난다. <b>게이트가 그런 이유로 죽으면
+     * 호출자가 그것을 {@code catch} 해 넘길 위험이 생긴다.</b>
+     *
+     * @throws ContributionNotAllowedException 보류 또는 금지
+     */
+    public PolicyClearance clearance() {
+        if (isAiContributionUndetermined()) {
+            throw new ContributionNotAllowedException(
+                    repository.getId(), ContributionNotAllowedException.Reason.UNDETERMINED);
+        }
+        if (isAiContributionForbidden()) {
+            throw new ContributionNotAllowedException(
+                    repository.getId(), ContributionNotAllowedException.Reason.FORBIDDEN);
+        }
+        return new PolicyClearance(repository.getId());
     }
 
     // ─────────────────────────────────────────────────────────
@@ -165,6 +286,24 @@ public class RepositoryPolicy {
      * <b>엔티티가 거부하면 지울 수 없다.</b>
      *
      * <p>해소는 사람의 명시적 행위이고 그 API 는 #24 다. 여기에 자동 경로를 만들지 않는다.
+     *
+     * <h2>🔴 사람이 해소한 뒤의 보호는 <b>비대칭</b>이다 (#24)</h2>
+     *
+     * <p>Q-8 의 「보류는 자동으로 풀리지 않는다」는 <b>방향성 규칙</b>이다 — 막는 것은
+     * <b>느슨해지는 쪽</b>이다. 위 두 가드가 정확히 그렇게 되어 있다(보류·금지에서 거부).
+     *
+     * <table border="1">
+     *   <caption>{@code resolvedAt != null} 일 때</caption>
+     *   <tr><td>새 판정이 {@code TRUE} (유지·완화)</td><td><b>거부</b> — 사람 판단을 자동이
+     *       재확인할 이유가 없다</td></tr>
+     *   <tr><td>새 판정이 {@code FALSE} (조여짐)</td><td>🔴 <b>허용</b></td></tr>
+     * </table>
+     *
+     * <p>🔴 <b>조여지는 쪽까지 막으면 S-5 가 깨진다.</b> 사람이 허용으로 해소한 뒤 대상
+     * 저장소가 {@code CONTRIBUTING.md} 에 AI 기여 금지를 명시하면, 재분석이 거부되어
+     * <b>금지된 저장소에 계속 Draft PR 을 만들게 된다.</b> 그리고 되돌릴 경로가 없다 —
+     * 「승인을 무겁게」가 아니라 <b>되돌릴 수 없는 방향을 고정</b>하는 것이고,
+     * {@code external-deps.md} 의 「모르면 되돌릴 수 없는 쪽을 피한다」에 어긋난다.
      */
     public void reanalyze(RuleReading reading, Clock clock) {
         if (isAiContributionUndetermined()) {
@@ -177,6 +316,12 @@ public class RepositoryPolicy {
         }
         if (reading == null || reading.isUndetermined()) {
             throw new IllegalArgumentException("판정이 서지 않은 결과로 갱신할 수 없다");
+        }
+        // 🔴 사람이 해소한 판정은 자동으로 「유지·완화」되지 않는다 — 방향을 본다.
+        //    금지로 조이는 것은 아래로 빠져나가 허용된다
+        if (isHumanResolved() && Boolean.TRUE.equals(reading.aiContributionAllowed())) {
+            throw new IllegalStateException(
+                    "사람이 해소한 판정을 재분석이 허용으로 되돌리지 않는다 (Q-8 · #24)");
         }
         apply(reading, clock);
     }

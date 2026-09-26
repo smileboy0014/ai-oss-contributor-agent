@@ -16,6 +16,20 @@ cd "$ROOT" || exit 0
 # tree          — CI. 추적 파일 전체를 본다. --no-verify 우회가 여기서 잡힌다
 SCAN_MODE="${SCAN_MODE:-staged}"
 
+# 🔴 어느 grep 으로 돌았는지 남긴다.
+#
+#   #64 에서 이것 때문에 구멍을 못 볼 뻔했다 — 개발 머신의 grep 이 ugrep 이었고,
+#   그것은 BOM 을 알아서 건너뛴다. 프로브가 차단되길래 「이슈가 틀렸나」 했는데
+#   /usr/bin/grep(BSD)으로 돌리니 그대로 샜다. CI 의 GNU grep 도 샌다.
+#
+#   즉 로컬 게이트가 구멍을 가리고 있었다. 훅은 PATH 에서 찾은 grep 을 쓰므로
+#   사람마다 다른 구현으로 돈다. 반대 방향도 있다 — 로컬에서만 빨개지는 오탐.
+#
+#   ⚠ 구현을 강제하지 않는다. macOS 기본에 GNU grep 이 없고 개발 환경을 못 정한다.
+#     대신 **보이게** 한다. 「초록이었다」가 어느 구현의 초록인지 알 수 있어야
+#     다른 환경의 결과와 대조할 수 있다.
+GREP_IMPL=$(grep --version 2>&1 | head -1)
+
 list_files() {
   if [ "$SCAN_MODE" = "tree" ]; then
     git ls-files
@@ -24,12 +38,29 @@ list_files() {
   fi
 }
 
+# 🔴 UTF-8 BOM(EF BB BF)을 벗긴다 — 첫 줄에만.
+#
+#   BOM 3바이트가 줄 시작을 차지하면 개인키 검사의 ^ 뒤 대시에 닿지 않는다.
+#   .pem 은 헤더가 1행이라 BOM 하나에 파일 전체가 샌다(#64).
+#   OpenSSL 은 BOM 을 만들지 않지만 PowerShell 5.1 의 Out-File 기본값이 UTF-8 BOM 이라
+#   `openssl genrsa | Out-File key.pem` 경로가 존재한다.
+#
+#   ⚠ 정규식이 아니라 여기서 고치는 이유 — read_file 은 모든 패턴이 통과하는 단일
+#   지점이다. 정규식 7개를 각각 넓히는 대신 입력을 정규화한다.
+#
+#   ⚠ 첫 줄에만 적용한다. 파일 중간의 EF BB BF 는 BOM 이 아니라 정상 문자(U+FEFF)다.
+#   ⚠ LC_ALL=C 를 붙인다. UTF-8 로케일의 sed 는 BOM 을 「부정한 바이트열」로 보고
+#     거부할 수 있고, 그러면 게이트가 조용히 빈 출력을 내보낸다.
+strip_bom() {
+  LC_ALL=C sed $'1s/^\xef\xbb\xbf//'
+}
+
 read_file() {
   if [ "$SCAN_MODE" = "tree" ]; then
     cat "$1" 2>/dev/null
   else
     git show ":$1" 2>/dev/null
-  fi
+  fi | strip_bom
 }
 
 files=$(list_files)
@@ -191,8 +222,11 @@ if [ "$found" -gt 0 ]; then
   echo "  1. 실제 값을 <REPLACE_WITH_SECRET_MANAGER> 플레이스홀더로 바꾸고 .env.example 에만 남깁니다."
   echo "  2. 실행 시 값은 환경변수 또는 Secret Manager 에서 주입합니다."
   echo "  3. 이미 유출된 크리덴셜은 파일을 지우는 것으로 끝나지 않습니다 — 즉시 폐기·재발급하세요."
+  echo ""
+  echo "  (grep: ${GREP_IMPL})"
   exit 1
 fi
 
 echo "✅ 시크릿 검사 통과 (SCAN_MODE=${SCAN_MODE} · 파일 $(echo "$files" | wc -l | tr -d ' ')개)"
+echo "   grep: ${GREP_IMPL}"
 exit 0

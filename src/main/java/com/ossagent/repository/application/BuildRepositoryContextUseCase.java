@@ -163,6 +163,11 @@ public class BuildRepositoryContextUseCase {
         private final Map<ExcludedPathReason, Integer> excluded =
                 new EnumMap<>(ExcludedPathReason.class);
         private ContextBudget budget;
+        /**
+         * 🔴 읽기를 <b>시도한</b> 횟수. 파일 예산과 다른 축이다 — 실패한 읽기는 예산을
+         * 쓰지 않으므로, 이 카운터가 없으면 실패가 계속될 때 후보 전량을 두드린다.
+         */
+        private int fetchAttempts;
 
         private Selection(RepositoryCoordinates coordinates, String ref, RepositoryTree tree,
                 Integer issueNumber) {
@@ -291,12 +296,17 @@ public class BuildRepositoryContextUseCase {
                 budget = budget.markTruncated();
                 return;
             }
-            if (!budget.hasRoom()) {
+            if (!budget.hasRoom() || fetchAttempts >= properties.maxFetchAttempts()) {
+                // 🔴 두 상한을 함께 본다. 파일 예산만 보면 실패가 계속될 때 멈추지 않는다 —
+                //    흔한 낱말 하나가 수천 경로에 걸릴 수 있고(TERM 은 경로 부분 문자열
+                //    매칭이다), 그 호출이 전부 실패하면 저장소 하나가 시간당 예산을 태워
+                //    같은 토큰을 쓰는 #7·#8 까지 막는다
                 count(ExcludedPathReason.BUDGET_EXHAUSTED);
                 budget = budget.markTruncated();
                 return;
             }
 
+            fetchAttempts++;
             Optional<RepositoryFile> fetched = fetchOrSkip(path);
             if (fetched.isEmpty()) {
                 return;

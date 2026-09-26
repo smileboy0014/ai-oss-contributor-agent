@@ -258,6 +258,39 @@ class BuildRepositoryContextUseCaseTest {
     }
 
     @Test
+    void 읽기가_계속_실패해도_호출_횟수가_상한에서_멈춘다() {
+        // 🔴 파일 예산은 「성공한 선별」만 센다. 실패가 예산을 쓰지 않으므로 이 상한이
+        //    없으면 후보 전량을 두드리고, 저장소 하나가 시간당 토큰 예산을 태워
+        //    같은 토큰을 쓰는 #7·#8 까지 막는다
+        String[] paths = new String[50];
+        for (int i = 0; i < paths.length; i++) {
+            paths[i] = "src/main/java/org/x/KafkaTemplate" + i + ".java";
+        }
+        source.givenTree(REPO, REF, paths);
+        // givenFile 을 하지 않는다 — 트리에는 있고 읽으면 전부 404 다
+
+        // ⚠ maxFiles(3) < maxFetchAttempts(5) 여야 한다 — 반대면 아래 하한 보정이 끼어들어
+        //    이 테스트가 시도 상한이 아니라 그 보정을 재게 된다
+        useCase = new BuildRepositoryContextUseCase(repositories, policyGate, source,
+                new RepositoryContextProperties(3, 5, 120_000, 40_000, 40, false));
+        RepositoryContext context = useCase.build(issue("KafkaTemplate 문제", ""));
+
+        assertThat(source.fetchedPaths())
+                .as("성공이 0건이어도 호출은 상한에서 멈춰야 한다")
+                .hasSize(5);
+        assertThat(context.budget().truncated()).isTrue();
+    }
+
+    @Test
+    void 시도_상한이_파일_상한보다_작으면_올려_잡는다() {
+        var properties = new RepositoryContextProperties(12, 3, 120_000, 40_000, 40, false);
+
+        assertThat(properties.maxFetchAttempts())
+                .as("「담을 수 있는데 두드릴 수 없는」 설정을 조용히 받아들이지 않는다")
+                .isEqualTo(12);
+    }
+
+    @Test
     void 레이트리밋은_삼키지_않고_전파한다() {
         source.givenTree(REPO, REF, SOURCE_PATH);
         source.failFileWith(SOURCE_PATH, new GitHubRateLimitException(403,
@@ -305,7 +338,8 @@ class BuildRepositoryContextUseCaseTest {
     private BuildRepositoryContextUseCase withProperties(int maxFiles, int maxTotalChars,
             int maxFileChars) {
         return new BuildRepositoryContextUseCase(repositories, policyGate, source,
-                new RepositoryContextProperties(maxFiles, maxTotalChars, maxFileChars, 40, false));
+                new RepositoryContextProperties(maxFiles, 0, maxTotalChars, maxFileChars, 40,
+                        false));
     }
 
     private static AnalyzableIssue issue(String title, String body) {

@@ -37,16 +37,12 @@ public record RepositoryTree(String sha, List<RepositoryTreeEntry> entries, bool
     }
 
     /**
-     * 이 경로가 트리에 <b>파일로</b> 있는가.
+     * 경로 집합 — <b>반복 조회하는 쪽이 한 번 만들어 쓴다.</b>
      *
-     * <p>의존성 확장(FR-7)이 쓴다 — import 에서 유추한 경로가 실재하는지 확인해야
-     * 없는 파일에 호출을 낭비하지 않는다.
+     * <p>⚠️ 「이 경로가 있는가」를 묻는 메서드를 두지 않는다. 그러면 호출자가 후보마다
+     * 부르게 되고, 그때마다 전체 항목을 훑는다. 집합을 한 번 만들어 넘기는 쪽이
+     * 반복 횟수를 트리 크기에서 떼어 놓는다.
      */
-    public boolean containsBlob(String path) {
-        return path != null && blobs().stream().anyMatch(it -> it.path().equals(path));
-    }
-
-    /** 경로 집합 — 반복 조회가 잦은 호출자가 한 번 만들어 쓴다 */
     public Set<String> blobPaths() {
         Set<String> paths = new LinkedHashSet<>();
         for (RepositoryTreeEntry entry : blobs()) {

@@ -17,6 +17,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * {@code adapter/out/*} 에 두면 {@code ExternalAdapterIsolationTest} 가 잡는다.
  *
  * @param maxFiles        컨텍스트에 담을 파일 수 상한
+ * @param maxFetchAttempts 🔴 <b>읽기를 시도하는 횟수</b>의 상한 — {@code maxFiles} 와 다른 축이다.
+ *                         아래 참조
  * @param maxTotalChars   전체 문자 수 상한
  * @param maxFileChars    파일 하나의 상한. 넘으면 <b>통째로 버린다</b> — 잘린 소스는 모델을 헷갈리게 한다
  * @param maxKeywords     키워드 수 상한. 너무 많으면 점수가 평평해져 변별력이 사라진다
@@ -25,18 +27,38 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("agent.context")
 public record RepositoryContextProperties(
         int maxFiles,
+        int maxFetchAttempts,
         int maxTotalChars,
         int maxFileChars,
         int maxKeywords,
         Boolean importExpansion) {
 
     private static final int DEFAULT_MAX_FILES = 12;
+
+    /**
+     * 🔴 <b>{@code maxFiles} 만으로는 호출 수가 묶이지 않는다.</b>
+     *
+     * <p>파일 예산은 <b>성공한 선별</b>만 센다. 읽기에 실패한 경로(404 · 1MB 초과 ·
+     * 심볼릭링크)는 예산을 쓰지 않으므로, 실패만 계속되면 <b>후보 전량을 순회하며
+     * 계속 호출</b>한다. 흔한 낱말 하나가 수천 경로에 걸릴 수 있고(`TERM` 은 경로
+     * 부분 문자열 매칭이다), 그러면 저장소 하나가 시간당 예산을 태워
+     * <b>같은 토큰을 쓰는 규약 수집(#7)·이슈 수집(#8)까지 막는다.</b>
+     *
+     * <p>그래서 「몇 개를 담을 것인가」와 「몇 번 두드릴 것인가」를 가른다.
+     * 기본값은 파일 상한의 두 배 — 실패가 절반이어도 목표를 채울 수 있고,
+     * 전부 실패해도 호출이 24회에서 멈춘다.
+     */
+    private static final int DEFAULT_MAX_FETCH_ATTEMPTS = 24;
     private static final int DEFAULT_MAX_TOTAL_CHARS = 120_000;
     private static final int DEFAULT_MAX_FILE_CHARS = 40_000;
     private static final int DEFAULT_MAX_KEYWORDS = 40;
 
     public RepositoryContextProperties {
         maxFiles = maxFiles <= 0 ? DEFAULT_MAX_FILES : maxFiles;
+        maxFetchAttempts = maxFetchAttempts <= 0 ? DEFAULT_MAX_FETCH_ATTEMPTS : maxFetchAttempts;
+        // 시도 상한이 파일 상한보다 작으면 목표를 채울 수 없다. 설정 실수를 조용히
+        // 받아들이지 않고 올려 잡는다 — 「담을 수 있는데 두드릴 수 없는」 상태를 만들지 않는다
+        maxFetchAttempts = Math.max(maxFetchAttempts, maxFiles);
         maxTotalChars = maxTotalChars <= 0 ? DEFAULT_MAX_TOTAL_CHARS : maxTotalChars;
         maxFileChars = maxFileChars <= 0 ? DEFAULT_MAX_FILE_CHARS : maxFileChars;
         maxKeywords = maxKeywords <= 0 ? DEFAULT_MAX_KEYWORDS : maxKeywords;
@@ -46,8 +68,8 @@ public record RepositoryContextProperties(
     }
 
     public static RepositoryContextProperties defaults() {
-        return new RepositoryContextProperties(DEFAULT_MAX_FILES, DEFAULT_MAX_TOTAL_CHARS,
-                DEFAULT_MAX_FILE_CHARS, DEFAULT_MAX_KEYWORDS, true);
+        return new RepositoryContextProperties(DEFAULT_MAX_FILES, DEFAULT_MAX_FETCH_ATTEMPTS,
+                DEFAULT_MAX_TOTAL_CHARS, DEFAULT_MAX_FILE_CHARS, DEFAULT_MAX_KEYWORDS, true);
     }
 
     public boolean importExpansionEnabled() {

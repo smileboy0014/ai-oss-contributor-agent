@@ -2,6 +2,7 @@ package com.ossagent.repository.application;
 
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
 import com.ossagent.repository.domain.OssRepository;
+import com.ossagent.repository.domain.PolicyDocumentFingerprints;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RuleReading;
 import java.time.Clock;
@@ -59,7 +60,7 @@ public class RepositoryPolicyWriter {
      */
     @Transactional
     public RepositoryPolicy savePending(OssRepository repository, RepositoryPolicy existing,
-            String reason) {
+            String reason, PolicyDocumentFingerprints prints) {
         if (existing != null) {
             log.warn("규약을 다시 읽지 못했다 repo={} reason={} — 기존 판정을 유지한다",
                     repository.getUrl(), reason);
@@ -67,7 +68,45 @@ public class RepositoryPolicyWriter {
         }
         log.info("규약 판정 보류 repo={} reason={} — 사람이 해소한다 (#24)",
                 repository.getUrl(), reason);
-        return policies.save(RepositoryPolicy.pending(repository, reason, clock));
+        return policies.save(RepositoryPolicy.pending(repository, reason, prints, clock));
+    }
+
+    /**
+     * 문서를 확인했고 <b>바뀐 것이 없다</b> — 이슈 #68. 판정을 건드리지 않는다.
+     *
+     * <p>🔴 이 경로가 있어야 스캔마다 규약을 다시 볼 수 있다. LLM 을 부르지 않으므로
+     * 비용은 GitHub 조회뿐이고, 그래서 <b>「규약이 얼마나 자주 바뀌는가」를 몰라도</b>
+     * 재확인 주기를 정할 수 있다 — PLAN-14 R-4 가 TTL 을 정하지 못한 이유가 사라진다.
+     */
+    @Transactional
+    public RepositoryPolicy saveVerified(Long policyId, PolicyDocumentFingerprints prints) {
+        RepositoryPolicy managed = managed(policyId);
+        managed.markVerified(prints, clock);
+        return policies.save(managed);
+    }
+
+    /**
+     * 🔴 <b>바뀐 것을 관측했는데 판정이 서지 않는다 → 보류로 강등</b> — S-5 · 이슈 #68.
+     *
+     * <p>{@code WARN} 으로 남긴다. 이것은 오류가 아니라 <b>사람을 불러야 하는 상황</b>이고,
+     * 「막았다」는 사실이 사고 후에 증명되어야 한다 — {@code logging.md} 의
+     * 「안전 게이트는 통과한 것도 남긴다」.
+     *
+     * <p>⚠️ 사유에 <b>우리 어휘만</b> 넣는다 — 경로 + 사유 코드 (S-4).
+     */
+    @Transactional
+    public RepositoryPolicy saveUnverifiable(Long policyId, String reason,
+            PolicyDocumentFingerprints prints) {
+        RepositoryPolicy managed = managed(policyId);
+        log.warn("규약이 바뀌었는데 판정할 수 없다 repo={} reason={} — 보류로 강등한다 (S-5 · #68)",
+                managed.getRepository().getUrl(), reason);
+        managed.markUnverifiable(reason, prints, clock);
+        return policies.save(managed);
+    }
+
+    private RepositoryPolicy managed(Long policyId) {
+        return policies.findById(policyId).orElseThrow(
+                () -> new IllegalStateException("정책이 사라졌다: id=" + policyId));
     }
 
     /**
@@ -81,15 +120,14 @@ public class RepositoryPolicyWriter {
      */
     @Transactional
     public RepositoryPolicy saveAnalyzed(OssRepository repository, Long existingPolicyId,
-            RuleReading reading) {
+            RuleReading reading, PolicyDocumentFingerprints prints) {
         log.info("규약 판정 완료 repo={} aiAllowed={}",
                 repository.getUrl(), reading.aiContributionAllowed());
         if (existingPolicyId == null) {
-            return policies.save(RepositoryPolicy.analyzed(repository, reading, clock));
+            return policies.save(RepositoryPolicy.analyzed(repository, reading, prints, clock));
         }
-        RepositoryPolicy managed = policies.findById(existingPolicyId).orElseThrow(
-                () -> new IllegalStateException("정책이 사라졌다: id=" + existingPolicyId));
-        managed.reanalyze(reading, clock);
+        RepositoryPolicy managed = managed(existingPolicyId);
+        managed.reanalyze(reading, prints, clock);
         // dirty checking 에 기대지 않고 명시적으로 저장한다 — 경계가 바뀌어도 안 깨진다
         return policies.save(managed);
     }

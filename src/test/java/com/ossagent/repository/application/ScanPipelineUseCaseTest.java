@@ -196,17 +196,39 @@ class ScanPipelineUseCaseTest {
     }
 
     @Test
-    @DisplayName("🔴 정책이 이미 있으면 다시 분석하지 않는다 — 매 주기 LLM 을 태우지 않는다")
-    void 정책이_있으면_재분석하지_않는다() {
+    @DisplayName("🔴 정책이 이미 있어도 문서는 다시 읽는다 — 다만 LLM 은 태우지 않는다 (#68)")
+    void 정책이_있어도_문서는_다시_읽는다() {
         givenAllowedPolicy();
         issueSource.givenIssues(issue(1));
 
         pipeline.run(repositoryId);
 
+        assertThat(documents.calls())
+                .as("🔴 다시 읽지 않으면 대상 저장소가 AI 기여를 금지해도 영영 모른다 — "
+                        + "「한 번 허용이면 영원히 허용」(PLAN-14 R-4)이 곧 S-5 구멍이다")
+                .isNotEmpty();
         assertThat(interpreter.calls())
-                .as("analyze() 는 허용이면 재분석한다 — 「없을 때만」 부르지 않으면 토큰이 샌다")
+                .as("비싼 것은 GitHub 조회가 아니라 LLM 판정이다. 필수 경로가 전부 404 라 "
+                        + "판정할 텍스트가 없으면 부르지 않는다")
                 .isEmpty();
-        assertThat(documents.calls()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("🔴 두 번째 스캔은 지문이 같아 판정을 그대로 둔다 — 매 주기 토큰을 태우지 않는다 (#68)")
+    void 지문이_같으면_두_번째_스캔이_판정을_흔들지_않는다() {
+        givenAllowedPolicy();
+        issueSource.givenIssues(issue(1));
+
+        pipeline.run(repositoryId);
+        interpreter.reset();
+        pipeline.run(repositoryId);
+
+        assertThat(interpreter.calls())
+                .as("지문이 같으면 LLM 을 건너뛴다 — 이것이 없으면 매 스캔 재분석이라 비용이 터진다")
+                .isEmpty();
+        assertThat(policies.findByRepositoryId(repositoryId).orElseThrow().allowsContribution())
+                .as("재확인이 판정을 흔들면 안 된다")
+                .isTrue();
     }
 
     // ─────────────────────── 파이프라인 본류 ───────────────────────

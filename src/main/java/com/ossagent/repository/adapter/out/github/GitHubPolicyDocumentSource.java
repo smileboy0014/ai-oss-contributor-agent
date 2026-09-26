@@ -1,5 +1,6 @@
 package com.ossagent.repository.adapter.out.github;
 
+import com.ossagent.repository.domain.DocumentFingerprint;
 import com.ossagent.repository.domain.FetchedDocument;
 import com.ossagent.repository.domain.PolicyDocumentPath;
 import com.ossagent.repository.domain.PolicyDocumentSource;
@@ -88,7 +89,11 @@ public class GitHubPolicyDocumentSource implements PolicyDocumentSource {
             // 자르지 않는다. 잘린 뒷부분에 금지 문구가 있었는지 판정할 방법이 없다
             log.warn("규약 문서가 상한을 넘었다 repo={} path={} size={} cap={}",
                     coordinates.fullName(), path.path(), content.length(), maxDocumentChars);
-            return FetchedDocument.unreadable(path, UnreadableReason.TRUNCATED);
+            // 🔴 판정에는 못 쓰지만 지문은 남긴다 — 이슈 #68.
+            //    내용을 받긴 했으므로 「바뀌었는가」는 알 수 있다. 「판정이 섰는가」와
+            //    「바뀌었는가」가 독립적인 물음이라는 것이 이 한 줄에 걸려 있다
+            return FetchedDocument.unreadable(path, UnreadableReason.TRUNCATED,
+                    DocumentFingerprint.of(content));
         }
         return FetchedDocument.read(path, content);
     }

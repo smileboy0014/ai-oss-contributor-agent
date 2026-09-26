@@ -12,6 +12,7 @@ import com.ossagent.candidate.domain.AnalysisRejectedException;
 import com.ossagent.candidate.domain.IssueAnalysis;
 import com.ossagent.candidate.domain.IssueAnalyst;
 import com.ossagent.issue.domain.AnalyzableIssue;
+import com.ossagent.support.secret.TokenRedactor;
 import java.math.BigDecimal;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +43,9 @@ import org.slf4j.LoggerFactory;
 public class LlmIssueAnalyst implements IssueAnalyst {
 
     private static final Logger log = LoggerFactory.getLogger(LlmIssueAnalyst.class);
+
+    /** 예외 메시지에 싣는 모델 원문의 상한. 진단에 필요한 만큼만이다 — S-4. */
+    private static final int MAX_EXCERPT_LENGTH = 32;
 
     private static final String SYSTEM = """
             너는 오픈소스 이슈를 읽고 기여 난이도를 사실에 근거해 평가하는 도구다.
@@ -178,7 +182,8 @@ public class LlmIssueAnalyst implements IssueAnalyst {
         } catch (IllegalArgumentException e) {
             // 🔴 모르는 값을 MEDIUM 같은 기본값으로 떨어뜨리지 않는다 — 그러면 모델의
             //    실패가 「보통 난이도 후보」로 둔갑해 사람이 그것을 믿게 된다
-            throw new AnalysisRejectedException("difficulty 가 알 수 없는 값입니다: " + raw);
+            throw new AnalysisRejectedException(
+                    "difficulty 가 알 수 없는 값입니다: " + excerpt(raw));
         }
     }
 
@@ -215,6 +220,20 @@ public class LlmIssueAnalyst implements IssueAnalyst {
     private static String text(JsonNode root, String field) {
         JsonNode node = root.get(field);
         return node == null || node.isNull() ? null : node.asText();
+    }
+
+    /**
+     * 🔴 예외 메시지에 들어갈 <b>모델 통제 문자열</b>을 안전하게 줄인다 — S-4.
+     *
+     * <p>이 메시지는 {@code AnalyzeIssuesUseCase} 가 {@code e.getMessage()} 로 WARN 에 찍는다.
+     * 길이 무제한의 모델 출력을 그대로 실으면 ① 토큰이 섞여 나갈 수 있고 ② 개행 주입으로
+     * 로그 행을 위조할 수 있다. 진단에 필요한 것은 「무엇이 왔는지」의 앞부분뿐이다.
+     */
+    private static String excerpt(String raw) {
+        String scrubbed = TokenRedactor.redact(raw).replaceAll("\\R", " ");
+        return scrubbed.length() <= MAX_EXCERPT_LENGTH
+                ? scrubbed
+                : scrubbed.substring(0, MAX_EXCERPT_LENGTH) + "…";
     }
 
     /** 모델이 코드펜스로 감싸는 일이 흔하다. 그것 때문에 후보를 FAILED 로 떨어뜨릴 이유는 없다. */

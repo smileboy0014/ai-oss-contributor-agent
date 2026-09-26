@@ -46,6 +46,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -98,6 +99,9 @@ class AnalyzeIssuesUseCaseTest {
 
     @Autowired
     private JdbcTemplate jdbc;
+
+    @Autowired
+    private CandidateAnalysisWriter writer;
 
     @Autowired
     private AgentRunRecorder recorder;
@@ -370,6 +374,48 @@ class AnalyzeIssuesUseCaseTest {
         assertThat(analyst.callCount())
                 .as("2회차에 토큰을 또 태우면 멱등이 아니라 「덮어쓰기」다")
                 .isZero();
+    }
+
+    @Test
+    @DisplayName("🔴 같은 이슈를 동시에 집어도 후보는 하나다 — UNIQUE 위반이 정상 경로로 흡수된다")
+    void 경합해도_후보는_하나다() {
+        givenPolicy(Boolean.TRUE);
+        givenIssue(1, FilterOutcome.PASSED, (short) 10);
+        // 1회차가 후보를 만든다
+        analyzeIssues.analyze(repositoryId);
+
+        // 사전 확인(findExistingIssueIds)을 통과해 버린 경쟁 상황을 재현한다 —
+        // 두 워커가 동시에 확인을 통과하면 두 번째 INSERT 가 UNIQUE 에 걸린다.
+        // ⚠ 이 경로는 배치 테스트로는 닿지 않는다(사전 확인이 먼저 걸러낸다)
+        Long issueId = issues.findAll().getFirst().getId();
+
+        assertThatThrownBy(() -> writer.beginAnalysis(issueId))
+                .as("멱등의 정본은 사전 확인이 아니라 UNIQUE(issue_id) 다")
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThat(candidates.findAll())
+                .as("같은 이슈에 후보가 두 번 생기면 PR 도 두 번 나간다")
+                .hasSize(1);
+    }
+
+    @Test
+    @DisplayName("⚠ 경합 예외를 흡수해도 배치가 죽지 않는다 — UnexpectedRollbackException 회귀")
+    void 경합_후에도_배치가_계속된다() {
+        givenPolicy(Boolean.TRUE);
+        givenIssue(1, FilterOutcome.PASSED, (short) 20);
+        analyzeIssues.analyze(repositoryId);
+
+        // 1번은 이미 후보가 있고, 2번은 새 이슈다. 배치가 1번에서 죽지 않고 2번을 처리해야 한다
+        givenIssue(2, FilterOutcome.PASSED, (short) 10);
+        analyst.reset();
+
+        AnalysisResult second = analyzeIssues.analyze(repositoryId);
+
+        assertThat(second.skipped()).isEqualTo(1);
+        assertThat(second.analyzed())
+                .as("한 건의 경합이 배치 전체를 죽이면 NFR-4 가 깨진다")
+                .isEqualTo(1);
+        assertThat(candidates.findAll()).hasSize(2);
     }
 
     @Test

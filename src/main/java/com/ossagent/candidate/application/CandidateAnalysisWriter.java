@@ -5,10 +5,6 @@ import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.candidate.domain.ContributionCandidate;
 import com.ossagent.candidate.domain.IssueAnalysis;
 import java.time.Clock;
-import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,11 +21,25 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>{@code REQUIRES_NEW} 인 이유 — 호출자가 실수로 트랜잭션을 감싸도 이 쓰기들은 각자
  * 커밋된다. 한 이슈의 실패가 앞서 성공한 후보들을 롤백시키면 안 된다(NFR-4).
+ *
+ * <h2>🔴 유일한 정당한 호출자는 {@link AnalyzeIssuesUseCase} 다</h2>
+ *
+ * <p>이 빈만으로도 후보를 만들 수 있지만 <b>거기에는 S-5 게이트가 없다.</b>
+ * 규약이 금지·보류인 저장소의 이슈가 후보가 되는 경로가 바로 그것이다.
+ * 그래서 클래스를 <b>package-private</b> 으로 좁혔다 — 같은 패키지의 UseCase 만 닿는다.
+ * (메서드는 {@code public}·package-private 무관하게 CGLIB 프록시가 붙지만, 클래스 가시성이
+ * 좁으면 {@code candidate.application} 밖에서는 <b>주입 자체가 컴파일되지 않는다.</b>)
+ *
+ * <p>⚠️ #14 스케줄러·#24 컨트롤러가 붙을 때 가장 새기 쉬운 자리다. 그쪽에서 필요하면
+ * <b>이 빈이 아니라 {@link AnalyzeIssuesUseCase} 를</b> 부른다.
+ *
+ * <p>⚠️ <b>메서드는 {@code public} 으로 남긴다.</b> 클래스가 이미 package-private 이라 가시성
+ * 목적은 달성됐고, package-private 메서드의 {@code @Transactional} 은 프록시 방식에 따라
+ * 조용히 안 걸릴 수 있다. 그러면 {@code completeAnalysis} 의 더티체킹이 통째로 사라지는데
+ * <b>증상이 「값이 저장되지 않는다」뿐</b>이라 원인을 찾기 어렵다.
  */
 @Component
-public class CandidateAnalysisWriter {
-
-    private static final Logger log = LoggerFactory.getLogger(CandidateAnalysisWriter.class);
+class CandidateAnalysisWriter {
 
     private final ContributionCandidateRepository candidates;
     private final Clock clock;
@@ -51,19 +61,26 @@ public class CandidateAnalysisWriter {
      * <p>{@code ANALYZING} 을 여기서 커밋하는 이유 — 이 중간 상태가 없으면 프로세스가 죽었을 때
      * 후보가 {@code DISCOVERED} 로 남아 <b>다음 실행이 같은 이슈에 토큰을 또 태운다.</b>
      *
-     * @return 새로 만든 후보 id. 이미 다른 실행이 잡았으면 {@link Optional#empty()}
+     * <h2>🔴 제약 위반을 <b>여기서 삼키지 않는다</b></h2>
+     *
+     * <p>원래 이 메서드가 {@code DataIntegrityViolationException} 을 잡아
+     * {@code Optional.empty()} 를 돌려주게 짰다가 되돌렸다. Hibernate 가 제약 위반을
+     * 변환하면서 <b>트랜잭션을 rollback-only 로 표시</b>하므로, 예외를 삼키고 정상 반환해도
+     * {@code REQUIRES_NEW} 프록시가 빠져나가며 커밋을 시도하다
+     * <b>{@code UnexpectedRollbackException}</b> 을 던진다. 그것은 호출자가 잡는 두 타입 어디에도
+     * 해당하지 않아 <b>배치 전체를 죽인다</b> — NFR-4 와 정면으로 어긋난다.
+     *
+     * <p>그래서 예외를 그대로 <b>전파</b>하고, 트랜잭션 <b>밖</b>에 있는
+     * {@code AnalyzeIssuesUseCase.analyzeOne} 이 잡아 건너뛴다.
+     *
+     * @return 새로 만든 후보 id
+     * @throws DataIntegrityViolationException 다른 실행이 이미 이 이슈를 잡았다 — 정상 경로다
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public Optional<Long> beginAnalysis(Long issueId) {
-        try {
-            ContributionCandidate candidate = ContributionCandidate.discover(issueId, clock);
-            candidate.startAnalysis(clock);
-            return Optional.of(candidates.saveAndFlush(candidate).getId());
-        } catch (DataIntegrityViolationException e) {
-            // 경쟁에서 졌다 = 다른 실행이 이미 이 이슈를 잡았다. 정상이다
-            log.debug("후보가 이미 있다 issueId={} — 건너뛴다", issueId);
-            return Optional.empty();
-        }
+    public Long beginAnalysis(Long issueId) {
+        ContributionCandidate candidate = ContributionCandidate.discover(issueId, clock);
+        candidate.startAnalysis(clock);
+        return candidates.saveAndFlush(candidate).getId();
     }
 
     /**

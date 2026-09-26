@@ -413,13 +413,11 @@ class ContributionCandidateTest {
     }
 
     @Test
-    @DisplayName("🔴 UseCase 를 건너뛰어도 analysis 가 스크럽된다 — 마지막 그물 S4")
-    void 도메인이_마지막_그물이다_S4() {
+    @DisplayName("적재된 analysis 에 토큰이 없다 — 스크럽 정본은 IssueAnalysis 다 S4")
+    void 적재된_analysis_에_토큰이_없다_S4() {
         ContributionCandidate candidate = discovered();
         candidate.startAnalysis(clock());
 
-        // IssueAnalysis 가 1차로 거르지만, 그 경로를 타지 않고 들어오는 값을 가정한다.
-        // AgentRun.fail 이 취한 것과 같은 2중 구조다
         candidate.completeAnalysis(
                 IssueAnalysisFixtures.withSummary("토큰 " + FAKE_TOKEN + " 로 재현"), clock());
 
@@ -427,6 +425,13 @@ class ContributionCandidateTest {
                 .as("적재 측 방어가 없으면 #13 조회 API 가 토큰을 HTTP 로 내보낸다")
                 .doesNotContain(FAKE_TOKEN);
     }
+
+    // ⚠ completeAnalysis 안의 redact 를 「마지막 그물」로 검증하는 테스트는 두지 않는다.
+    //   IssueAnalysis 가 record 라 생성 경로가 canonical 생성자뿐이고 역직렬화·리플렉션도
+    //   그것을 타므로, 미스크럽 값을 만들어 넣을 방법이 아예 없다 —
+    //   그런 테스트는 반드시 「실패할 수 없는 테스트」가 되어 커버리지를 거짓으로 부풀린다.
+    //   실제로 그 redact 를 지우고 돌려 봤을 때 전부 초록이었다. 위 테스트는 IssueAnalysis 의
+    //   스크럽을 지우면 빨개진다 — 그것이 진짜 방어다.
 
     @Test
     @DisplayName("분석 결과를 적재해도 attempt 는 0 이다 — ANALYZE 는 카운터 밖 Q-6")

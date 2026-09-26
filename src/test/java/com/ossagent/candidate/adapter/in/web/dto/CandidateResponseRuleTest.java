@@ -53,9 +53,14 @@ class CandidateResponseRuleTest {
      *   <li>{@code errorMessage} — 이슈 완료조건 「상세: {@code AgentRun} 이력」.
      *       왜 실패했는지 없이 이력은 의미가 없다. {@code FindCandidatesUseCase#toRunView}.
      *       적재 측({@code AgentRun.fail})도 거르므로 <b>이중 방어</b>다</li>
+     *   <li>{@code category} — 목록·상세의 분류 표시. LLM 자유 문자열이라 {@code @ExternalText}
+     *       를 붙였고({@code IssueAnalysis} 가 적재 시 스크럽한다), 노출은 요구사항이다.
+     *       ⚠️ 표시하지 않고 두면 이 가드가 필드의 존재를 <b>아예 모른다</b> — 허용 목록에
+     *       올리는 것이 「몰래 통과」보다 낫다</li>
      * </ul>
      */
-    private static final Set<String> ALLOWED_WITH_SCRUB = Set.of("analysis", "errorMessage");
+    private static final Set<String> ALLOWED_WITH_SCRUB =
+            Set.of("analysis", "errorMessage", "category");
 
     /**
      * 검사 대상 패키지. <b>목록이 아니라 패키지다</b> — 새 응답 타입이 자동으로 포함된다.

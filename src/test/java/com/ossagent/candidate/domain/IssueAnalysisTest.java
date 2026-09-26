@@ -43,6 +43,28 @@ class IssueAnalysisTest {
     }
 
     @Test
+    @DisplayName("🔴 category 의 토큰도 스크럽된다 — summary 와 조건이 같다 S4")
+    void category_도_스크럽을_거친다_S4() {
+        IssueAnalysis analysis = IssueAnalysisFixtures.builder()
+                .category("bug-" + FAKE_TOKEN)
+                .build();
+
+        assertThat(analysis.category())
+                .as("모델이 프롬프트의 토큰을 이 필드로 되뱉으면 255자 안에 들어가 그대로 적재되고, "
+                        + "#13 조회 API 가 목록·상세 양쪽에서 HTTP 로 내보낸다")
+                .doesNotContain(FAKE_TOKEN)
+                .contains(TokenRedactor.MASK);
+    }
+
+    @Test
+    @DisplayName("category 는 화이트리스트로 닫지 않는다 — 모르는 분류로 후보를 태우지 않는다")
+    void 모르는_category_는_거부하지_않는다() {
+        assertThat(IssueAnalysisFixtures.builder().category("performance").build().category())
+                .as("difficulty 와 달리 분류는 판정을 좌우하지 않는 서술 메타데이터다")
+                .isEqualTo("performance");
+    }
+
+    @Test
     @DisplayName("toString 이 요약 본문을 노출하지 않는다")
     void toString_이_본문을_흘리지_않는다_S4() {
         IssueAnalysis analysis = IssueAnalysisFixtures.withSummary("대상 저장소에서 온 텍스트");

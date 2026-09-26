@@ -9,11 +9,11 @@ import com.ossagent.issue.application.FindAnalyzableIssuesUseCase;
 import com.ossagent.issue.domain.AnalyzableIssue;
 import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -137,13 +137,17 @@ public class AnalyzeIssuesUseCase {
      * 파이프라인을 인질로 잡는다.
      */
     private void analyzeOne(AnalyzableIssue issue, Counter counter) {
-        Optional<Long> created = writer.beginAnalysis(issue.id());
-        if (created.isEmpty()) {
-            // 경쟁에서 졌다 — UNIQUE(issue_id) 가 막았다. 멱등이 작동한 것이다
+        Long candidateId;
+        try {
+            candidateId = writer.beginAnalysis(issue.id());
+        } catch (DataIntegrityViolationException e) {
+            // 🔴 경쟁에서 졌다 — UNIQUE(issue_id) 가 막았다. 이것이 멱등의 실체다.
+            //    ⚠ 이 catch 가 트랜잭션 「밖」에 있어야 한다. 안에서 삼키면 rollback-only 로
+            //    표시된 트랜잭션이 커밋을 시도하다 UnexpectedRollbackException 을 던져
+            //    배치 전체가 죽는다 — CandidateAnalysisWriter.beginAnalysis javadoc
             counter.skipped++;
             return;
         }
-        Long candidateId = created.get();
 
         MDC.put("candidateId", String.valueOf(candidateId));
         try {

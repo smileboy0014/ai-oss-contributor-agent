@@ -30,7 +30,12 @@ import java.math.RoundingMode;
  * 임계를 적용해 후보를 거르는 것은 UseCase 다. 판정을 값 타입에 넣으면 임계가 도메인에
  * 굳어 설정으로 바꿀 수 없게 된다.
  *
- * @param category               {@code bug}·{@code enhancement}·{@code documentation} 등 자유 문자열
+ * @param category               {@code bug}·{@code enhancement}·{@code documentation} 등.
+ *                               <b>스크럽된 값</b>이다. ⚠️ {@code difficulty} 처럼 화이트리스트로
+ *                               닫지 <b>않은</b> 것은 의도다 — 난이도는 판정을 좌우하는 서열값이라
+ *                               모르는 값을 받으면 안 되지만, 분류는 서술 메타데이터일 뿐이라
+ *                               모델이 {@code performance} 같은 새 어휘를 내놨다고 후보를
+ *                               {@code FAILED} 로 태울 이유가 없다
  * @param difficulty             3분 enum
  * @param implementationFeasible 🔴 {@code Boolean} 이 아니라 {@code boolean} 이다 — {@code null}
  *                               을 {@code false} 로 읽지 않기 위해 생성 전에 걸러낸다
@@ -70,7 +75,10 @@ public record IssueAnalysis(
     }
 
     public IssueAnalysis {
-        category = requireText(category, "category");
+        // 🔴 category 도 LLM 자유 문자열이다 — summary 와 조건이 같으므로 방어도 같아야 한다.
+        //    모델이 프롬프트의 토큰을 이 필드로 되뱉으면 255자 안에 들어가 그대로 적재되고,
+        //    #13 조회 API 가 HTTP 로 내보낸다
+        category = TokenRedactor.redact(requireText(category, "category"));
         if (category.length() > MAX_CATEGORY_LENGTH) {
             throw new AnalysisRejectedException(
                     "category 가 너무 깁니다 length=" + category.length()

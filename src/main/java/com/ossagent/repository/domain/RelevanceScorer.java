@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * 트리 경로 × 키워드 → 점수와 사유. <b>순수 함수다</b> — 이슈 #15 FR-2.
@@ -132,10 +133,15 @@ public final class RelevanceScorer {
      * 테스트를 요구하는 저장소가 많아서다(S-5 · {@code RepositoryPolicy.tests_required}).
      * 고칠 파일만 보여 주면 모델이 <b>그 저장소의 테스트 관습</b>을 모른 채 테스트를 쓴다.
      *
-     * @return 트리에 실재하는 테스트 경로만. 없으면 빈 목록
+     * <p>⚠️ {@link RepositoryTree} 가 아니라 <b>경로 집합</b>을 받는다. 트리를 받으면 후보마다
+     * 전체 항목을 훑게 되고, 호출자는 이미 그 집합을 들고 있다. 순수 함수의 입력을
+     * 필요한 만큼으로 좁히는 쪽이 테스트도 쉽다.
+     *
+     * @param blobPaths 트리에서 <b>읽을 수 있는</b> 경로 집합
+     * @return 그 집합에 실재하는 테스트 경로만. 없으면 빈 목록
      */
-    public static List<String> testPairsOf(RepositoryTree tree, String sourcePath) {
-        if (tree == null || sourcePath == null || sourcePath.isBlank()) {
+    public static List<String> testPairsOf(Set<String> blobPaths, String sourcePath) {
+        if (blobPaths == null || sourcePath == null || sourcePath.isBlank()) {
             return List.of();
         }
         int dot = sourcePath.lastIndexOf('.');
@@ -148,12 +154,12 @@ public final class RelevanceScorer {
         List<String> found = new ArrayList<>();
         for (String suffix : TEST_SUFFIXES) {
             String sameDirectory = withoutExtension + suffix + extension;
-            if (tree.containsBlob(sameDirectory)) {
+            if (blobPaths.contains(sameDirectory)) {
                 found.add(sameDirectory);
             }
             // 표준 메이븐/그래들 배치 — src/main/java/... ↔ src/test/java/...
             String testTree = sameDirectory.replace("/main/", "/test/");
-            if (!testTree.equals(sameDirectory) && tree.containsBlob(testTree)) {
+            if (!testTree.equals(sameDirectory) && blobPaths.contains(testTree)) {
                 found.add(testTree);
             }
         }

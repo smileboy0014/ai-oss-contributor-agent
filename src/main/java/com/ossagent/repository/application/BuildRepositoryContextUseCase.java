@@ -155,9 +155,10 @@ public class BuildRepositoryContextUseCase {
 
         private final RepositoryCoordinates coordinates;
         private final String ref;
-        private final RepositoryTree tree;
         private final Integer issueNumber;
         private final Map<String, RepositoryTreeEntry> entriesByPath;
+        /** 파일 이름 → 그 이름을 가진 경로들. import 이웃 탐색이 전체를 훑지 않게 한다 */
+        private final Map<String, List<String>> pathsByFileName = new LinkedHashMap<>();
         private final Map<String, SelectedFile> selected = new LinkedHashMap<>();
         private final Map<ExcludedPathReason, Integer> excluded =
                 new EnumMap<>(ExcludedPathReason.class);
@@ -167,13 +168,14 @@ public class BuildRepositoryContextUseCase {
                 Integer issueNumber) {
             this.coordinates = coordinates;
             this.ref = ref;
-            this.tree = tree;
             this.issueNumber = issueNumber;
             this.budget = ContextBudget.of(properties.maxFiles(), properties.maxTotalChars(),
                     properties.maxFileChars());
             this.entriesByPath = new LinkedHashMap<>();
             for (RepositoryTreeEntry entry : tree.blobs()) {
                 entriesByPath.put(entry.path(), entry);
+                pathsByFileName.computeIfAbsent(entry.fileName(), key -> new ArrayList<>())
+                        .add(entry.path());
             }
         }
 
@@ -185,7 +187,7 @@ public class BuildRepositoryContextUseCase {
 
         private void takeTestPairs() {
             for (String path : List.copyOf(selected.keySet())) {
-                for (String testPath : RelevanceScorer.testPairsOf(tree, path)) {
+                for (String testPath : RelevanceScorer.testPairsOf(entriesByPath.keySet(), path)) {
                     if (selected.containsKey(testPath)) {
                         promoteToTestPair(testPath);
                         continue;
@@ -239,13 +241,25 @@ public class BuildRepositoryContextUseCase {
             }
         }
 
-        /** {@code import a.b.C;} → 트리에 실재하는 {@code .../a/b/C.java} 경로 */
+        /**
+         * {@code import a.b.C;} → 트리에 실재하는 {@code .../a/b/C.java} 경로.
+         *
+         * <p>⚠️ 경로 전체를 훑지 않는다. 대상 저장소는 파일이 수만 개일 수 있고, 여기는
+         * (고른 파일 × import 문) 만큼 반복되는 자리다. <b>파일 이름으로 먼저 좁힌 뒤</b>
+         * 접미사를 맞춘다 — 같은 이름의 클래스는 저장소 안에서 몇 개 되지 않는다.
+         */
         private Set<String> importedPathsOf(SelectedFile file) {
             Set<String> found = new LinkedHashSet<>();
             Matcher matcher = IMPORT_STATEMENT.matcher(file.content());
             while (matcher.find() && found.size() < MAX_IMPORT_NEIGHBORS) {
-                String suffix = "/" + matcher.group(1).replace('.', '/') + ".java";
-                for (String path : entriesByPath.keySet()) {
+                String qualified = matcher.group(1);
+                int lastDot = qualified.lastIndexOf('.');
+                if (lastDot < 0) {
+                    continue;
+                }
+                String fileName = qualified.substring(lastDot + 1) + ".java";
+                String suffix = "/" + qualified.replace('.', '/') + ".java";
+                for (String path : pathsByFileName.getOrDefault(fileName, List.of())) {
                     if (path.endsWith(suffix)) {
                         found.add(path);
                         break;
@@ -291,8 +305,12 @@ public class BuildRepositoryContextUseCase {
             //    부를 수 있게 두면 언젠가 빠뜨린다
             SelectedFile file = new SelectedFile(path, reason, score, fetched.get().content());
             if (!budget.fits(file.size())) {
-                // 트리의 size 는 바이트, 여기는 문자다. 어긋날 수 있어 읽은 뒤 한 번 더 본다
-                count(ExcludedPathReason.TOO_LARGE);
+                // 트리의 size 는 바이트, 여기는 문자다. 어긋날 수 있어 읽은 뒤 한 번 더 본다.
+                // ⚠ 사유를 뭉뚱그리지 않는다 — 「이 파일이 컸다」와 「예산이 떨어졌다」는
+                //    다음에 고칠 것이 다르다(파일당 상한 vs 전체 상한). FR-5 의 근거 기록이다
+                count(file.size() > properties.maxFileChars()
+                        ? ExcludedPathReason.TOO_LARGE
+                        : ExcludedPathReason.BUDGET_EXHAUSTED);
                 budget = budget.markTruncated();
                 return;
             }

@@ -78,7 +78,7 @@ class RelevanceScorerTest {
     void 같은_디렉터리의_테스트_짝을_찾는다() {
         var tree = treeOf("src/main/java/org/x/Poller.java", "src/test/java/org/x/PollerTests.java");
 
-        assertThat(RelevanceScorer.testPairsOf(tree, "src/main/java/org/x/Poller.java"))
+        assertThat(RelevanceScorer.testPairsOf(tree.blobPaths(), "src/main/java/org/x/Poller.java"))
                 .as("표준 메이븐/그래들 배치에서 main ↔ test 를 건넌다")
                 .containsExactly("src/test/java/org/x/PollerTests.java");
     }
@@ -87,7 +87,7 @@ class RelevanceScorerTest {
     void 트리에_없는_테스트_짝은_돌려주지_않는다() {
         var tree = treeOf("src/main/java/org/x/Poller.java");
 
-        assertThat(RelevanceScorer.testPairsOf(tree, "src/main/java/org/x/Poller.java"))
+        assertThat(RelevanceScorer.testPairsOf(tree.blobPaths(), "src/main/java/org/x/Poller.java"))
                 .as("실재하지 않는 경로를 후보로 올리면 호출을 낭비한다")
                 .isEmpty();
     }

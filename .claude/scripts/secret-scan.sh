@@ -110,6 +110,18 @@ fi
 violations=""
 found=0
 
+# 🔴 어느 검사에 걸렸는지를 따로 센다 — 조치 방법이 검사마다 다르기 때문이다.
+#
+#   전에는 「실제 값을 <REPLACE_WITH_SECRET_MANAGER> 로 바꾸세요」를 전역으로 찍었는데,
+#   그 면제를 상속하는 것은 scan_pattern 6개뿐이고 **개인키 검사에는 없다**(#58 에서
+#   회귀로 제거했다 — 의도된 상태다). 즉 안내가 7개 중 6개에서만 참이었다.
+#
+#   ⚠ 이 거짓이 실제 사고를 냈다. 안내대로 했는데 개인키에서만 안 먹으니 그 탈출구가
+#   없는 것이 결함처럼 보였고, #58 에서 화이트리스트를 되살렸다가 **진짜 키 파일이
+#   통과하는 회귀**로 잡혔다. 고칠 것은 게이트가 아니라 **메시지**다 (#66).
+placeholder_found=0
+pk_found=0
+
 # ── ① .env 실파일 스테이징 검사 ────────────────────────────────
 for f in $files; do
   base=$(basename "$f")
@@ -138,6 +150,7 @@ scan_pattern() {
       local lineno="${line%%:*}"
       violations="${violations}\n  ❌ ${label} — ${f}:${lineno}\n     → ${advice}"
       found=$((found+1))
+      placeholder_found=1
     done <<< "$hits"
   fi
 }
@@ -262,6 +275,7 @@ for f in $files; do
       lineno="${line%%:*}"
       violations="${violations}\n  ❌ Private Key — ${f}:${lineno}\n     → 개인키는 저장소에 두지 않습니다. *.pem·*.key 는 .gitignore 대상이고, 값은 Secret Manager 로 주입합니다."
       found=$((found+1))
+      pk_found=1
     done <<< "$pk_hits"
   fi
 done
@@ -271,9 +285,25 @@ if [ "$found" -gt 0 ]; then
   printf "%b\n" "$violations"
   echo ""
   echo "조치 방법:"
-  echo "  1. 실제 값을 <REPLACE_WITH_SECRET_MANAGER> 플레이스홀더로 바꾸고 .env.example 에만 남깁니다."
-  echo "  2. 실행 시 값은 환경변수 또는 Secret Manager 에서 주입합니다."
-  echo "  3. 이미 유출된 크리덴셜은 파일을 지우는 것으로 끝나지 않습니다 — 즉시 폐기·재발급하세요."
+  echo "  1. 값을 지우고 실행 시 환경변수 또는 Secret Manager 에서 주입합니다."
+  echo "  2. 이미 유출된 크리덴셜은 파일을 지우는 것으로 끝나지 않습니다 — 즉시 폐기·재발급하세요."
+
+  # 🔴 아래 둘은 **걸린 검사에 따라서만** 찍는다. 안내가 참인 범위를 넘지 않게 한다 (#66).
+  if [ "$placeholder_found" -eq 1 ]; then
+    echo ""
+    echo "  토큰·키 값 검사에 걸린 건:"
+    echo "    값을 <REPLACE_WITH_SECRET_MANAGER> 로 바꾸면 통과합니다 (.env.example 에만 남깁니다)."
+  fi
+
+  if [ "$pk_found" -eq 1 ]; then
+    echo ""
+    echo "  ⚠ 개인키 검사에는 플레이스홀더 경로가 없습니다 — 그것이 의도입니다."
+    echo "    플레이스홀더 면제는 한때 있었고, 그 때문에 **진짜 키 파일이 통과했습니다**(#58)."
+    echo "    키 파일이라면: 스테이징에서 빼고 .gitignore 에 넣은 뒤 그 키를 폐기·재발급하세요."
+    echo "    문서의 예시 때문에 막혔다면 그것은 이 검사의 알려진 한계입니다."
+    echo "    게이트를 넓히지 말고 이슈로 올려 주세요 — 넓히면 위 회귀가 그대로 재발합니다."
+  fi
+
   echo ""
   echo "  (grep: ${GREP_IMPL} · sed: ${SED_IMPL})"
   exit 1

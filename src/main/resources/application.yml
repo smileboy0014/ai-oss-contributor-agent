@@ -108,6 +108,25 @@ sandbox:
   # 끝나거나 log-timeout 에 걸릴 때까지 흐른다
   max-output-chars: ${SANDBOX_MAX_OUTPUT_CHARS:200000}
 
+# 스캔 파이프라인 실행 — #14
+scan:
+  schedule:
+    # 🔴 기본 꺼짐. 켜는 것은 배포 결정이지 코드 기본값이 아니다 —
+    #    켜진 채로 뜨면 로컬 기동·통합 테스트가 GitHub 과 LLM 을 자동으로 탄다.
+    #    ⚠ 실제 배선은 ScanScheduler·SchedulingConfig 의 @ConditionalOnProperty 다.
+    #      그 애노테이션이 없으면 이 값은 아무 일도 하지 않는다
+    #    ⚠ 이것은 비용·레이트리밋 방어이지 S-6 방어가 아니다. 자동 경로가 ANALYZED 에서
+    #      멈추는 것은 이 플래그와 무관하게 성립한다
+    enabled: false
+    # 이전 실행이 끝난 뒤부터 센다. fixedRate 면 스캔이 주기보다 길 때 실행이 겹쳐 쌓인다
+    fixed-delay: 1h
+    initial-delay: 5m
+  # 차면 409 로 거절한다. 무한 큐는 「쌓이는 줄 모르는」 상태를 만들고,
+  # 그때 쌓이는 것은 몇 시간 뒤에 실행될 스캔이다
+  queue-capacity: 10
+  # 종료 시 진행 중 스캔을 기다린다 — 중간에 끊기면 커서가 어중간해진다
+  shutdown-grace-seconds: 60
+
 agent:
   execution:
     max-retries: 3

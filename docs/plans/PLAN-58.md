@@ -27,12 +27,11 @@ grep -nE '^-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?'
 ```yaml
 stringData:
   tls.key: |
-    -----BEGIN RSA PRIVATE KEY-----   # <REPLACE_WITH_SECRET_MANAGER> · ^ 에 걸리지 않는다
+  │ -----BEGIN RSA PRIVATE KEY-----   ← ^ 에 걸리지 않는다
 ```
 
-⚠️ 위 예시 줄에 플레이스홀더가 붙은 것 자체가 **이 수정의 부수 발견**이다 —
-PEM 검사에만 `<REPLACE_WITH_SECRET_MANAGER>` 화이트리스트가 없어서, 선행 공백을 허용하자
-**이 계획서가 커밋되지 않았다.** 다른 패턴에는 다 있는 탈출구라 §2 에서 함께 건다.
+⚠️ 위 예시의 `│` 는 **문서용 표시**다(실제 파일에는 없다). 이 줄이 검사에 걸리지 않게
+줄 시작에서 떼어 놓은 것인데, **그 필요 자체가 부수 발견이었다** — §5 ② 참조.
 
 k8s Secret · Helm values · GitHub Actions 가 전부 이 모양이고, **키가 저장소에 실제로
 나타나는 1순위 형태**다. #28 의 런타임 스크럽(`TokenRedactor`)은 이 형태를 이미 막지만,

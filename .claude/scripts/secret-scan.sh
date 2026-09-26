@@ -114,6 +114,13 @@ for f in $files; do
     "ANTHROPIC_API_KEY 환경변수로 주입하세요. 예시 파일에는 <REPLACE_WITH_SECRET_MANAGER> 를 씁니다." \
     'sk-ant-[A-Za-z0-9_-]{20,}' "$f"
 
+  # GCP 서비스계정 키 JSON — 공개 저장소에 가장 흔히 커밋되는 키 「파일」 포맷이다.
+  # 헤더가 "private_key": " 뒤에 오므로 아래 줄 단위 검사가 놓친다(대시 앞이 따옴표다).
+  # 한 줄 임베드는 의도적으로 안 잡지만 이건 다르다 — 키를 담는 것이 목적인 파일이다.
+  scan_pattern "Private Key (JSON)" \
+    "서비스계정 키 파일은 저장소에 두지 않습니다. Secret Manager 또는 Workload Identity 를 쓰세요." \
+    '"private_key"[[:space:]]*:[[:space:]]*"-+ ?BEGIN' "$f"
+
   # 개인키는 별도 처리 (하이픈으로 시작하는 정규식이 grep 인자로 오해되는 것을 피한다)
   # ⚠ PRIVATE KEY 뒤에 곧바로 대시를 요구하면 PGP 가 통째로 빠져나간다 —
   #   -----BEGIN PGP PRIVATE KEY BLOCK----- 은 사이에 「 BLOCK」이 낀다.
@@ -123,22 +130,35 @@ for f in $files; do
   #   실제로 나타나는 1순위 형태다(#58).
   #
   #   ⚠ 그렇다고 앵커를 아예 빼면 안 된다. 추적 파일 전체에서 25건이 걸리는데
-  #   전부 소스의 javadoc 설명과 테스트 픽스처다(#28 이 남긴 것). main 이 적색이 된다.
+  #   그중 21건이 TokenRedactorTest 다 — 런타임 스크럽이 PEM 을 지우는지 검증하려면
+  #   그 테스트가 PEM 헤더를 문자열로 들고 있어야만 한다. 「정리하면 된다」가 아니라
+  #   지우면 S-4 런타임 쪽 커버리지가 사라진다. 다른 게이트를 끄는 것과 같다.
   #
-  #   가르는 선 — 실제 키 파일은 헤더가 줄의 처음(들여쓰기 제외)에 온다.
+  #   가르는 선 — 키 파일은 헤더가 줄의 처음(들여쓰기·목록 기호 제외)에 온다.
   #   소스에서 헤더가 등장할 때는 앞에 "·*·String x = 가 붙는다.
   #
-  #   🕳 그래서 소스 리터럴에 통째로 박은 키(key = "-----BEGIN…")는 여기서 안 잡힌다.
-  #   허용이 의도다 — 막으면 TokenRedactorTest 자신이 커밋되지 않는다.
+  #   🕳 실측으로 확인한 한계 — 아래는 이 검사가 놓친다.
+  #     · 소스 리터럴에 박은 키 (key = "-----BEGIN…")  ← 허용이 의도다(위 21건)
+  #     · .properties 인라인 (KEY="-----BEGIN…")
+  #     · UTF-8 BOM 이 붙은 파일  ← 선재 구멍. BOM 이 줄 시작을 차지한다
+  #     · JSON 한 줄 임베드 ({"key":"-----BEGIN…"})  ← GCP SA 포맷은 위에서 따로 잡는다
   #   여기서 닫는 것은 「키 파일을 커밋하지 마라」이지 「키 문자열이 소스에 없게 하라」가
   #   아니다. 후자는 런타임 쪽 TokenRedactor 가 맡는다.
-  #   ⚠ scan_pattern 과 같은 화이트리스트를 여기도 건다. 원래 PEM 검사에만
-  #   <REPLACE_WITH_SECRET_MANAGER> 예외가 없었는데, 선행 공백을 허용하자마자
-  #   문서의 들여쓴 예시가 걸려 이 PR 의 계획서 자신이 커밋되지 않았다.
-  #   다른 패턴에는 다 있는 탈출구가 여기만 없던 것이라 일관성 회복이다.
+  #   🔴 여기에는 <REPLACE_WITH_SECRET_MANAGER> 화이트리스트를 걸지 않는다.
+  #   한 번 걸었다가 뺐다 — 「다른 패턴엔 다 있는 탈출구」라는 논거가 성립하지 않는다.
+  #
+  #     토큰 패턴: 줄 하나 = 시크릿 전체 → 면제하면 그 시크릿 하나
+  #     PEM:       줄 하나 = 시크릿의 머리 → 면제하면 그 아래 본문 전체
+  #
+  #   즉 헤더 줄에 마커 한 번만 붙이면 진짜 키 파일이 통째로 통과한다. 게다가 이
+  #   스크립트가 차단 시 「실제 값을 <REPLACE_WITH_SECRET_MANAGER> 로 바꾸라」고
+  #   안내하므로, 막힌 사람이 본문을 지우는 대신 헤더에 마커를 붙이고 초록을 볼 수 있다.
+  #   게이트가 제 우회법을 안내하는 모양이 된다.
+  #
+  #   문서에 헤더 예시를 쓸 일이 있으면 줄 시작에서 떼어 놓는다(인용 기호 등).
   pk_hits=$(read_file "$f" \
-    | grep -nE '^[[:space:]]*-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?' \
-    | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
+    | grep -nE '^[[:space:]]*([-*>][[:space:]]+)?-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?' \
+    || true)
   if [ -n "$pk_hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue

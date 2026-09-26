@@ -133,6 +133,20 @@ class SecretPatternDriftTest {
             "  -----END PGP PRIVATE KEY BLOCK-----");
 
     /**
+     * GCP 서비스계정 키 JSON — <b>공개 저장소에 가장 흔히 커밋되는 키 파일 포맷</b>이다.
+     *
+     * <p>헤더가 {@code "private_key": "} 뒤에 오므로 <b>줄 단위 PEM 검사가 놓친다</b> —
+     * 대시 앞이 따옴표라 {@code ^[[:space:]]*-+} 에 걸리지 않는다. 「키 파일을 커밋하지
+     * 마라」를 닫는다고 적어 놓고 그 대표 포맷을 놓치고 있었다 (#58 리뷰).
+     */
+    private static final String SAMPLE_SERVICE_ACCOUNT = String.join("\n",
+            "{",
+            "  \"type\": \"service_account\",",
+            "  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\n" + FAKE_KEY_BODY
+                    + "\\n-----END PRIVATE KEY-----\\n\"",
+            "}");
+
+    /**
      * 스크립트 정규식 ↔ 런타임 커버리지 대응표.
      *
      * @param scriptRegex    스크립트에 적힌 그대로. 추출 결과와 <b>집합으로</b> 대조한다
@@ -148,7 +162,9 @@ class SecretPatternDriftTest {
             new Row("github_pat_[A-Za-z0-9_]{20,}", SAMPLE_FINE_GRAINED, SAMPLE_FINE_GRAINED),
             new Row("xox[baprs]-[A-Za-z0-9-]{10,}", SAMPLE_SLACK_TOKEN, SAMPLE_SLACK_TOKEN),
             new Row("sk-ant-[A-Za-z0-9_-]{20,}", SAMPLE_ANTHROPIC_KEY, SAMPLE_ANTHROPIC_KEY),
-            new Row("^[[:space:]]*-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?",
+            new Row("\"private_key\"[[:space:]]*:[[:space:]]*\"-+ ?BEGIN",
+                    SAMPLE_SERVICE_ACCOUNT, FAKE_KEY_BODY),
+            new Row("^[[:space:]]*([-*>][[:space:]]+)?-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?",
                     SAMPLE_PEM, FAKE_KEY_BODY));
 
     /**
@@ -189,6 +205,20 @@ class SecretPatternDriftTest {
      * 된다. 더한 패턴이 {@link #ROWS} 나 {@link #RUNTIME_ONLY} 에 속하지 않는지 먼저 본다.
      */
     private static final int PEM_IMPLEMENTATION_PATTERNS = 2;
+
+    /**
+     * 런타임 패턴 하나를 <b>여러 스크립트 행이 공유</b>하는 수.
+     *
+     * <p>GCP 서비스계정 JSON 행이 그렇다. 커밋 차단 쪽에서는 별도 패턴이 필요하지만
+     * ({@code "private_key": "} 접두사 때문에 줄 단위 PEM 검사가 놓친다), 런타임은
+     * <b>같은 {@code PEM_HEADER} 가 이미 잡는다</b> — 한 줄 안에 헤더와 종료 표시가 함께
+     * 있어 스캐너의 한 줄짜리 경로로 처리된다.
+     *
+     * <p>⚠️ 대응이 <b>1:1 이 아니어도 된다</b>는 것을 여기서 처음 인정한다. 숫자를 맞추려고
+     * 런타임에 쓸모없는 패턴을 더하는 것이 훨씬 나쁘다 —
+     * 실제로 가려지는지는 {@link #모든_샘플이_런타임에서_사라진다_S4} 가 <b>실행으로</b> 본다.
+     */
+    private static final int SCRIPT_ROWS_SHARING_RUNTIME_PATTERN = 1;
 
     // ── 검사 ──────────────────────────────────────────────────────────────────
 
@@ -275,7 +305,8 @@ class SecretPatternDriftTest {
                           · 커밋 차단에 쓸 수 없는 사유가 있다면 RUNTIME_ONLY 에 사유와 함께 등록한다
                         ⚠ 이 검사는 개수만 본다. 무엇을 가리는 패턴인지는 판정하지 못하므로,
                           숫자를 맞추는 것으로 때우지 않는다 — 등록표를 실제로 갱신한다.""")
-                .isEqualTo(ROWS.size() + RUNTIME_ONLY.size() + PEM_IMPLEMENTATION_PATTERNS);
+                .isEqualTo(ROWS.size() + RUNTIME_ONLY.size() + PEM_IMPLEMENTATION_PATTERNS
+                        - SCRIPT_ROWS_SHARING_RUNTIME_PATTERN);
     }
 
     @Test

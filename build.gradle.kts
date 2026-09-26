@@ -91,14 +91,23 @@ tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 
     // 🔴 소스 밖 파일을 읽는 테스트는 그 파일을 입력으로 선언해야 다시 돈다.
-    //   SecretPatternDriftTest·PromptBoundaryTest 가 .claude/scripts 와 소스 트리를
-    //   런타임에 읽는데, Gradle 은 그것을 모른다 — 스크립트만 고치면 테스트가
-    //   UP-TO-DATE 로 건너뛰어진다.
+    //   SecretPatternDriftTest 가 .claude/scripts 를 런타임에 읽는데 Gradle 은 모른다 —
+    //   스크립트만 고치면 이 태스크가 UP-TO-DATE 로 건너뛰어진다.
     //
     //   실제로 그랬다(#58). 커밋 차단 패턴을 고쳐 놓고 테스트를 돌렸는데 초록이었다.
     //   --rerun-tasks 로 강제하니 그제서야 빨개졌다. 가드가 있는데 돌지 않는 것은
     //   가드가 없는 것과 같고, 「초록이었다」가 「검증했다」로 읽힌다는 점에서 더 나쁘다.
-    inputs.files(fileTree("$rootDir/.claude/scripts") { include("*.sh") })
+    //
+    //   🕳 여기서 닫는 것은 .claude/scripts 뿐이다. PromptBoundaryTest 는 src/main 을
+    //   텍스트로 읽는데 그쪽은 선언하지 않았다 — 선언하면 주석 한 줄만 고쳐도
+    //   Testcontainers 포함 전 스위트가 다시 돈다. 남는 구멍은 「바이트코드를 바꾸지 않는
+    //   소스 변경」뿐이고(주석·공백), 그 검사가 보는 것은 import 와 log 호출이라
+    //   주석만으로 위반이 생기지 않는다. 비용/위험을 저울질해 두고 가는 것이지
+    //   닫았다고 말하지 않는다.
+    //
+    //   ⚠ 이 선언은 모든 Test 태스크에 붙는다. 훅 스크립트 하나만 고쳐도 전 스위트가
+    //   다시 돈다 — 게이트가 조용히 꺼지는 것보다 낫다고 보고 감수한다.
+    inputs.files(fileTree("$rootDir/.claude/scripts") { include("**/*.sh") })
             .withPropertyName("harnessScripts")
             .withPathSensitivity(PathSensitivity.RELATIVE)
 

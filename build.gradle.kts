@@ -90,6 +90,18 @@ tasks.withType<JavaCompile>().configureEach {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
 
+    // 🔴 소스 밖 파일을 읽는 테스트는 그 파일을 입력으로 선언해야 다시 돈다.
+    //   SecretPatternDriftTest·PromptBoundaryTest 가 .claude/scripts 와 소스 트리를
+    //   런타임에 읽는데, Gradle 은 그것을 모른다 — 스크립트만 고치면 테스트가
+    //   UP-TO-DATE 로 건너뛰어진다.
+    //
+    //   실제로 그랬다(#58). 커밋 차단 패턴을 고쳐 놓고 테스트를 돌렸는데 초록이었다.
+    //   --rerun-tasks 로 강제하니 그제서야 빨개졌다. 가드가 있는데 돌지 않는 것은
+    //   가드가 없는 것과 같고, 「초록이었다」가 「검증했다」로 읽힌다는 점에서 더 나쁘다.
+    inputs.files(fileTree("$rootDir/.claude/scripts") { include("*.sh") })
+            .withPropertyName("harnessScripts")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // Testcontainers 가 물고 오는 docker-java 는 API 버전을 협상하지 않고 기본값(v1.32)으로
     // 요청하는데, 최신 Docker 엔진이 이를 400 으로 거부한다. 증상이
     // 「Could not find a valid Docker environment」라 Docker 가 안 떠 있는 것처럼 보이지만

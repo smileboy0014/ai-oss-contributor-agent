@@ -138,6 +138,17 @@ class ExternalTextScrubRegistryTest {
                             + " GeneratedChange.testResult 이고 그쪽도 PENDING 이다."
                             + " LLM 송신은 PromptScrubber 를 거친다 (#17)")),
 
+            // ── #16 구현 계획 — 전부 VALUE_TYPE. 영속되지 않지만 하류(#18 코딩 프롬프트)로
+            //    다시 나가므로 방어 조건은 같다 ───────────────────────────────────
+            Map.entry("PlannedFile.intent", new Decision(Mechanism.VALUE_TYPE,
+                    "PlannedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"
+                            + " 경로가 없다. 계획 프롬프트에 대상 저장소 파일 내용이 실려"
+                            + " 나갔으므로 모델이 그것을 되뱉을 수 있다 (#16)")),
+            Map.entry("ImplementationPlan.summary", new Decision(Mechanism.VALUE_TYPE,
+                    "ImplementationPlan compact 생성자가 redact 한다 (#16)")),
+            Map.entry("ImplementationPlan.testStrategy", new Decision(Mechanism.VALUE_TYPE,
+                    "위와 같다. 비어 있을 수 있고 그 판정은 PlanValidator 가 한다 (#16)")),
+
             Map.entry("SelectedFile.content", new Decision(Mechanism.VALUE_TYPE,
                     "SelectedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"
                             + " 경로가 없다. ⚠ SecretFilePolicy 가 이것을 대신하지 않는다 —"

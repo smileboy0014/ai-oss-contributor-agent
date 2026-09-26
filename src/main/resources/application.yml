@@ -148,6 +148,24 @@ agent:
     #   조이는 것은 언제든 되지만 푸는 것은 소급되지 않으므로 느슨하게 잡았다.
     #   실측 0건에서 정한 추정값이라 설정으로 빼 뒀다 — PLAN-11 A-1
     min-confidence: 0.50
+  # 구현 계획(#16) — PRD §13. 계획을 세우고 「코딩에 넘기기 전에」 검증한다.
+  plan:
+    # 🔴 3번째 재시도 축이다. 다른 둘과 섞지 않는다 —
+    #    agent.llm.max-retries       전송 실패(429·5xx·타임아웃)
+    #    agent.execution.max-retries CODE→VERIFY→REVIEW 루프 한 바퀴
+    #    여기                         「모델이 없는 파일을 지목했다」는 의미 실패
+    #    ⚠ 곱셈 예산: 2 × (1 + agent.llm.max-retries 2) = LLM 호출 최대 6회
+    max-attempts: 2
+    # 계획은 분석(1,500)보다 길고 코드(16,000)보다 짧다
+    max-output-tokens: 4000
+    # 🔴 agent.context.max-files(12)보다 작아야 한다 — 본 것보다 많이 고칠 수 없다
+    max-planned-files: 8
+    # PR 컨벤션의 「< 400줄」과 같은 눈금
+    max-planned-loc: 400
+    # 이슈별 추정치(IssueAnalysis)에 곱하는 여유. 고정 상한만으로는 scope creep 을 못 잡는다 —
+    # 파일 7개짜리 무관한 계획이 max-planned-files(8)를 그대로 통과한다.
+    # ⚠ 1.0 으로 조이지 않는다. 추정은 추정이고, 정밀도가 아니라 scope creep 이 목표다
+    scope-tolerance: 2.0
   # 저장소 분석(#15) — PRD §12. 「저장소 전체를 LLM 에 넘기지 않는다」를 숫자로 만든 것이다.
   # ⚠ 전부 실측 0건의 추정값이다. 첫 End-to-End 를 돌려 보고 조정한다
   context:

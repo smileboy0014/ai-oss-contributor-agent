@@ -1,7 +1,6 @@
 package com.ossagent.support.web;
 
 import com.ossagent.candidate.domain.CandidateNotFoundException;
-import jakarta.validation.ConstraintViolationException;
 import com.ossagent.repository.domain.RepositoryAlreadyRegisteredException;
 import com.ossagent.repository.domain.RepositoryNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -22,18 +21,6 @@ public class ApiExceptionHandler {
     @ExceptionHandler(RepositoryNotFoundException.class)
     public ProblemDetail handleNotFound(RepositoryNotFoundException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
-    }
-
-    /**
-     * 쿼리 파라미터 제약 위반 — 400.
-     *
-     * <p>{@code @Validated} 컨트롤러의 메서드 검증은 {@link ConstraintViolationException} 을 던지는데
-     * Spring 이 기본 매핑하지 않아 <b>500 이 된다.</b> 호출자 잘못을 서버 오류로 보고하면
-     * 재시도해도 소용없는 요청을 계속 받게 된다.
-     */
-    @ExceptionHandler(ConstraintViolationException.class)
-    public ProblemDetail handleConstraintViolation(ConstraintViolationException e) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());
     }
 
     @ExceptionHandler(CandidateNotFoundException.class)

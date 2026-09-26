@@ -16,6 +16,7 @@ import com.ossagent.candidate.domain.AgentRun;
 import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.candidate.domain.ContributionCandidate;
 import com.ossagent.candidate.domain.GeneratedChange;
+import com.ossagent.candidate.domain.PullRequest;
 import com.ossagent.support.secret.TokenRedactor;
 import java.util.List;
 import java.util.Optional;
@@ -111,6 +112,31 @@ class FindCandidatesUseCaseTest {
         assertThat(summary.toString())
                 .as("대상 저장소가 커밋해 둔 시크릿이 diff 를 타고 나간다 — 본문을 담지 않는 것이 방어다")
                 .doesNotContain(FAKE_TOKEN);
+    }
+
+    @Test
+    @DisplayName("PR URL 에 자격증명이 섞여도 응답으로 나가지 않는다")
+    void PR_URL_의_자격증명이_응답으로_새지_않는다_S4() {
+        ContributionCandidate candidate = mock(ContributionCandidate.class);
+        when(candidate.getId()).thenReturn(1L);
+        when(candidates.findById(1L)).thenReturn(Optional.of(candidate));
+        when(runs.findByCandidateIdOrderByStartedAtAsc(1L)).thenReturn(List.of());
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.empty());
+
+        PullRequest pullRequest = mock(PullRequest.class);
+        // #22 가 push URL 에 자격증명을 박는 형태로 넣을 수 있다 — 가장 흔한 구현이다
+        when(pullRequest.getForkUrl())
+                .thenReturn("https://x-access-token:" + FAKE_TOKEN + "@github.com/me/spring-kafka.git");
+        when(pullRequest.getPrUrl())
+                .thenReturn("https://github.com/spring-projects/spring-kafka/pull/1?t=" + FAKE_TOKEN);
+        when(candidate.getPullRequest()).thenReturn(pullRequest);
+
+        var view = useCase.findDetail(1L).pullRequest();
+
+        assertThat(view.forkUrl())
+                .as("적재 측(#22)을 믿지 않는다 — errorMessage 에 적용한 논리와 같다")
+                .doesNotContain(FAKE_TOKEN);
+        assertThat(view.prUrl()).doesNotContain(FAKE_TOKEN);
     }
 
     @Test

@@ -57,19 +57,23 @@ class CandidateResponseRuleTest {
      */
     private static final Set<String> ALLOWED_WITH_SCRUB = Set.of("analysis", "errorMessage");
 
-    private static final List<Class<?>> RESPONSE_RECORDS = List.of(
-            CandidateSummary.class,
-            CandidateDetail.class,
-            CandidateDetail.AgentRunView.class,
-            CandidateDetail.ChangeSummary.class,
-            CandidateDetail.PullRequestView.class);
+    /**
+     * 검사 대상 패키지. <b>목록이 아니라 패키지다</b> — 새 응답 타입이 자동으로 포함된다.
+     *
+     * <p>{@code application} 을 함께 보는 이유 — 본문이 실제로 실릴 수 있는 지점은 UseCase 가
+     * 만드는 뷰({@code CandidateDetailView.ChangeView})다. web DTO 만 보면 <b>한 계층 하류만</b>
+     * 지키게 된다.
+     */
+    private static final List<String> RESPONSE_PACKAGES = List.of(
+            "com.ossagent.candidate.adapter.in.web.dto",
+            "com.ossagent.candidate.application");
 
     @Test
     void 응답_DTO_는_외부텍스트_본문을_담지_않는다_S4() {
         Set<String> externalTextFields = externalTextFieldNames();
         List<String> leaked = new ArrayList<>();
 
-        for (Class<?> response : RESPONSE_RECORDS) {
+        for (Class<?> response : responseRecords()) {
             for (RecordComponent component : response.getRecordComponents()) {
                 String name = component.getName();
                 if (externalTextFields.contains(name) && !ALLOWED_WITH_SCRUB.contains(name)) {
@@ -111,10 +115,43 @@ class CandidateResponseRuleTest {
                 .isNotEmpty()
                 .contains("diff", "analysis");
 
-        assertThat(RESPONSE_RECORDS)
-                .allSatisfy(type -> assertThat(type.isRecord())
-                        .as("%s 가 record 가 아니다 — 컴포넌트를 훑을 수 없다", type.getSimpleName())
-                        .isTrue());
+        List<Class<?>> scanned = responseRecords();
+        assertThat(scanned)
+                .as("응답 record 를 하나도 못 찾았다 — 패키지 스캔이 깨진 것이다")
+                .isNotEmpty();
+        assertThat(scanned).extracting(Class::getSimpleName)
+                .as("중첩 record 까지 훑어야 한다 — ChangeView 가 본문이 실릴 수 있는 지점이다")
+                .contains("CandidateSummary", "CandidateDetail", "ChangeSummary",
+                        "CandidateDetailView", "ChangeView");
+    }
+
+    /**
+     * 응답 패키지의 record 전부 — <b>중첩 record 까지 재귀로</b> 모은다.
+     *
+     * <p>하드코딩 목록이면 내일 누가 {@code CandidateDetail.VerificationView} 를 추가할 때
+     * 아무것도 빨개지지 않는다. 그러면 이 클래스의 「고정 목록으로 검사하지 않는다」가 거짓이 된다.
+     */
+    private static List<Class<?>> responseRecords() {
+        var scanner = new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter((metadataReader, factory) -> true);
+
+        List<Class<?>> records = new ArrayList<>();
+        for (String pkg : RESPONSE_PACKAGES) {
+            for (BeanDefinition definition : scanner.findCandidateComponents(pkg)) {
+                collectRecords(ClassUtils.resolveClassName(definition.getBeanClassName(), null),
+                        records);
+            }
+        }
+        return records;
+    }
+
+    private static void collectRecords(Class<?> type, List<Class<?>> sink) {
+        if (type.isRecord()) {
+            sink.add(type);
+        }
+        for (Class<?> nested : type.getDeclaredClasses()) {
+            collectRecords(nested, sink);
+        }
     }
 
     /** 엔티티에서 {@link ExternalText} 가 붙은 필드 이름 전부. */

@@ -140,16 +140,25 @@ public class FindCandidatesUseCase {
                 change.getCreatedAt());
     }
 
+    /**
+     * 🔴 <b>URL 도 스크럽한다.</b> 지금은 이 컬럼들을 채우는 코드가 없어 무해하지만,
+     * <b>#22(Fork push)가 무엇을 넣느냐에 이 API 의 안전이 걸린다.</b>
+     * push URL 에 자격증명을 박는 형태({@code https://x-access-token:TOKEN@github.com/...})는
+     * 가장 흔한 구현이고, 그렇게 들어오는 순간 이 조회 API 가 토큰을 HTTP 로 내보낸다 — S-4.
+     *
+     * <p>{@code redact()} 는 토큰이 없으면 입력을 그대로 돌려주므로 비용이 없다.
+     * <b>적재 측을 믿지 않는 것</b>은 {@code errorMessage} 에 적용한 논리와 같다.
+     */
     private static CandidateDetailView.PrView toPrView(PullRequest pullRequest) {
         if (pullRequest == null) {
             return null;
         }
         return new CandidateDetailView.PrView(
                 pullRequest.getId(),
-                pullRequest.getForkUrl(),
+                TokenRedactor.redact(pullRequest.getForkUrl()),
                 pullRequest.getBranchName(),
                 pullRequest.getGithubPrNumber(),
-                pullRequest.getPrUrl(),
+                TokenRedactor.redact(pullRequest.getPrUrl()),
                 pullRequest.getStatus() == null ? null : pullRequest.getStatus().name());
     }
 

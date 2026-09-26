@@ -216,7 +216,10 @@ Phase 1 대상 `spring-kafka` 도 기여 문서 301줄에 AI 언급이 하나도
 **규약이 있는데 못 읽은 것**이므로 위 표의 마지막 줄에 해당해야 한다.
 
 보류는 **자동으로 풀리지 않는다.** 재분석·시간 경과·횟수 소진으로 통과시키지 않는다.
-사람이 명시적으로 푼다 — 해소 경로는 승인 지점과 함께 만든다(#24).
+사람이 명시적으로 푼다 — **`POST /api/repositories/{id}/policy/resolution`** 하나뿐이다(#24).
+🔴 그 경로에서도 **금지 판정은 뒤집히지 않고**, **정책 행이 없으면 만들어 주지 않는다**
+(만들어 주면 「읽지 않고 허용」이 되어 이 조항이 정면으로 뚫린다).
+「해소」가 「허용」을 뜻하지도 않는다 — 사람이 읽고 **금지로 닫는 것도 정상적인 해소**다.
 
 **어기면** — 규약 위반 PR 은 읽히지 않고 닫히며, 반복되면 저장소 차원에서 차단된다.
 
@@ -226,16 +229,24 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
 
 - 후보 선정(`SELECTED`) · 구현 착수 · PR 생성은 API 호출로 트리거되는 **명시적 행위**다. 스케줄러가 끝까지 자동으로 흘려보내지 않는다
 
-  | 게이트 | 엔드포인트 | 확정 |
-  |---|---|---|
-  | 선정 | `POST /api/candidates/{id}/select` | Q-5 (2026-09-25) |
-  | 착수 | `POST /api/candidates/{id}/implement` | PRD §23 |
-  | **PR 생성** | `POST /api/candidates/{id}/pull-request` | PRD §23 |
+  | 게이트 | 엔드포인트 | 확정 | 구현 |
+  |---|---|---|---|
+  | 선정 | `POST /api/candidates/{id}/select` | Q-5 (2026-09-25) | ✅ #24 |
+  | 착수 | `POST /api/candidates/{id}/implement` | PRD §23 | ⬜ #18 |
+  | **PR 생성** | `POST /api/candidates/{id}/pull-request` | PRD §23 | ⬜ #23 |
+
+  ⚠️ 뒤의 둘이 **없는 것이 일정 문제가 아니다.** 실행기 없이 열면 후보가 각각
+  `IMPLEMENTING`(탈출 트리거 없음)과 **PR 없는 종단 `PR_CREATED`** 에 갇힌다.
+  `CandidateApprovalApiTest` 가 둘 다 404 인 것을 회귀로 고정하므로, 여는 사람은
+  그 테스트를 함께 고쳐야 한다 — 실행기와 같은 PR 에서 열라는 강제다.
 
   🔴 **`implement` 가 PR 까지 흘려보내면 반려다.** PRD §24 시퀀스가 그렇게 그려져 있으나
   **그 다이어그램이 틀렸다**(#30). 그대로 구현하면 세 번째 게이트가 사라지고 S-2 까지 뚫린다.
 
-  선택 취소(`SELECTED` → `REJECTED`)도 사람 행위로만 일어난다. 자동 취소 경로를 만들지 않는다
+  선택 취소(`SELECTED` → `REJECTED`)도 사람 행위로만 일어난다 — `POST /api/candidates/{id}/reject`.
+  자동 취소 경로를 만들지 않는다. 🔴 `cancelSelection` 은 **출발 상태를 직접 본다** —
+  전이표에는 `ANALYZED → REJECTED` 도 있어서 맡겨 두면 시스템 판정(`rejectAsInfeasible`)과
+  같은 것이 되고, 둘이 같아진 순간 다음 사람이 메서드 하나로 합친다
 - 재시도 상한(`agent.execution.max-retries`)을 코드에서 무한으로 바꾸지 않는다 — 상한 소진은 `FAILED` 이고, 그 자체가 사람에게 넘기는 신호다
 - 상태머신의 종단 상태(`PR_CREATED`·`REJECTED`·`FAILED`)에서 나가는 전이를 만들지 않는다
 
@@ -251,8 +262,8 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
 | S-2 | PR 이 draft 고정인가 · 머지/ready 호출이 없는가 | 부분 — 위 훅 |
 | S-3 | 대상 저장소 실행이 샌드박스 경유인가 | 부분 — 위 훅 |
 | S-4 | 시크릿이 코드·로그·프롬프트에 없는가 | 부분 — [`secret-scan.sh`](../../scripts/secret-scan.sh) · 소스 검사 2종(`SecretPatternDriftTest`·`PromptBoundaryTest`). ⚠️ 마스킹 동작 자체는 **런타임 테스트**가 본다 (#28) |
-| S-5 | `RepositoryPolicy` 를 읽고 따르는가 | ❌ 리뷰 전용 |
-| S-6 | 승인 지점·재시도 상한이 살아 있는가 | ❌ 리뷰 전용 |
+| S-5 | `RepositoryPolicy` 를 읽고 따르는가 | 부분 — `startImplementing` 이 `PolicyClearance` 를 요구해 **컴파일러가** 막는다(#24). 나머지는 리뷰 |
+| S-6 | 승인 지점·재시도 상한이 살아 있는가 | 부분 — `ApprovalGateArchitectureTest`(ArchUnit)가 「자동 진입점이 게이트를 부르지 못한다」·「`selectedAt` 은 `selectByHuman` 만 쓴다」를 잡는다. 나머지는 리뷰 |
 
 정적 탐지가 「부분」인 것은 **훅이 문자열만 본다**는 뜻이다. 호출 그래프를 따라가야 아는 위반은 잡히지 않으므로,
 훅 통과가 곧 합격이 아니다. 판단은 [`pr-review`](../../skills/pr-review/SKILL.md) 와 사람이 한다.

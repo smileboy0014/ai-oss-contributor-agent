@@ -13,6 +13,7 @@ import com.ossagent.repository.domain.FakeContributionRuleInterpreter;
 import com.ossagent.repository.domain.FakePolicyDocumentSource;
 import com.ossagent.repository.domain.FakeRepositorySource;
 import com.ossagent.repository.domain.OssRepository;
+import com.ossagent.repository.domain.PolicyClearance;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryMetadata;
 import com.ossagent.repository.domain.RepositoryPolicy;
@@ -315,5 +316,87 @@ class AnalyzeRepositoryPolicyUseCaseTest {
         useCase.analyze(repositoryId);
 
         useCase.assertContributionAllowed(repositoryId);
+    }
+
+    // ── 통행증 (#24) — 게이트와 같은 기준이어야 한다 ──────────────────
+
+    @Test
+    void 허용이면_통행증을_발급한다_S5() {
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        PolicyClearance clearance = useCase.clearanceFor(repositoryId);
+
+        assertThat(clearance.repositoryId())
+                .as("발급 경로가 이것 하나뿐이라 통행증의 id 는 항상 조회한 그 id 다 — "
+                        + "「남의 통행증을 들고 왔다」를 호출자가 따로 검증할 필요가 없다")
+                .isEqualTo(repositoryId);
+    }
+
+    @Test
+    void 보류는_통행증을_받지_못한다_S5() {
+        documents.givenUnreadable("CONTRIBUTING.md", UnreadableReason.TRUNCATED);
+        useCase.analyze(repositoryId);
+
+        assertThatThrownBy(() -> useCase.clearanceFor(repositoryId))
+                .as("🔴 보류에 통행증이 나가면 Q-8 의 「보류는 자동으로 풀리지 않는다」가 무의미해진다")
+                .isInstanceOfSatisfying(ContributionNotAllowedException.class, e ->
+                        assertThat(e.reason())
+                                .isEqualTo(ContributionNotAllowedException.Reason.UNDETERMINED));
+    }
+
+    @Test
+    void 금지는_통행증을_받지_못한다_S5() {
+        documents.givenRead("CONTRIBUTING.md", "AI 기여 금지");
+        interpreter.given(forbidden());
+        useCase.analyze(repositoryId);
+
+        assertThatThrownBy(() -> useCase.clearanceFor(repositoryId))
+                .isInstanceOfSatisfying(ContributionNotAllowedException.class, e ->
+                        assertThat(e.reason())
+                                .isEqualTo(ContributionNotAllowedException.Reason.FORBIDDEN));
+    }
+
+    @Test
+    void 정책이_없으면_통행증을_받지_못한다_S5() {
+        assertThatThrownBy(() -> useCase.clearanceFor(repositoryId))
+                .as("엔티티 메서드로는 판정할 수 없는 경우다 — 부를 대상이 없다")
+                .isInstanceOfSatisfying(ContributionNotAllowedException.class, e ->
+                        assertThat(e.reason())
+                                .isEqualTo(ContributionNotAllowedException.Reason.NOT_ANALYZED));
+    }
+
+    @Test
+    void 게이트와_통행증은_같은_기준으로_판정한다_S5() {
+        // 🔴 판정 로직이 두 벌이면 한쪽에만 새 규칙이 들어가고, 같은 클래스의 두 문이
+        //    다르게 판정하게 된다. 네 상황 전부에서 두 문의 결과가 같은지를 본다
+        assertBothReject();
+
+        documents.givenUnreadable("CONTRIBUTING.md", UnreadableReason.TRUNCATED);
+        useCase.analyze(repositoryId);
+        assertBothReject();
+
+        policies.deleteAll();
+        documents.reset();
+        documents.givenRead("CONTRIBUTING.md", "AI 기여 금지");
+        interpreter.given(forbidden());
+        useCase.analyze(repositoryId);
+        assertBothReject();
+
+        policies.deleteAll();
+        documents.reset();
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+        useCase.assertContributionAllowed(repositoryId);
+        assertThat(useCase.clearanceFor(repositoryId)).isNotNull();
+    }
+
+    private void assertBothReject() {
+        assertThatThrownBy(() -> useCase.assertContributionAllowed(repositoryId))
+                .isInstanceOf(ContributionNotAllowedException.class);
+        assertThatThrownBy(() -> useCase.clearanceFor(repositoryId))
+                .isInstanceOf(ContributionNotAllowedException.class);
     }
 }

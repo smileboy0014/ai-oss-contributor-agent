@@ -78,6 +78,13 @@ dependencies {
     //    ClientOptions.httpClient 주입점에 스텁을 꽂아 대신한다 (StubHttpClient)
     testImplementation(libs.wiremock.standalone)
 
+    // 🔴 구조 규칙을 테스트로 고정한다 — 「selectedAt 을 쓰는 메서드가 selectByHuman 하나뿐」
+    //    (#24 · S-6 불변식 ②). 손으로 메서드를 열거하면 새 메서드가 추가될 때 조용히 빠지고,
+    //    소스 텍스트 스캔은 주석·문자열·리네임에 뚫린 줄 모른 채 초록이 된다.
+    //    ⚠ 규칙에는 반드시 양성 대조를 붙인다 — 이름 하나만 바뀌어도 규칙은 0건을 검사하고
+    //      초록이 된다 (ExternalAdapterIsolationTest 가 같은 이유로 미끼를 둔다)
+    testImplementation(libs.archunit.junit5)
+
     // 선언하지 않으면 Gradle 이 자기 버전의 launcher 를 끼워 넣어 BOM 이 관리하는 engine 과 어긋난다.
     // 증상이 「테스트를 못 찾는다」로 나와 원인을 짚기 어렵다.
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")

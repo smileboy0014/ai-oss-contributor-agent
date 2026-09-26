@@ -11,6 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Clock;
 import java.time.Instant;
 import lombok.AccessLevel;
@@ -32,6 +33,28 @@ public class RepositoryPolicy {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    /**
+     * 동시 갱신 방어 — 🔴 <b>사람의 판단이 재분석에 조용히 지워지지 않게 한다</b> (S-5 · #24).
+     *
+     * <p>이 행에 쓰는 주체가 둘이다 — 재분석({@code RepositoryPolicyWriter.saveAnalyzed},
+     * 스케줄러가 기동한다)과 사람의 보류 해소({@link #resolvePending}).
+     * 둘 다 자기 트랜잭션 안에서 행을 <b>다시 읽으므로</b> 오래된 엔티티로 덮어쓰지는 않는다.
+     * 그런데 그것만으로는 부족하다.
+     *
+     * <pre>
+     * 정책 = 허용
+     *   사람:   허용 → 금지   (규약이 바뀐 것을 사람이 확인했다)
+     *   재분석: 허용 → 허용   (아직 바뀐 문서를 못 봤다)
+     * 둘 다 가드를 통과한다 → 나중 커밋이 이긴다
+     * </pre>
+     *
+     * <p>재분석이 이기면 <b>사람의 금지 판단이 사라지고</b> 우리는 계속 Draft PR 을 만든다.
+     * 되돌릴 수 없는 방향이 그쪽이다. 충돌은 409 로 나간다.
+     */
+    @Version
+    @Column(nullable = false)
+    private Long version;
 
     /**
      * 소유 저장소. <b>같은 {@code repository} 도메인 안이라 연관관계를 쓴다</b> — architecture.md 규율 ④.

@@ -36,3 +36,28 @@ ALTER TABLE repository_policy
 --   ⚠ 입력 상한은 1000자이고 컬럼이 1024인 것은 마스킹이 길이를 늘릴 수 있어서다
 ALTER TABLE repository_policy
     ADD COLUMN resolution_note VARCHAR(1024);
+
+-- ─────────────────────────────────────────────────────────────
+-- 🔴 낙관적 락 — 사람의 판단이 재분석에 조용히 지워지지 않게 한다
+-- ─────────────────────────────────────────────────────────────
+-- 이 행에 쓰는 주체가 둘이 됐다.
+--   · 재분석 (RepositoryPolicyWriter.saveAnalyzed — 스케줄러가 기동한다, #14)
+--   · 사람의 보류 해소 (ResolvePolicyPendingUseCase.resolve, #24)
+--
+-- 둘 다 자기 트랜잭션 안에서 행을 다시 읽으므로 「오래된 엔티티로 덮어쓰는」 문제는
+-- 없다. 그러나 version 이 없으면 UPDATE 가 WHERE id = ? 뿐이라, 두 트랜잭션이
+-- 같은 값을 읽고 각자 쓰면 나중 커밋이 이긴다:
+--
+--   정책 = 허용
+--   ├─ 사람:   허용 → 금지 로 조인다 (규약이 바뀐 것을 사람이 확인했다)
+--   └─ 재분석: 허용 → 허용 (아직 바뀐 문서를 못 봤거나 캐시된 판정)
+--   둘 다 통과 → 재분석이 나중에 커밋되면 🔴 사람의 금지 판단이 사라진다
+--
+-- 되돌릴 수 없는 방향은 그쪽이다 — 규약 위반 PR 이 나간다 (S-5).
+-- 충돌은 409 로 나간다 (ApiExceptionHandler).
+--
+-- ⚠ contribution_candidate(V4)와 같은 이유·같은 형태다. 거기서는 같은 후보에
+--   구현 사이클이 둘 생기는 것을 막았다.
+ALTER TABLE repository_policy
+    ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+

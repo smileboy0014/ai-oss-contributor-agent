@@ -19,6 +19,7 @@ import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.OptimisticLockingFailureException;
 
 /**
  * 승인 게이트 ② — 보류 해소 (S-5 · Q-8).
@@ -155,5 +156,38 @@ class ResolvePolicyPendingUseCaseTest {
     void 식별자가_없으면_거부한다() {
         assertThatThrownBy(() -> useCase.resolve(null, true, "근거"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 재분석이_사람의_판단을_조용히_덮어쓰지_못한다_S5() {
+        // 정책 = 허용. 여기서 쓰는 주체가 둘이 된다 —
+        //   사람(허용 → 금지 로 조인다) · 재분석(허용 → 허용, 아직 바뀐 문서를 못 봤다)
+        policies.save(RepositoryPolicy.analyzed(
+                repositories.findById(repositoryId).orElseThrow(),
+                new RuleReading(true, "17", "./gradlew build", "./gradlew test",
+                        true, true, true, ScrubbedRules.of("{}")),
+                clock));
+
+        // 재분석이 자기 트랜잭션에서 읽은 사본. 이 시점에는 아직 허용이다
+        RepositoryPolicy asSeenByReanalysis = reread();
+
+        // 그 사이 사람이 금지로 닫는다 — 규약이 바뀐 것을 확인했다
+        useCase.resolve(repositoryId, false, "AGENTS.md 에 AI 기여 금지가 추가됐다");
+
+        // 재분석이 자기 사본에 허용 판정을 적용하고 저장한다.
+        // 🔴 @Version 이 없으면 UPDATE ... WHERE id = ? 라 이것이 그대로 이긴다
+        asSeenByReanalysis.reanalyze(
+                new RuleReading(true, "17", "./gradlew build", "./gradlew test",
+                        true, true, true, ScrubbedRules.of("{}")),
+                clock);
+
+        assertThatThrownBy(() -> policies.save(asSeenByReanalysis))
+                .as("사람의 금지 판단이 사라지면 우리는 계속 Draft PR 을 만든다 — "
+                        + "되돌릴 수 없는 방향이 그쪽이다. 충돌은 409 로 나간다")
+                .isInstanceOf(OptimisticLockingFailureException.class);
+
+        assertThat(reread().isAiContributionForbidden())
+                .as("사람의 판단이 남는다")
+                .isTrue();
     }
 }

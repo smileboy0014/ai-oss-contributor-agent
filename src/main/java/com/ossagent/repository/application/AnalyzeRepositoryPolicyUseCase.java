@@ -3,6 +3,7 @@ package com.ossagent.repository.application;
 import com.ossagent.agent.domain.LlmTransientException;
 import com.ossagent.repository.adapter.out.persistence.OssRepositoryRepository;
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
+import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.repository.domain.ContributionRuleInterpreter;
 import com.ossagent.repository.domain.OssRepository;
@@ -147,6 +148,46 @@ public class AnalyzeRepositoryPolicyUseCase {
             throw new ContributionNotAllowedException(
                     repositoryId, ContributionNotAllowedException.Reason.FORBIDDEN);
         }
+    }
+
+    /**
+     * 규약 제약을 <b>값으로</b> 내보낸다 — 이슈 #16 FR-6.
+     *
+     * <h2>🔴 이것은 게이트가 아니다</h2>
+     * {@code assertContributionAllowed} 와 <b>거부 조건이 다른 것이 정상</b>이다.
+     *
+     * <table>
+     *   <tr><th></th><th>{@code assertContributionAllowed}</th><th>이 메서드</th></tr>
+     *   <tr><td>뜻</td><td><b>「해도 된다」</b> — 권한</td><td><b>「이렇게 해라」</b> — 데이터</td></tr>
+     *   <tr><td>못 받으면</td><td>🔴 진행 불가 (S-5)</td><td>기본값으로 진행 가능</td></tr>
+     *   <tr><td>보류·금지일 때</td><td>예외</td><td><b>값을 돌려준다</b></td></tr>
+     * </table>
+     *
+     * <p>⚠️ <b>둘을 합치고 싶어지는 자리다.</b> 「제약을 줄 때 허용 여부도 함께 주면 조회가
+     * 한 번」으로 보이지만, 그러면 <b>빌드 명령을 알고 싶어 부른 호출이 통행증을 부산물로</b>
+     * 쥐여 준다. 게이트가 부산물이 되는 순간 「정책을 확인하지 않고 구현 단계로 가는 것이
+     * 불가능하다」가 성립하지 않는다.
+     *
+     * <p>판정 필드({@code aiContributionAllowed}·{@code pendingReason})를 값에 싣지 않는 이유도
+     * 같다 — {@link ContributionConstraints} javadoc.
+     *
+     * @return 정책이 아직 없으면 {@link ContributionConstraints#unknown()}.
+     *         「제약이 없다」가 아니라 <b>「우리가 아는 제약이 없다」</b>는 뜻이다
+     */
+    @Transactional(readOnly = true)
+    public ContributionConstraints constraintsOf(Long repositoryId) {
+        if (repositoryId == null) {
+            throw new IllegalArgumentException("저장소 식별자는 필수다");
+        }
+        return policies.findByRepositoryId(repositoryId)
+                .map(policy -> new ContributionConstraints(
+                        policy.getJavaVersion(),
+                        policy.getBuildCommand(),
+                        policy.getTestCommand(),
+                        policy.isTestsRequired(),
+                        policy.isIssueReferenceRequired(),
+                        policy.isSignoffRequired()))
+                .orElseGet(ContributionConstraints::unknown);
     }
 
     @Transactional(readOnly = true)

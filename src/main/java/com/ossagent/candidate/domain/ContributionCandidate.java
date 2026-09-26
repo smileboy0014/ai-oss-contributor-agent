@@ -338,6 +338,28 @@ public class ContributionCandidate {
         return transitionTo(CandidateStatus.FAILED, clock);
     }
 
+    /**
+     * {@code SELECTED → FAILED} — <b>구현 계획을 세우지 못했다</b> (종단). 이슈 #16.
+     *
+     * <p>🔴 {@link #fail(Clock)} 과 가른 이유는 <b>부를 수 있는 조건이 다르기</b> 때문이다.
+     * 저쪽은 구현 루프({@code IMPLEMENTING}·{@code TESTING}·{@code REVIEWING})에서 부르고,
+     * 이쪽은 <b>아직 루프에 들어가지도 못한</b> 후보에 대한 것이다. 한 메서드로 두면
+     * 「어느 단계에서 죽었는가」가 호출부에만 남고 도메인에서 사라진다.
+     *
+     * <p>계획 수립이 {@code IMPLEMENTING} 전이 <b>앞</b>인 이유는 {@link #attempt} 의
+     * javadoc 에 있다 — {@code PLAN} 행의 {@code attempt} 가 1 일 때 이 필드는 0 이어야 한다.
+     * 그래서 상한 소진 시점의 상태가 {@code SELECTED} 다.
+     *
+     * <p>⚠️ {@code REJECTED} 가 아니다. 그것은 <b>사람의 선택 취소</b>이고(Q-5),
+     * 기계가 그리로 보내면 「선택 취소는 사람만」이 무너진다.
+     *
+     * <p>{@code attempt} 를 <b>올리지 않는다</b> — 계획 재생성은 파이프라인 루프가 아니라
+     * 별개 축이다({@code agent.plan.max-attempts}). 여기서 올리면 세 축이 섞인다.
+     */
+    public StatusTransition failPlanning(Clock clock) {
+        return transitionTo(CandidateStatus.FAILED, clock);
+    }
+
     // ─────────────────────────────── 판정 ───────────────────────────────
 
     /** 사람이 고르지 않았다 — 구현 단계 진입 불가 (S-6). */

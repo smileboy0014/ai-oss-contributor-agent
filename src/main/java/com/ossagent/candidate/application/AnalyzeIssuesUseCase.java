@@ -184,11 +184,23 @@ public class AnalyzeIssuesUseCase {
      * 🔴 <b>판정은 여기서 한다.</b> 모델에게 「기각할까」를 묻지 않는다 — 물으면 임계 정책이
      * 모델 안으로 들어가 설정으로 바꿀 수 없게 된다.
      *
+     * <table border="1">
+     *   <caption>기각 사유 — {@code codemaps/domain.md} 전이표가 정본이다</caption>
+     *   <tr><th>조건</th><th>왜</th></tr>
+     *   <tr><td>{@code implementationFeasible=false}</td><td>무엇을 고쳐야 하는지 모른다</td></tr>
+     *   <tr><td>{@code breakingChange=true}</td><td>호환성을 깨는 PR 은 자동화가 낼 것이 아니다.
+     *       규칙 필터도 {@code FilterReason.BREAKING_CHANGE} 를 {@code REJECTED} 로 둔다 —
+     *       두 단계가 <b>같은 판정</b>을 해야 한다</td></tr>
+     *   <tr><td>{@code confidence < min-confidence}</td><td>확신 없는 판정 위에 30분짜리
+     *       구현을 얹지 않는다</td></tr>
+     * </table>
+     *
      * <p>⚠️ {@code REJECTED} 는 <b>종단</b>이다. 임계를 나중에 낮춰도 이미 걸러진 후보는
      * 돌아오지 않는다 — 기본값을 느슨하게 잡은 이유다.
      */
     private boolean shouldReject(IssueAnalysis analysis) {
         return !analysis.implementationFeasible()
+                || analysis.breakingChange()
                 || analysis.confidence().compareTo(properties.minConfidence()) < 0;
     }
 

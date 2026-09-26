@@ -391,6 +391,22 @@ class AnalyzeIssuesUseCaseTest {
     }
 
     @Test
+    @DisplayName("breaking_change 는 REJECTED — 규칙 필터와 같은 판정을 한다")
+    void 호환성_파괴는_REJECTED_다() {
+        givenPolicy(Boolean.TRUE);
+        givenIssue(1, FilterOutcome.PASSED, (short) 10);
+        analyst.given(new IssueAnalysis("enhancement", IssueAnalysis.Difficulty.HARD, true,
+                8, 400, true, true, new BigDecimal("0.95"), "공개 API 시그니처가 바뀐다"));
+
+        assertThat(analyzeIssues.analyze(repositoryId).rejected())
+                .as("규칙 필터가 FilterReason.BREAKING_CHANGE 를 REJECTED 로 두는 것과 같은 판정이다 "
+                        + "— 두 단계가 갈리면 탐지 시점에 따라 결과가 달라진다")
+                .isEqualTo(1);
+        assertThat(candidates.findAll().getFirst().getStatus())
+                .isEqualTo(CandidateStatus.REJECTED);
+    }
+
+    @Test
     @DisplayName("임계 미만 신뢰도는 REJECTED, 임계값 자체는 통과한다")
     void 저신뢰도는_REJECTED_다() {
         givenPolicy(Boolean.TRUE);

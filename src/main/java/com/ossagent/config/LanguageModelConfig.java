@@ -12,6 +12,7 @@ import com.ossagent.agent.domain.AgentRunRecorder;
 import com.ossagent.agent.domain.LanguageModel;
 import com.ossagent.agent.domain.PromptScrubber;
 import com.ossagent.support.ExternalAdapter;
+import com.ossagent.support.observability.PipelineMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -53,7 +54,7 @@ public class LanguageModelConfig {
      */
     @Bean
     public LanguageModel languageModel(AnthropicProperties properties, PromptScrubber scrubber,
-            AgentRunRecorder recorder) {
+            AgentRunRecorder recorder, PipelineMetrics metrics) {
         LanguageModel delegate;
         if (properties.hasApiKey()) {
             // 송신 대상 호스트를 우리가 고정한다. fromEnv() 는 ANTHROPIC_BASE_URL 까지 읽어
@@ -74,6 +75,6 @@ public class LanguageModelConfig {
             // safety-ok: 환경변수 이름만 담은 상수 문자열이다. 값 보간이 없고, 애초에 키가 「없는」 경우다
             log.warn("ANTHROPIC_API_KEY 가 비어 있다 — LLM 호출은 실패한다");
         }
-        return new RecordingLanguageModel(delegate, recorder);
+        return new RecordingLanguageModel(delegate, recorder, metrics);
     }
 }

@@ -4,6 +4,9 @@ import com.ossagent.agent.domain.LlmTransientException;
 import com.ossagent.repository.adapter.out.persistence.OssRepositoryRepository;
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
+import com.ossagent.support.observability.GateOutcome;
+import com.ossagent.support.observability.PipelineMetrics;
+import com.ossagent.support.observability.SafetyClause;
 import com.ossagent.repository.domain.ContributionRuleInterpreter;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.PolicyDocumentPath;
@@ -43,11 +46,13 @@ public class AnalyzeRepositoryPolicyUseCase {
     private final PolicyDocumentSource documentSource;
     private final ContributionRuleInterpreter interpreter;
     private final RepositoryPolicyWriter writer;
+    private final PipelineMetrics metrics;
 
     public AnalyzeRepositoryPolicyUseCase(OssRepositoryRepository repositories,
             RepositoryPolicyRepository policies, RepositorySource repositorySource,
             PolicyDocumentSource documentSource, ContributionRuleInterpreter interpreter,
-            RepositoryPolicyWriter writer) {
+            RepositoryPolicyWriter writer, PipelineMetrics metrics) {
+        this.metrics = metrics;
         this.repositories = repositories;
         this.policies = policies;
         this.repositorySource = repositorySource;
@@ -210,18 +215,27 @@ public class AnalyzeRepositoryPolicyUseCase {
      */
     @Transactional(readOnly = true)
     public void assertContributionAllowed(Long repositoryId) {
-        RepositoryPolicy policy = policies.findByRepositoryId(repositoryId)
-                .orElseThrow(() -> new ContributionNotAllowedException(
-                        repositoryId, ContributionNotAllowedException.Reason.NOT_ANALYZED));
+        try {
+            RepositoryPolicy policy = policies.findByRepositoryId(repositoryId)
+                    .orElseThrow(() -> new ContributionNotAllowedException(
+                            repositoryId, ContributionNotAllowedException.Reason.NOT_ANALYZED));
 
-        if (policy.isAiContributionUndetermined()) {
-            throw new ContributionNotAllowedException(
-                    repositoryId, ContributionNotAllowedException.Reason.UNDETERMINED);
+            if (policy.isAiContributionUndetermined()) {
+                throw new ContributionNotAllowedException(
+                        repositoryId, ContributionNotAllowedException.Reason.UNDETERMINED);
+            }
+            if (policy.isAiContributionForbidden()) {
+                throw new ContributionNotAllowedException(
+                        repositoryId, ContributionNotAllowedException.Reason.FORBIDDEN);
+            }
+        } catch (ContributionNotAllowedException e) {
+            metrics.safetyGate(SafetyClause.S5, GateOutcome.BLOCKED, e.reason());
+            throw e;
         }
-        if (policy.isAiContributionForbidden()) {
-            throw new ContributionNotAllowedException(
-                    repositoryId, ContributionNotAllowedException.Reason.FORBIDDEN);
-        }
+        // 🔴 통과도 센다 — logging.md 「통과한 것도 남긴다. 사고 후 「막았는가」를
+        //    증명할 수 있어야 한다」. 차단만 세면 분모가 없어 막힌 비율을 계산할 수 없고,
+        //    「0건 차단」과 「계측 고장」이 구분되지 않는다
+        metrics.safetyGate(SafetyClause.S5, GateOutcome.PASSED, null);
     }
 
     /**

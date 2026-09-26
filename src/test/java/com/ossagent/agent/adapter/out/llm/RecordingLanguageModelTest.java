@@ -3,6 +3,7 @@ package com.ossagent.agent.adapter.out.llm;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ossagent.support.observability.PipelineMetricsFixtures;
 import com.ossagent.agent.domain.AgentRunContext;
 import com.ossagent.agent.domain.FakeLanguageModel;
 import com.ossagent.agent.domain.LlmCallSite;
@@ -36,7 +37,7 @@ class RecordingLanguageModelTest {
     void 성공하면_토큰이_장부에_남는다() {
         var recorder = new RecordingAgentRunRecorder();
         var model = new RecordingLanguageModel(
-                new FakeLanguageModel().respondWith("응답", 13, 17), recorder);
+                new FakeLanguageModel().respondWith("응답", 13, 17), recorder, PipelineMetricsFixtures.discarding());
 
         model.complete(CTX, REQUEST);
 
@@ -51,7 +52,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                recorder);
+                recorder, PipelineMetricsFixtures.discarding());
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST))
                 .isInstanceOf(LlmTransientException.class);
@@ -67,7 +68,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(new LlmPermanentException(
                         LlmFailureReason.TRUNCATED, LlmCallSite.CODE, new LlmUsage(8, 4096))),
-                recorder);
+                recorder, PipelineMetricsFixtures.discarding());
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST))
                 .isInstanceOf(LlmPermanentException.class);
@@ -83,7 +84,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                recorder);
+                recorder, PipelineMetricsFixtures.discarding());
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST)).isInstanceOf(LlmException.class);
 
@@ -95,7 +96,7 @@ class RecordingLanguageModelTest {
     @Test
     void MDC_를_호출_후에_반드시_비운다() {
         var model = new RecordingLanguageModel(
-                new FakeLanguageModel(), new RecordingAgentRunRecorder());
+                new FakeLanguageModel(), new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding());
 
         model.complete(CTX, REQUEST);
 
@@ -111,7 +112,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                new RecordingAgentRunRecorder());
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding());
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST)).isInstanceOf(LlmException.class);
 

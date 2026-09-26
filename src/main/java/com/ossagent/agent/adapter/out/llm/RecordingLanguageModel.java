@@ -7,6 +7,8 @@ import com.ossagent.agent.domain.LlmException;
 import com.ossagent.agent.domain.LlmFailureReason;
 import com.ossagent.agent.domain.LlmRequest;
 import com.ossagent.agent.domain.LlmResponse;
+import com.ossagent.support.observability.LlmOutcome;
+import com.ossagent.support.observability.PipelineMetrics;
 import org.slf4j.MDC;
 
 /**
@@ -38,10 +40,13 @@ public class RecordingLanguageModel implements LanguageModel {
 
     private final LanguageModel delegate;
     private final AgentRunRecorder recorder;
+    private final PipelineMetrics metrics;
 
-    public RecordingLanguageModel(LanguageModel delegate, AgentRunRecorder recorder) {
+    public RecordingLanguageModel(LanguageModel delegate, AgentRunRecorder recorder,
+            PipelineMetrics metrics) {
         this.delegate = delegate;
         this.recorder = recorder;
+        this.metrics = metrics;
     }
 
     @Override
@@ -54,14 +59,21 @@ public class RecordingLanguageModel implements LanguageModel {
             try {
                 LlmResponse response = delegate.complete(ctx, request);
                 recorder.succeeded(runId, response.usage());
+                metrics.llmCall(ctx.callSite(), LlmOutcome.SUCCEEDED, response.usage(),
+                        ctx.attempt());
                 return response;
             } catch (LlmException e) {
                 // 실패로 기록하되 아는 토큰은 함께 남긴다. 절단은 응답을 받았으므로 사용량을 안다 —
                 // 성공으로 기록하면 장부가 거짓말을 하고, 사용량을 버리면 비용이 사라진다
                 recorder.failed(runId, e.reason(), e.usage().orElse(null));
+                // 🔴 실패도 토큰을 센다 — 절단은 응답을 받았으므로 사용량을 알고,
+                //    모델은 이미 토큰을 생성했다. 성공만 세면 장부가 거짓말을 한다
+                metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, e.usage().orElse(null),
+                        ctx.attempt());
                 throw e;
             } catch (RuntimeException e) {
                 recorder.failed(runId, LlmFailureReason.INVALID_REQUEST, null);
+                metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, null, ctx.attempt());
                 throw e;
             }
         } finally {

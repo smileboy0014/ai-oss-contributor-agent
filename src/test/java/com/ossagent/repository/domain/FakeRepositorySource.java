@@ -24,7 +24,10 @@ public class FakeRepositorySource implements RepositorySource {
 
     private final Map<String, RepositoryMetadata> metadata = new HashMap<>();
     private final Map<String, RepositoryFile> files = new HashMap<>();
+    private final Map<String, RepositoryTree> trees = new HashMap<>();
+    private final Map<String, RuntimeException> fileFailures = new HashMap<>();
     private final List<String> fetchedPaths = new ArrayList<>();
+    private final List<String> fetchedTreeRefs = new ArrayList<>();
     private RuntimeException failure;
 
     public FakeRepositorySource given(RepositoryMetadata value) {
@@ -44,9 +47,65 @@ public class FakeRepositorySource implements RepositorySource {
         return this;
     }
 
+    /**
+     * <b>이 경로 하나만</b> 실패시킨다 — {@link #failWith} 는 전역이라 「파일 하나가 실패해도
+     * 나머지는 계속 모은다」를 재현할 수 없다.
+     *
+     * <p>🔴 실패 모드를 재현하지 못하는 페이크는 게이트를 검증하지 못한다 —
+     * {@code testing-philosophy.md}. 「항상 성공만 반환하는 페이크」가 정확히 그 문제다.
+     */
+    public FakeRepositorySource failFileWith(String path, RuntimeException exception) {
+        fileFailures.put(path, exception);
+        return this;
+    }
+
     /** 실제로 조회된 경로. 「저장소 전체를 넘기지 않는다」(PRD §12)를 테스트로 확인할 때 쓴다. */
     public List<String> fetchedPaths() {
         return List.copyOf(fetchedPaths);
+    }
+
+    /**
+     * 트리를 등록한다 — 경로만 주면 전부 blob 으로 만든다.
+     *
+     * <p>#15 선별 테스트가 쓰는 주 진입점이다. 시크릿 경로({@code .env} 등)를 섞어 두고
+     * <b>그 경로가 {@link #fetchedPaths()} 에 나타나지 않는 것</b>으로 S-4 배선을 단언한다.
+     */
+    public FakeRepositorySource givenTree(RepositoryCoordinates coordinates, String ref,
+            String... paths) {
+        List<RepositoryTreeEntry> entries = new ArrayList<>(paths.length);
+        for (String path : paths) {
+            entries.add(new RepositoryTreeEntry(path, RepositoryTreeEntry.EntryType.BLOB, 0));
+        }
+        trees.put(key(coordinates, ref), new RepositoryTree("fake-tree-sha", entries, false));
+        return this;
+    }
+
+    /** 트리 자체를 주입한다 — {@code truncated} · 서브모듈 같은 모양을 재현할 때 쓴다. */
+    public FakeRepositorySource givenTree(RepositoryCoordinates coordinates, String ref,
+            RepositoryTree tree) {
+        trees.put(key(coordinates, ref), tree);
+        return this;
+    }
+
+    /** 트리를 조회한 {@code ref}. 「저장소당 1회」(NFR-1)를 단언할 때 쓴다. */
+    public List<String> fetchedTreeRefs() {
+        return List.copyOf(fetchedTreeRefs);
+    }
+
+    /**
+     * ⚠️ 컨텍스트가 테스트 클래스 사이에 캐시되고 이 대역은 싱글턴이다.
+     * <b>누적되는 기록</b>({@link #fetchedPaths()}·{@link #fetchedTreeRefs()})을 단언하는
+     * 테스트는 {@code @BeforeEach} 에서 이것을 부른다 — {@code testing-philosophy.md}.
+     */
+    public FakeRepositorySource reset() {
+        metadata.clear();
+        files.clear();
+        trees.clear();
+        fileFailures.clear();
+        fetchedPaths.clear();
+        fetchedTreeRefs.clear();
+        failure = null;
+        return this;
     }
 
     /**
@@ -74,8 +133,31 @@ public class FakeRepositorySource implements RepositorySource {
             String ref) {
         throwIfFailing();
         fetchedPaths.add(path);
-        // 🔴 없는 파일만 빈 값이다. 실패는 failWith 로 주입한다 — S-5 의 계약을 페이크도 지킨다
+        RuntimeException perPath = fileFailures.get(path);
+        if (perPath != null) {
+            throw perPath;
+        }
+        // 🔴 없는 파일만 빈 값이다. 실패는 failWith·failFileWith 로 주입한다 —
+        //    S-5 의 계약을 페이크도 지킨다
         return Optional.ofNullable(files.get(key(coordinates, path)));
+    }
+
+    /**
+     * 🔴 <b>빈 트리를 돌려주지 않는다.</b> 등록이 없으면 셋업 오류다 —
+     * {@code fetchMetadata} 와 같은 이유로 실제 구현과 다른 예외 타입을 쓴다.
+     * 여기서 빈 트리를 주면 「선별 0건」이 정상 통과로 읽혀 가드가 공허해진다.
+     */
+    @Override
+    public RepositoryTree fetchTree(RepositoryCoordinates coordinates, String ref) {
+        throwIfFailing();
+        fetchedTreeRefs.add(ref);
+        RepositoryTree found = trees.get(key(coordinates, ref));
+        if (found == null) {
+            throw new IllegalStateException(
+                    "페이크에 등록되지 않은 트리입니다(테스트 셋업 오류): %s@%s"
+                            .formatted(coordinates.fullName(), ref));
+        }
+        return found;
     }
 
     private void throwIfFailing() {

@@ -48,4 +48,26 @@ public interface RepositorySource {
      *            다시 열지 않도록 지금 둔다
      */
     Optional<RepositoryFile> fetchFile(RepositoryCoordinates coordinates, String path, String ref);
+
+    /**
+     * 저장소의 <b>파일 목록 전체</b>를 한 번에 읽는다 — 이슈 #15 저장소 분석의 1단계.
+     *
+     * <p>왜 이 능력이 필요한가 — 관련 파일을 찾으려면 무엇이 있는지부터 알아야 하는데,
+     * {@link #fetchFile} 을 경로마다 부르면 경로를 <b>추측</b>해야 한다. 트리 한 번이면
+     * 추측이 사라지고 호출도 1회다. 코드 검색 API 를 쓰지 않는 이유는 그쪽이 분당 30회라는
+     * <b>별도 예산</b>을 쓰기 때문이다 — PLAN-15 D-1.
+     *
+     * <p>🔴 <b>{@link #fetchFile} 과 실패 계약이 다르다.</b> 저쪽은 404 를 빈 {@link Optional}
+     * 로 돌려주지만 여기는 <b>빈 값이 없다.</b> 트리가 없는 저장소는 존재하지 않으므로,
+     * 404 를 「파일이 하나도 없다」로 옮기면 그것은 「못 읽었다」를 「없다」로 번역하는 것이다.
+     * <b>모든 실패는 예외로 전파한다</b> — 권한 · 레이트리밋 · 없는 {@code ref} 전부.
+     *
+     * <p>⚠️ 목록이 <b>잘려서</b> 올 수 있다. 그것은 실패가 아니라
+     * {@link RepositoryTree#truncated()} 로 드러나는 사실이고, 호출자가 판단한다 —
+     * 근거는 {@link RepositoryTree} javadoc.
+     *
+     * @param ref 브랜치 · 태그 · 커밋 SHA. {@code null} 이면 기본 브랜치를 본다 —
+     *            {@link #fetchFile} 과 같은 규칙이라 두 호출을 같은 {@code ref} 로 묶을 수 있다
+     */
+    RepositoryTree fetchTree(RepositoryCoordinates coordinates, String ref);
 }

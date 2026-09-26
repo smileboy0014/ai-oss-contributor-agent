@@ -91,7 +91,7 @@ com.ossagent.{도메인}
 
 | 경계 | domain 의 능력 인터페이스 | adapter/out 구현체 | 소유 도메인 | 상태 |
 |---|---|---|---|---|
-| GitHub — 저장소·파일 | `RepositorySource` | `GitHubRepositorySource` | `repository` | ✅ **존재** (#6) |
+| GitHub — 저장소·파일·**트리** | `RepositorySource` | `GitHubRepositorySource` | `repository` | ✅ **존재** (#6) — #15 가 `fetchTree` 를 더했다.<br>⚠️ **실패 계약이 메서드마다 다르다** — `fetchFile` 은 404 를 `Optional.empty()` 로 주지만 `fetchTree` 는 **빈 값이 없다**(트리가 없는 저장소는 없으므로 404 도 예외다) |
 | GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` | ✅ **존재** (#6) |
 | GitHub — 규약 문서 수집 | `PolicyDocumentSource` | `GitHubPolicyDocumentSource` | `repository` | ✅ **존재** (#7) — `RepositorySource` 위에 얹고 **예외를 `UnreadableReason` 으로 번역**한다 |
 | LLM — 규약 판정 | `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | `repository` | ✅ **존재** (#7) — `LanguageModel` 위에 얹는다 |

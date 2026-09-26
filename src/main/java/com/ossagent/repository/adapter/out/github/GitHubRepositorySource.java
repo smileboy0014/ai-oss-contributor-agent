@@ -6,13 +6,17 @@ import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryFile;
 import com.ossagent.repository.domain.RepositoryMetadata;
 import com.ossagent.repository.domain.RepositorySource;
+import com.ossagent.repository.domain.RepositoryTree;
+import com.ossagent.repository.domain.RepositoryTreeEntry;
 import com.ossagent.support.github.GitHubApiClient;
 import com.ossagent.support.github.GitHubRequest;
 import com.ossagent.support.github.GitHubResourceNotFoundException;
 import com.ossagent.support.github.GitHubResponse;
 import com.ossagent.support.github.GitHubUnreadableContentException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -129,6 +133,85 @@ public class GitHubRepositorySource implements RepositorySource {
         // 🔴 내용을 로그에 찍지 않는다. 대상 저장소가 시크릿을 커밋해 뒀을 수 있다
         log.debug("대상 저장소 파일 읽음 repo={} path={} size={}", coordinates.fullName(), path, size);
         return Optional.of(new RepositoryFile(path, content));
+    }
+
+    /**
+     * {@code GET /repos/{owner}/{repo}/git/trees/{ref}?recursive=1} — 저장소 전체 경로를 1회로 받는다.
+     *
+     * <p>🔴 <b>빈 값이 없다.</b> 404 를 포함한 모든 실패가 예외로 나간다 —
+     * {@link com.ossagent.repository.domain.RepositorySource#fetchTree} 의 계약이다.
+     *
+     * <p>⚠️ <b>{@code ref} 에 {@code /} 가 들어 있으면 보장하지 않는다.</b> 이 경로는
+     * {@code UriBuilder} 가 조립하므로 {@code /} 가 경로 구분자로 나간다. Phase 1~3 대상
+     * 저장소의 기본 브랜치는 전부 {@code main}·{@code master} 라 지금은 닿지 않고,
+     * 슬래시 있는 브랜치를 실제로 넘길 일이 생기면 커밋 SHA 로 먼저 해석해야 한다.
+     * 조용히 엉뚱한 트리를 받는 것보다 <b>한계를 적어 두는 쪽</b>을 택했다.
+     */
+    @Override
+    public RepositoryTree fetchTree(RepositoryCoordinates coordinates, String ref) {
+        String resolvedRef = resolveRef(coordinates, ref);
+        GitHubResponse response = client.get(GitHubRequest
+                .of("/repos/%s/%s/git/trees/%s".formatted(coordinates.owner(), coordinates.name(),
+                        resolvedRef))
+                .withQuery("recursive", "1"));
+
+        if (!response.hasBody()) {
+            throw new GitHubUnreadableContentException(
+                    "트리 응답에 본문이 없습니다 repo=%s ref=%s"
+                            .formatted(coordinates.fullName(), resolvedRef));
+        }
+        JsonNode body = response.body();
+        JsonNode tree = body.path("tree");
+        if (!tree.isArray()) {
+            // 🔴 「항목 0개」가 아니라 「우리가 아는 모양이 아니다」다. 빈 트리로 옮기면
+            //    선별이 조용히 0건이 되고 원인이 드러나지 않는다
+            throw new GitHubUnreadableContentException(
+                    "트리 응답에 tree 배열이 없습니다 repo=%s ref=%s"
+                            .formatted(coordinates.fullName(), resolvedRef));
+        }
+
+        List<RepositoryTreeEntry> entries = new ArrayList<>(tree.size());
+        for (JsonNode node : tree) {
+            String path = text(node, "path");
+            if (path == null || path.isBlank()) {
+                continue;
+            }
+            entries.add(new RepositoryTreeEntry(
+                    path,
+                    // 🔴 mode 를 함께 넘긴다 — 심볼릭링크는 type 이 "blob" 이고 mode 로만 갈린다
+                    RepositoryTreeEntry.EntryType.from(text(node, "type"), text(node, "mode")),
+                    node.path("size").asInt(0)));
+        }
+
+        boolean truncated = bool(body, "truncated");
+        if (truncated) {
+            // ⚠️ 실패가 아니라 사실이다. 판단은 호출자가 한다 — RepositoryTree javadoc
+            log.warn("대상 저장소 트리가 잘렸습니다 — 일부 경로를 보지 못합니다 repo={} ref={} entries={}",
+                    coordinates.fullName(), resolvedRef, entries.size());
+        }
+        // 🔴 경로를 나열하지 않는다. 수천 건이고 대상 저장소의 임의 문자열이다
+        log.debug("대상 저장소 트리 읽음 repo={} ref={} entries={} truncated={}",
+                coordinates.fullName(), resolvedRef, entries.size(), truncated);
+        return new RepositoryTree(text(body, "sha"), entries, truncated);
+    }
+
+    /**
+     * {@code ref} 가 없으면 기본 브랜치를 쓴다 — {@code fetchFile} 과 같은 규칙.
+     *
+     * <p>⚠️ 이때 메타데이터 호출이 <b>1회 더</b> 든다. 호출자가 이미 기본 브랜치를 알고 있으면
+     * 그 값을 넘겨 이 경로를 피하는 것이 낫다 — {@code BuildRepositoryContextUseCase} 가 그렇게 한다.
+     */
+    private String resolveRef(RepositoryCoordinates coordinates, String ref) {
+        if (ref != null && !ref.isBlank()) {
+            return ref.trim();
+        }
+        String defaultBranch = fetchMetadata(coordinates).defaultBranch();
+        if (defaultBranch == null || defaultBranch.isBlank()) {
+            // 「못 알아냈다」를 임의의 기본값(main)으로 메우지 않는다 — 엉뚱한 트리를 받는다
+            throw new GitHubUnreadableContentException(
+                    "기본 브랜치를 알 수 없어 트리를 읽지 못했습니다 repo=" + coordinates.fullName());
+        }
+        return defaultBranch;
     }
 
     private static String decode(String encoded, String encoding, RepositoryCoordinates coordinates,

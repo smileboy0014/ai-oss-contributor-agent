@@ -397,6 +397,36 @@ class TokenRedactorTest {
                 .doesNotContain(LONG_KEY_BODY);
     }
 
+    @ParameterizedTest(name = "[{index}] armor 머리말 {0}개")
+    @ValueSource(ints = {1, 3, 5, 8})
+    @DisplayName("armor 머리말이 많아도 진입 창이 소진되지 않는다")
+    void armor_머리말이_창을_소진하지_않는다_S4(int 머리말수) {
+        // 🔴 빈 줄·머리말이 창 예산을 먹고 있었다. RFC 4880 은 Comment: 를 복수 허용하고
+        //    gpg --comment 를 여러 번 주면 그대로 늘어난다. 개수가 형식에 의해 정해지지
+        //    파싱 위험과 무관한데 같은 예산을 쓰게 뒀더니 5개에서 키가 통째로 샜다
+        String armor = "Comment: fixture\n".repeat(머리말수);
+        String text = "-----BEGIN PGP PRIVATE KEY BLOCK-----\n" + armor + "\n" + LONG_KEY_BODY;
+
+        assertThat(TokenRedactor.redact(text))
+                .as("머리말 %d개 — 형식이 정하는 줄 수가 방어를 소진시키면 안 된다", 머리말수)
+                .doesNotContain(LONG_KEY_BODY);
+    }
+
+    @Test
+    @DisplayName("헤더는 들여쓰지 않았는데 본문만 들여쓴 경우에도 가린다")
+    void 헤더와_본문의_들여쓰기가_달라도_가린다_S4() {
+        // 🔴 「본문은 헤더와 같은 장식을 달고 있다」가 사실이 아니었다 — 마크다운
+        //    코드블록·붙여넣기 중 첫 줄 유실·YAML 블록 스칼라가 그 모양이다.
+        //    예산을 헤더에서 유도하는 것만으로는 닫히지 않아 들여쓰기를 무료로 만들었다
+        String text = "-----BEGIN RSA PRIVATE KEY-----\n"
+                + "            " + LONG_KEY_BODY + "\n"
+                + "            -----END RSA PRIVATE KEY-----";
+
+        assertThat(TokenRedactor.redact(text))
+                .as("들여쓰기는 야생에서 상한이 없다 — 예산으로 셀 것이 아니다")
+                .doesNotContain(LONG_KEY_BODY);
+    }
+
     @Test
     @DisplayName("YAML diff 처럼 장식이 겹쳐도 가린다")
     void 겹친_장식에서도_가린다_S4() {

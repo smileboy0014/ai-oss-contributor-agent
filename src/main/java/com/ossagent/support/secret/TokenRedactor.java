@@ -191,9 +191,18 @@ public final class TokenRedactor {
      * <p>🔴 상수 8 로 두었더니 <b>들여쓰기 9칸부터 키가 샜다.</b> k8s Secret·Helm·Actions 는
      * 8~12칸이 일상이고, 그 파일의 diff 는 접두어가 붙어 1이 더 늘어난다.
      *
-     * <p>본문은 헤더와 <b>같은 장식을 달고 있다</b> — YAML 이든 diff 든 그 줄만 따로 들여쓰지
-     * 않는다. 그래서 헤더가 달고 있는 만큼을 예산으로 주면 매직넘버가 사라지고, 얼마나 깊이
-     * 들여쓰든 따라간다. {@code +2} 는 본문 줄에만 붙는 꼬리({@code ,} · {@code ;})의 몫이다.
+     * <p>⚠️ 처음에는 「본문은 헤더와 <b>같은</b> 장식을 달고 있다」를 근거로 삼았는데
+     * <b>그 전제가 틀렸다.</b> 마크다운 코드블록·붙여넣기 중 첫 줄 유실·YAML 블록 스칼라에서는
+     * <b>헤더만 col 0 이고 본문만 들여쓰인다.</b> 그래서 들여쓰기는
+     * {@link #shapeOf} 가 아예 <b>무료</b>로 만들고, 이 유도는 <b>비공백 장식</b>만 맡는다.
+     *
+     * <p>남은 역할은 하나다 — {@code +        MIIE…} 처럼 <b>diff 접두어와 들여쓰기가
+     * 겹치는</b> 경우. 접두어 때문에 앞이 공백으로 시작하지 않아 들여쓰기 면제가 걸리지
+     * 않는다. 헤더 줄도 같은 접두어를 달고 있으므로 거기서 유도하면 따라간다.
+     * k8s Secret 을 고치는 diff 가 정확히 그 모양이다.
+     *
+     * <p>🕳 지울 수 있는지 <b>측정해 봤다.</b> 상수로 되돌리면 그 케이스가 회귀한다.
+     * {@code +2} 는 본문 줄에만 붙는 꼬리({@code ,} · {@code ;})의 몫이다.
      */
     private static int decorationBudget(String text, int headerStart) {
         int lineStart = headerStart;
@@ -237,8 +246,13 @@ public final class TokenRedactor {
                 }
             } else if (startsKeyBody(line, budget)) {
                 entered = true;
+            } else if (passesThroughToEntry(line)) {
+                // 🔴 빈 줄·머리말은 창 예산을 먹지 않는다. 개수가 형식에 의해 정해지고
+                //    파싱 위험과 무관하기 때문이다 — RFC 4880 은 Comment: 를 복수 허용하고
+                //    gpg --comment 를 여러 번 주면 그대로 늘어난다. 같은 예산을 쓰게 뒀더니
+                //    머리말 5개 + 빈 줄로 창이 소진돼 키가 통째로 샜다
             } else if (continuesKeyBody(line, budget) && ++probed <= ENTRY_WINDOW_LINES) {
-                // 빈 줄·머리말·짧은 본문 줄은 지나가게 두되 자격은 주지 않는다.
+                // 짧은 본문 줄만 창 예산을 쓴다.
                 // 끝내 자격 줄을 못 만나면 beforeWindow 로 되돌아가 이 줄들을 남긴다
             } else {
                 return beforeWindow;
@@ -295,7 +309,11 @@ public final class TokenRedactor {
      * 2차식이 났다).
      */
     private static int[] shapeOf(String line) {
-        String bare = stripComment(line);
+        // 🔴 들여쓰기는 장식 예산을 쓰지 않는다. 야생에서 상한이 없고(마크다운 코드블록 ·
+        //    붙여넣기 · YAML 블록 스칼라), 예산이 정말 필요한 것은 +·>·*·"·, 같은
+        //    비공백 장식이다. 헤더 줄이 col 0 인데 본문만 12칸 들여쓰인 경우가 실제로 있다.
+        //    ⚠ 줄 안쪽 공백은 그대로 센다 — 그것을 빼면 영문 산문이 본문으로 먹힌다
+        String bare = stripComment(line).stripLeading();
         int longest = 0;
         int run = 0;
         for (int i = 0; i < bare.length(); i++) {

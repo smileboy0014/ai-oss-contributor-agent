@@ -25,6 +25,8 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 |---|---|
 | **Policy Analysis** | 대상 저장소의 기여 규약을 수집·판정해 `RepositoryPolicy` 로 고정. **후보보다 먼저**이고 저장소 단위다 |
 | **보류** (pending) | 규약을 **읽지 못해** 판정이 서지 않은 상태. `aiContributionAllowed = NULL`. 🔴 **「허용」이 아니다**(S-5) — 자동으로 풀리지 않고 사람이 해소한다(#24) |
+| **해소** (resolution) | 사람이 보류를 푼 행위. `POST /repositories/{id}/policy/resolution` · `resolved_at` 이 증거다. 🔴 **「허용」과 같은 말이 아니다** — 읽고 **금지로 닫는 것도 해소**다(#24) |
+| **통행증** (`PolicyClearance`) | 「규약을 읽었고 AI 기여가 허용이었다」는 **값**. `RepositoryPolicy.clearance()` 만 발급하고 `startImplementing` 이 **인자로 요구**한다 — S-5 의 의무가 javadoc 에서 컴파일러로 옮겨간 자리(#24) |
 | **Scan** | 대상 저장소의 open 이슈를 수집해 저장 |
 | **스캔 파이프라인** | 저장소 하나에 대해 `Policy Analysis → Scan → Filter → Analysis` 를 잇는 실행(#14). 🔴 **`ANALYZED` 에서 멈춘다** — 선택·구현은 사람이 트리거한다 |
 | **진행 상태** (scan execution) | 파이프라인 1회의 국면 — `IDLE`·`QUEUED`·`RUNNING`·`SUCCEEDED`·`SKIPPED`·`FAILED`. ⚠️ **프로세스 메모리**다. 다중 인스턴스에서는 중복 방어가 깨진다 — #26 |
@@ -65,6 +67,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
+| `PolicyClearance` | — | 구현 단계 **통행증** 값 타입. 〃 — 규율 ④의 값 타입 예외다. 🔴 `adapter/in` 경계를 넘지 않는다(외부가 주입하면 게이트가 껍데기가 된다) |
 | `IssueSnapshot` | — | 수집 시점의 이슈 원본 **값**. 영속 엔티티 `Issue` 와 다르다 |
 | `AnalyzableIssue` | — | 분석 단계로 넘기는 이슈 **값**. `issue` 가 소유하고 `candidate` 가 import 한다 — 규율 ④ |
 | `RepositoryTree` | — | 대상 저장소의 **경로 목록**. 내용이 없다. `truncated` 는 「못 본 것이 있다」이지 「없다」가 아니다 (#15) |
@@ -192,6 +195,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | 「PR 을 올린다」 | 「Draft PR 을 만든다」 | 제출은 사람이 한다. 표현이 흐려지면 코드도 흐려진다 |
 | 「저장소에 push」 | 「Fork 에 push」 | S-1 위반이 문장에서 시작된다 |
 | 「테스트를 돌린다」 | 「샌드박스에서 테스트를 돌린다」 | S-3 |
+| 「보류를 해소했다 = 허용했다」 | 「해소했다」 / 「허용으로 풀었다」 | 금지로 닫는 것도 해소다. 뭉개면 「해소 API」가 「허용 API」로 구현된다 (#24) |
 | 「필터를 통과한 이슈」 | 「배제되지 않은 이슈」 | `UNDECIDED` 도 후보가 된다. 「통과」로 뭉개면 판정이 흐려진다 (#9) |
 | 「에이전트」 단독 | 「코딩 에이전트」 / 「이 제품」 | 제품 전체와 내부 LLM 실행자가 같은 말이 된다 |
 | 「시크릿을 막았다」 | 「**경로를 배제했다**」 / 「**내용을 스크럽했다**」 | 🔴 **순서가 다른 두 방어**이고 서로를 대신하지 않는다 (#15·#28). 경로 배제(`SecretFilePolicy`)는 키 파일을 **안 여는** 것이고, 스크럽(`TokenRedactor`)은 **연 파일**의 알려진 패턴을 가리는 것이다. 소스에 하드코딩된 토큰은 경로 정책을 **정상 통과**한다 |

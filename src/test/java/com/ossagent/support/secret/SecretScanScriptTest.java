@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,6 +98,31 @@ class SecretScanScriptTest {
     }
 
     @Test
+    @DisplayName("BOM 처리가 고장나면 조용히 통과하지 않고 멈춘다")
+    void 전처리가_고장나면_시끄럽게_멈춘다_S4(@TempDir Path repo) throws Exception {
+        // 🔴 read_file 이 「… | strip_bom」 으로 끝나므로 그 sed 가 실패하면 파이프가
+        //    빈 출력을 내고 **모든 패턴이 히트 0건**이 된다 — 게이트가 「✅ 통과」를
+        //    찍으며 진짜 개인키를 커밋시킨다. 실측으로 재현했다.
+        //
+        //    ⚠ 이 스크립트가 고치려던 것과 같은 종류의 실패다. 구멍을 닫으면서
+        //    「조용히 꺼지는 게이트」를 새로 만들 뻔했다.
+        Files.writeString(repo.resolve("key.txt"), KEY_BLOCK);
+
+        ScanResult result = scanWithBrokenPreprocessor(repo, "key.txt");
+
+        assertThat(result.blocked())
+                .as("""
+                        전처리가 고장났는데 exit 0 이면 시크릿이 그대로 커밋된다.
+                        게이트는 고장났을 때 **통과가 아니라 중단**이어야 한다.
+                        출력:
+                        %s""", result.output())
+                .isTrue();
+        assertThat(result.output())
+                .as("무엇이 고장났는지 말해야 사람이 고칠 수 있다")
+                .contains("게이트가 고장났습니다");
+    }
+
+    @Test
     @DisplayName("스크립트를 실제로 실행했다")
     void 스크립트를_실제로_실행했다(@TempDir Path repo) throws Exception {
         // 🔴 0건 통과 방지. 스크립트는 git 저장소 밖이거나 대상 파일이 없으면
@@ -128,6 +154,21 @@ class SecretScanScriptTest {
      * {@code git show :파일} 로 읽으므로 인덱스에 들어간 바이트를 그대로 본다.
      */
     private static ScanResult scan(Path repo, String target) throws Exception {
+        return scan(repo, target, Function.identity());
+    }
+
+    /**
+     * BOM 전처리를 고장낸 사본으로 돌린다 — {@code sed} 부재·로케일 거부를 재현한다.
+     *
+     * <p>스크립트를 <b>복사본에서만</b> 고친다. 원본은 건드리지 않는다.
+     */
+    private static ScanResult scanWithBrokenPreprocessor(Path repo, String target)
+            throws Exception {
+        return scan(repo, target, script -> script.replace("LC_ALL=C sed ", "LC_ALL=C no_such_cmd "));
+    }
+
+    private static ScanResult scan(Path repo, String target, Function<String, String> mutate)
+            throws Exception {
         run(repo, "git", "init", "-q");
         run(repo, "git", "config", "user.email", "test@example.com");
         run(repo, "git", "config", "user.name", "test");
@@ -135,7 +176,8 @@ class SecretScanScriptTest {
         Path scripts = repo.resolve(".claude/scripts");
         Files.createDirectories(scripts);
         Path copied = scripts.resolve("secret-scan.sh");
-        Files.copy(SCRIPT, copied);
+        Files.writeString(copied, mutate.apply(Files.readString(SCRIPT, StandardCharsets.UTF_8)),
+                StandardCharsets.UTF_8);
 
         run(repo, "git", "add", target);
         return run(repo, "bash", copied.toString());

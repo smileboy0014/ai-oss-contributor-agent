@@ -141,7 +141,7 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | `repository` 등록·조회 API | ✅ | `RegisterRepositoryUseCase` |
 | `repository` 스캔 요청 접수 | ⚠️ 경계만 | **요청 사실만 기록**한다. 실제 수집 없음 |
 | `candidate` 상태 enum | ✅ | `CandidateStatus` 11종 |
-| `candidate` 조회 API | ⚠️ 경계만 | **빈 배열 고정** |
+| `candidate` 조회 API | ✅ 구현 | 목록(필터·페이지네이션) · 상세. **적재 경로(#11) 부재로 결과는 빈 상태** |
 | HTTP 예외 매핑 | ✅ | `support/web/ApiExceptionHandler` |
 | `Clock` 주입 | ✅ | `config/ClockConfig` |
 | **GitHub 읽기 클라이언트** | ✅ | `support/github` — 타임아웃·재시도 명시 · **403 을 권한/1차/2차 리밋으로 구분** · 레이트리밋 헤더 노출 · 자격증명 공급자 이음매. **쓰기 메서드 없음(S-1)** |

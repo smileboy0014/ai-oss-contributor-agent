@@ -177,8 +177,10 @@ curl -s -X POST localhost:8080/api/repositories \
 curl -s localhost:8080/api/repositories
 ```
 
-`GET /api/candidates` 는 **빈 배열 고정**이고 `POST /api/repositories/{id}/scan` 은
-**요청 사실만 기록**한다. 아직 구현이 없는 것이지 고장난 것이 아니다 —
+`GET /api/candidates` 는 **동작한다** — 필터(상태·난이도·최소 신뢰도)와 페이지네이션,
+그리고 `GET /api/candidates/{id}` 상세까지 있다. 다만 **후보를 만드는 경로(#11)가 아직 없어
+결과가 비어 있다.** `POST /api/repositories/{id}/scan` 은 여전히 **요청 사실만 기록**한다.
+아직 구현이 없는 것이지 고장난 것이 아니다 —
 [`project-overview.md`](../rules/context/project-overview.md) 「지금 어디까지 와 있나」.
 
 ## 6. MCP (선택)

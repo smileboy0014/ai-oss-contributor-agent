@@ -38,8 +38,32 @@ public final class SecretFilePolicy {
     /** 디렉토리 이름 — 경로 어디에 있어도 배제한다. */
     private static final Set<String> SECRET_DIRECTORIES = Set.of("secrets");
 
-    /** 파일명 접두어. {@code credentials.json} · {@code credentials-prod.yml} 을 함께 문다. */
-    private static final List<String> SECRET_NAME_PREFIXES = List.of(".env", "credentials");
+    /**
+     * 🔴 <b>점 파일 접두어 — 구분자 없이 그대로 문다</b>({@code .env*}).
+     *
+     * <p>{@code .envrc}(direnv)가 대표적이다. {@code export AWS_SECRET_ACCESS_KEY=…} 가
+     * 그대로 들어 있는데, 구분자를 요구하면 <b>{@code .env} 와 {@code .env.local} 은 막고
+     * {@code .envrc} 는 통과시킨다.</b> 이슈 #28 의 완료 조건도 {@code .env*} 다.
+     *
+     * <p>점으로 시작하는 이름공간이라 오탐 위험이 거의 없다 — 소스 파일이
+     * {@code .env} 로 시작하지 않는다.
+     */
+    private static final List<String> DOTFILE_PREFIXES = List.of(".env");
+
+    /**
+     * 단어 접두어 — <b>구분자를 요구한다.</b>
+     *
+     * <p>{@code credentials.json} · {@code credentials-prod.yml} 은 물되
+     * <b>{@code CredentialsProvider.java} 는 통과시켜야 한다.</b> 실재하는 클래스 이름이고
+     * (`org.apache.http.client.CredentialsProvider`), 인증 버그를 고칠 때 LLM 이 봐야 하는
+     * 바로 그 파일이다. 여기서 구분자를 빼면 대상 저장소의 <b>소스</b>가 배제된다.
+     *
+     * <p>{@link #DOTFILE_PREFIXES} 와 규칙이 다른 것은 일관성 부족이 아니라,
+     * 점 파일은 이름공간이고 단어는 클래스 이름에 나타나기 때문이다.
+     */
+    private static final List<String> SECRET_NAME_PREFIXES = List.of("credentials");
+
+    private static final List<String> NAME_SEPARATORS = List.of(".", "-", "_");
 
     private SecretFilePolicy() {
     }
@@ -72,10 +96,20 @@ public final class SecretFilePolicy {
             return true;
         }
 
-        for (String prefix : SECRET_NAME_PREFIXES) {
-            if (fileName.equals(prefix) || fileName.startsWith(prefix + ".")
-                    || fileName.startsWith(prefix + "-") || fileName.startsWith(prefix + "_")) {
+        for (String prefix : DOTFILE_PREFIXES) {
+            if (fileName.startsWith(prefix)) {
                 return true;
+            }
+        }
+
+        for (String prefix : SECRET_NAME_PREFIXES) {
+            if (fileName.equals(prefix)) {
+                return true;
+            }
+            for (String separator : NAME_SEPARATORS) {
+                if (fileName.startsWith(prefix + separator)) {
+                    return true;
+                }
             }
         }
 

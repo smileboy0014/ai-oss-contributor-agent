@@ -21,6 +21,7 @@ class SecretFilePolicyTest {
             ".env",
             ".env.local",
             ".env.production",
+            ".envrc",
             "config/.env.example",
             "deploy/server.pem",
             "certs/client.key",
@@ -63,6 +64,7 @@ class SecretFilePolicyTest {
             "src/test/resources/application.yml",
             "docs/keynote.md",
             "src/main/java/Monkey.java",
+            "src/main/java/org/apache/http/client/CredentialsProvider.java",
     })
     @DisplayName("정상 소스는 통과시킨다")
     void 정상_소스는_통과한다(String path) {

@@ -52,7 +52,7 @@ class PromptBoundaryTest {
     @Test
     @DisplayName("LLM SDK 는 어댑터와 조립 지점에서만 쓴다")
     void LLM_SDK_사용처가_제한된다_S4() {
-        List<String> users = sourceFiles(MAIN)
+        List<String> users = sourceFiles(MAIN).stream()
                 .filter(path -> read(path).contains("com.anthropic"))
                 .map(PromptBoundaryTest::relativeToMain)
                 .sorted()
@@ -95,7 +95,7 @@ class PromptBoundaryTest {
     void 프롬프트_경로_로그에_본문이_실리지_않는다_S4() {
         List<String> suspects = new ArrayList<>();
 
-        for (Path path : sourceFiles(AGENT).toList()) {
+        for (Path path : sourceFiles(AGENT)) {
             Matcher call = LOG_CALL.matcher(read(path));
             while (call.find()) {
                 String arguments = call.group(1);
@@ -126,11 +126,11 @@ class PromptBoundaryTest {
     @DisplayName("검사 대상 소스를 실제로 읽었다")
     void 검사_대상_소스를_실제로_읽었다() {
         // 경로가 틀리면 위 두 검사가 0건을 훑고 조용히 통과한다
-        assertThat(sourceFiles(AGENT).toList())
+        assertThat(sourceFiles(AGENT))
                 .as("agent 패키지에서 소스를 하나도 찾지 못했다 — 작업 디렉토리나 경로가 잘못됐다")
                 .isNotEmpty();
 
-        long logCalls = sourceFiles(AGENT)
+        long logCalls = sourceFiles(AGENT).stream()
                 .mapToLong(path -> LOG_CALL.matcher(read(path)).results().count())
                 .sum();
         assertThat(logCalls)
@@ -169,13 +169,15 @@ class PromptBoundaryTest {
         return false;
     }
 
-    private static Stream<Path> sourceFiles(Path root) {
-        try {
-            return Files.walk(root)
-                    .filter(Files::isRegularFile)
+    /**
+     * ⚠️ {@code Files.walk} 는 열린 디렉토리 핸들을 쥔다 — {@code try-with-resources} 로
+     * 닫는다. 단말 연산만으로는 닫히지 않아, 호출이 쌓이면 핸들이 샌다.
+     */
+    private static List<Path> sourceFiles(Path root) {
+        try (Stream<Path> walk = Files.walk(root)) {
+            return walk.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".java"))
-                    .toList()
-                    .stream();
+                    .toList();
         } catch (IOException e) {
             throw new UncheckedIOException("소스를 훑지 못했습니다: " + root.toAbsolutePath(), e);
         }

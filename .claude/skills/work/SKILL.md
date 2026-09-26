@@ -186,15 +186,15 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
 
   - 테스트 게이트: ./gradlew build
     ℹ️ CI 도 같은 `build` 를 돌린다(Q-10). **CI 는 fresh checkout 이라 아래 ② 의
-    `UP-TO-DATE` 문제가 원천적으로 없다** — 로컬에서 ℹ️ 가 나오면 CI 초록이 근거가 된다
+    `UP-TO-DATE` 문제가 원천적으로 없다** — 다만 CI 는 **PR 이후**라 Phase 2 의 대체재가 아니다
   ⚠ 빌드 판정 (필수) — 파이프로 자른 출력만 보고 성공 판정 금지
      (파이프 종료 코드는 마지막 명령이 덮어쓴다).
      🔴 로그는 **세션 스크래치패드**에 쓴다 (경로는 세션 시스템 프롬프트에 있다) — 아래 ③:
 
-     LOG=<스크래치패드>/work-build.log
+     LOG="$SCRATCH/work-build.log"      # ← $SCRATCH 는 세션 스크래치패드 경로로 치환한다
      ./gradlew build > "$LOG" 2>&1; echo "exit=$?"
      grep -c '^BUILD SUCCESSFUL' "$LOG"
-     grep -E '^> Task :test( |$)|^> Task :test [A-Z-]+' "$LOG"   # ← 접미사를 본다
+     grep -E '^> Task :test( |$)' "$LOG"          # ← 접미사째 찍힌다. 없으면 「줄 없음」
      grep -E '^[0-9]+ actionable tasks' "$LOG"
 
   ⚠ **세 가지를 다 본다. `exit=0` + `BUILD SUCCESSFUL` 만으로는 부족하다.**
@@ -214,7 +214,9 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      **오탐으로 죽는 게이트는 반드시 꺼진다.** 「실행되지 않았다」와 「통과했다」를
      **다르게 보고**하면 충분하다 — Stop 훅 [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh)
      가 이미 그렇게 한다(「한 건도 실행하지 않았으면 「통과」라고 하지 않는다」).
-     ℹ️ 가 나오면 **`clean build` 로 한 번 더 받거나** CI 초록을 근거로 쓴다
+     ℹ️ 가 나오면 **`./gradlew build --rerun-tasks`**(또는 `clean build`)로 한 번 더 받는다.
+     ⚠ **여기서 「CI 로 받겠다」는 성립하지 않는다** — CI 는 PR 이 생긴 뒤(Phase 5)에야 돈다.
+     Phase 2 의 ℹ️ 를 CI 로 미루면 **게이트 없이 Phase 3~4 를 지나간다**
 
      ⚠ **요약 줄(`N actionable tasks: M executed`)은 보조다.** `executed 0` 이면
      아무것도 안 돈 것이 확실하지만, **`M executed` 는 `:test` 를 이름으로 지목하지 않는다** —

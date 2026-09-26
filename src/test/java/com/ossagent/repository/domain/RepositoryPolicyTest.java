@@ -124,4 +124,141 @@ class RepositoryPolicyTest {
                 .as("이 컬럼은 PR 본문 조립(#23)의 입력이 될 수 있다 — 종착지가 공개 PR 이다")
                 .doesNotContain(leaked);
     }
+
+    // ───────────────────── 보류 해소 — Q-8 · #24 ─────────────────────
+
+    @Test
+    void 사람은_보류를_허용으로_풀_수_있다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "CONTRIBUTING.adoc=5xx", CLOCK);
+
+        policy.resolvePending(true, "adoc 을 직접 열어 확인했다 — AI 금지 문구 없음", CLOCK);
+
+        assertThat(policy.allowsContribution()).isTrue();
+        assertThat(policy.isHumanResolved())
+                .as("resolvedAt 이 「기계 판정이 아니다」를 말한다")
+                .isTrue();
+        assertThat(policy.getPendingReason())
+                .as("해소 뒤에도 보존한다 — 왜 보류였는지가 사라지면 판단을 재검토할 수 없다")
+                .isEqualTo("CONTRIBUTING.adoc=5xx");
+    }
+
+    @Test
+    void 사람은_보류를_금지로_닫을_수도_있다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=UNKNOWN", CLOCK);
+
+        policy.resolvePending(false, "AGENTS.md 에 AI 생성 기여 금지가 적혀 있다", CLOCK);
+
+        assertThat(policy.isAiContributionForbidden())
+                .as("🔴 「해소」는 「허용」이 아니다. 허용 전용으로 두면 금지 판정을 내리려고 "
+                        + "DB 를 손으로 고치게 되고 그쪽이 더 위험하다 — Q-8")
+                .isTrue();
+        assertThat(policy.isHumanResolved()).isTrue();
+    }
+
+    @Test
+    void 금지_판정은_해소로_뒤집히지_않는다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), forbidden(), CLOCK);
+
+        assertThatThrownBy(() -> policy.resolvePending(true, "메인테이너가 괜찮다고 했다", CLOCK))
+                .as("막지 않으면 FR-2 가 API 호출 한 번으로 풀린다")
+                .isInstanceOf(PolicyResolutionRejectedException.class);
+
+        assertThat(policy.isAiContributionForbidden()).isTrue();
+        assertThat(policy.isHumanResolved())
+                .as("거부는 흔적을 남기지 않는다")
+                .isFalse();
+    }
+
+    @Test
+    void 거부_메시지가_우회법을_안내하지_않는다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), forbidden(), CLOCK);
+
+        // 🔴 게이트가 막으면서 「이렇게 하면 나를 지나갈 수 있다」를 적어 두면 그것이 관행이 된다.
+        //    조치 방법을 적는 것 자체는 옳다 — 다만 그 방법이 「게이트를 통과하는 법」이어야지
+        //    「게이트를 우회하는 법」이면 안 된다
+        assertThatThrownBy(() -> policy.resolvePending(true, "근거", CLOCK))
+                .hasMessageNotContainingAny("DB", "직접 수정", "UPDATE");
+    }
+
+    @Test
+    void 이미_허용인_정책은_해소할_것이_없다() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), allowed(), CLOCK);
+
+        assertThatThrownBy(() -> policy.resolvePending(true, "한 번 더 허용", CLOCK))
+                .isInstanceOf(PolicyResolutionRejectedException.class);
+    }
+
+    @Test
+    void 허용된_정책을_금지로_조이는_것은_언제든_가능하다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), allowed(), CLOCK);
+
+        policy.resolvePending(false, "나중에 AGENTS.md 에 금지가 추가된 것을 사람이 확인했다", CLOCK);
+
+        assertThat(policy.isAiContributionForbidden())
+                .as("조이는 방향까지 막으면 규약이 바뀌어도 되돌릴 길이 없다 — "
+                        + "「모르면 되돌릴 수 없는 쪽을 피한다」")
+                .isTrue();
+    }
+
+    @Test
+    void 근거_없는_해소는_남길_수_없다() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=UNKNOWN", CLOCK);
+
+        assertThatThrownBy(() -> policy.resolvePending(true, "   ", CLOCK))
+                .as("왜 그렇게 판단했는지가 없으면 그 판정은 재검토도 못 한다")
+                .isInstanceOf(PolicyResolutionRejectedException.class);
+
+        assertThat(policy.isAiContributionUndetermined()).isTrue();
+    }
+
+    @Test
+    void 해소_근거도_스크럽을_거친다_S4() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=UNKNOWN", CLOCK);
+        // 토큰 「형태」가 유의미한 테스트다 — 스크럽이 실제로 무는지를 봐야 하므로 조립한다
+        String leaked = "ghp_" + "B".repeat(36);
+
+        policy.resolvePending(true, "메인테이너 토큰 " + leaked + " 로 확인했다", CLOCK);
+
+        assertThat(policy.getResolutionNote())
+                .as("사람이 대상 저장소 원문이나 자기 토큰을 붙여넣는다 — 여기가 마지막 방어다")
+                .doesNotContain(leaked);
+    }
+
+    @Test
+    void 해소_근거는_컬럼_상한_안으로_잘린다() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=UNKNOWN", CLOCK);
+
+        policy.resolvePending(true, "가".repeat(5_000), CLOCK);
+
+        assertThat(policy.getResolutionNote().length())
+                .as("스크럽이 길이를 늘릴 수 있어 입력 상한(1000)과 컬럼(1024)을 두 축으로 둔다. "
+                        + "도메인이 마지막으로 한 번 더 자른다")
+                .isLessThanOrEqualTo(1024);
+    }
+
+    // ───────────── 해소 뒤 재분석 — 방향이 다르다 (Q-8 · #24) ─────────────
+
+    @Test
+    void 사람이_해소한_판정을_재분석이_허용으로_되돌리지_못한다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=5xx", CLOCK);
+        policy.resolvePending(true, "직접 읽었다 — 금지 문구 없음", CLOCK);
+
+        assertThatThrownBy(() -> policy.reanalyze(allowed(), CLOCK))
+                .as("Q-8 이 막으려는 것은 「자동이 사람 판단을 조용히 바꾸는 것」이다. "
+                        + "해소가 그 방어를 리셋하면 안 된다")
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 사람이_해소한_뒤에도_재분석이_금지로_조이는_것은_통과한다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=5xx", CLOCK);
+        policy.resolvePending(true, "직접 읽었다 — 금지 문구 없음", CLOCK);
+
+        policy.reanalyze(forbidden(), CLOCK);
+
+        assertThat(policy.isAiContributionForbidden())
+                .as("🔴 양방향으로 막으면 대상 저장소가 나중에 AI 금지를 추가해도 영영 못 본다. "
+                        + "그 방향은 되돌릴 수 없는 쪽(규약 위반 PR)이라 열어 둔다")
+                .isTrue();
+    }
 }

@@ -33,10 +33,10 @@ import org.junit.jupiter.api.Test;
  *
  * <h2>🔴 0건 검사로 초록이 되지 않게 한다</h2>
  *
- * <p>이 저장소에는 아직 {@code adapter/in/scheduler} 패키지가 하나도 없다. 그래서
- * 「스케줄러는 게이트에 닿지 못한다」는 규칙이 <b>아무것도 검사하지 않고 통과</b>한다.
- * 정작 필요해지는 시점은 누군가 스케줄러를 처음 만드는 때인데, 그때 규칙이 고장 나 있으면
- * S-6 이 조용히 뚫린다.
+ * <p>「스케줄러는 게이트에 닿지 못한다」는 규칙은 <b>위반이 0건이면 규칙이 통째로 잘못
+ * 쓰여 있어도 초록</b>이다. #24 를 쓸 당시 이 저장소에는 {@code adapter/in/scheduler} 가
+ * 하나도 없어 정확히 그 상태였고, 그 뒤 {@code ScanScheduler}(#14)가 들어왔지만
+ * <b>그것이 마침 게이트를 안 부를 뿐</b>이라 사정은 같다 — 규칙이 무는지는 여전히 증명되지 않는다.
  *
  * <p>그래서 규칙마다 <b>양성 대조</b>를 둔다 — 운영 코드에는 없지만 미끼 패키지
  * ({@code support.testing.probe})에는 있는 위반을 <b>같은 규칙이 무는지</b> 확인한다.
@@ -88,7 +88,7 @@ class ApprovalGateArchitectureTest {
     void 그_규칙이_실제로_무는지_확인한다_양성_대조() {
         assertThatThrownBy(() -> 자동_진입점은_승인_게이트를_부르지_못한다().check(PROBES))
                 .as("미끼(AutoSelectProbe)를 놓치면 규칙이 고장 난 것이다 — "
-                        + "지금은 운영 코드에 scheduler 패키지가 없어 0건 검사로 초록이 된다")
+                        + "운영 코드의 scheduler 는 게이트를 안 부르므로 규칙이 위반 0건으로 초록이다")
                 .isInstanceOf(AssertionError.class)
                 .hasMessageContaining("AutoSelectProbe");
     }

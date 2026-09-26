@@ -19,7 +19,7 @@ import java.util.List;
  * <p>「활성 PR 존재」를 여기 두지 않은 이유다. 확인 수단이 없어 늘 {@code UNDECIDED} 를
  * 내면 집계에서 {@link FilterOutcome#PASSED} 가 <b>도달 불가능한 죽은 값</b>이 되고,
  * 하류가 {@code UNDECIDED} 를 통과로 뭉갤 수밖에 없다. 이슈 단위 판정이 아니라
- * <b>단계 전체의 공백</b>이므로 행마다 기록하지 않는다 — #11 입구와 #22 의 몫이다.
+ * <b>단계 전체의 공백</b>이므로 행마다 기록하지 않는다 — #11 입구와 #23 의 몫이다.
  */
 public interface FilterRule {
 

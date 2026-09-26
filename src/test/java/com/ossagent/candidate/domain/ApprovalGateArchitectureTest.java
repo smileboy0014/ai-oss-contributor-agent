@@ -65,6 +65,14 @@ class ApprovalGateArchitectureTest {
      *
      * <p>미끼 패키지도 함께 뺀다. 경로 규칙({@code DO_NOT_INCLUDE_TESTS})이 이미 걸러내지만,
      * 그 규칙은 <b>Gradle 의 출력 경로 관례</b>에 기대므로 의도를 한 번 더 못 박는다.
+     *
+     * <p>🔴 <b>그 「한 번 더」가 공짜가 아니다.</b> 문자열로 경로를 거르는 람다를 더한 것은
+     * <b>매칭 실패점을 하나 늘린 것</b>이기도 하다. 그 람다가 넓게 물어
+     * {@code com.ossagent.repository.**} 가 통째로 빠져도 규칙 ①·①b·③ 은
+     * <b>검사 대상이 사라져 공허하게 초록</b>이 된다 — 그런데 ①을 허용목록으로 쓴 이유가
+     * 바로 {@code repository.application} 의 자동 실행자를 덮으려던 것이다.
+     * 그래서 아래 {@code 판정_대상이_임포트에_실재한다_모수} 가 필요하다 —
+     * {@code testing-philosophy.md} 요구 1(모수)·4(입력 도달).
      */
     private static final JavaClasses PRODUCTION = new ClassFileImporter()
             .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
@@ -347,5 +355,43 @@ class ApprovalGateArchitectureTest {
                         + "필요하면 candidate 의 UseCase 또는 값 타입으로 받는다")
                 .check(PRODUCTION);
     }
-}
 
+    // ────────── 모수 — 규칙들이 실제로 무엇을 훑었는가 ──────────
+
+    @Test
+    void 판정_대상이_임포트에_실재한다_모수() {
+        // 🔴 규칙 ①·①b·③ 에는 미끼(물림)만 있고 모수가 없었다.
+        //    PRODUCTION 이 통째로 비면 ②·④ 의 PRODUCTION.get(...) 이 터져 잡히지만,
+        //    **부분 누락**은 아무도 못 잡는다 — 미끼 테스트는 PROBES 를 따로 임포트하므로
+        //    그대로 초록이고, ②·④ 는 candidate 패키지만 본다.
+        //    여기서 각 규칙이 「무엇을 훑었는가」를 이름으로 못 박는다.
+
+        assertThat(PRODUCTION.contain(SelectCandidateUseCase.class))
+                .as("규칙 ① 이 지목하는 타입이 임포트에 없으면 그 규칙은 공허하다")
+                .isTrue();
+        assertThat(PRODUCTION.contain(ContributionCandidate.class))
+                .as("규칙 ①b 가 호출을 추적하는 타입")
+                .isTrue();
+        assertThat(PRODUCTION.contain(PolicyClearance.class))
+                .as("규칙 ③ 이 adapter/in 밖으로 막는 타입")
+                .isTrue();
+
+        // ⚠️ 가장 중요한 모수다. 규칙 ①을 거부목록에서 허용목록으로 뒤집은 이유가
+        //    「진짜 자동 실행자가 ..adapter.in.scheduler.. 밖에 있다」였고,
+        //    그 밖이란 곧 repository.application 이다. 그 패키지가 임포트에서 빠지면
+        //    ①은 정확히 자기가 덮으려던 것을 안 보면서 초록이 된다
+        assertThat(PRODUCTION.stream()
+                .filter(c -> c.getPackageName().startsWith("com.ossagent.repository.application"))
+                .count())
+                .as("규칙 ①이 덮으려는 자동 실행자(ScanExecutor·LaunchScanUseCase)가 사는 패키지")
+                .isGreaterThan(0);
+
+        // 🔴 미끼는 운영 판정에서 빠져야 한다 — 빠지지 않으면 규칙들이 항상 빨갛다.
+        //    모수를 세면서 이것도 함께 본다(둘은 같은 ImportOption 체인이 결정한다)
+        assertThat(PRODUCTION.stream()
+                .filter(c -> c.getPackageName().startsWith(PROBE_PACKAGE))
+                .count())
+                .as("미끼가 운영 판정에 섞이면 안 된다")
+                .isZero();
+    }
+}

@@ -147,6 +147,7 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | `candidate` 조회 API | ✅ 구현 | 목록(필터·페이지네이션) · 상세 |
 | `candidate` 적재 경로 | ✅ 구현 | `AnalyzeIssuesUseCase`(#11) — 필터 통과 이슈를 LLM 으로 판정해 후보 생성. **트리거(#14)는 아직 없다** |
 | HTTP 예외 매핑 | ✅ | `support/web/ApiExceptionHandler` |
+| **파이프라인 메트릭** | ✅ | `support/observability` (#25) — 🔴 **태그를 만드는 유일한 지점**이 `PipelineMetrics` 이고 시그니처가 enum 만 받는다. 카디널리티 폭발과 식별자 유출이 같은 방향이라 한 곳에 가뒀다 (S-4). 잰다: LLM 토큰(입·출력)·단계 소요 시간·게이트 통과/차단·후보 상태 분포.<br>⚠️ 구현·테스트·리뷰·PR 지표는 **그 단계가 없어** 재지 않는다 — 0 고정 카운터는 「재고가 0」과 「아직 없다」를 구분하지 못한다 |
 | `Clock` 주입 | ✅ | `config/ClockConfig` |
 | **GitHub 읽기 클라이언트** | ✅ | `support/github` — 타임아웃·재시도 명시 · **403 을 권한/1차/2차 리밋으로 구분** · 레이트리밋 헤더 노출 · 자격증명 공급자 이음매. **쓰기 메서드 없음(S-1)** |
 | **GitHub 능력 인터페이스** | ✅ | `RepositorySource`(repository) · `IssueSource`(issue) + 어댑터 2 + 테스트 페이크 2 |

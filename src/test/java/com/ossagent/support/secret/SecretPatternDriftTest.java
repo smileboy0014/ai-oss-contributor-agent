@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -112,17 +113,38 @@ class SecretPatternDriftTest {
      *       PGP armor 가 통째로 빠져나갔다 (RFC 4880)</li>
      *   <li><b>머리말 뒤의 빈 줄</b> — gpg 2.1+ 의 표준 출력 모양이고,
      *       진입 판정이 여기서 끊겨 키 전체가 샜다</li>
+     *   <li>🔴 <b>들여쓰기</b> — 커밋 차단이 줄 앵커라 <b>선행 공백 한 칸에 통째로</b>
+     *       빠져나갔다. k8s Secret·Helm·Actions 가 전부 이 모양이다 (#58)</li>
      * </ul>
      *
-     * <p>⚠️ 처음에는 맨몸 PGP 블록만 두었는데, 그것으로는 뒤의 둘을 <b>잡을 수 없었다.</b>
-     * 「샘플이 먼저 대표여야 한다」 — {@code testing-philosophy.md}.
+     * <p>⚠️ <b>샘플을 두 번 고쳤고, 두 번 다 「잡지 못하는 것이 있어서」였다.</b>
+     * 처음에는 맨몸 PGP 블록이라 {@code Version:} 머리말과 빈 줄을 못 잡았고,
+     * 그 다음에는 <b>줄 시작</b>이라 들여쓰기 구멍을 못 잡았다 — 커밋 차단 패턴이
+     * {@code ^-+} 였는데 샘플도 {@code -} 로 시작해 <b>구멍이 있는 채로 초록</b>이었다.
+     *
+     * <p>「샘플이 먼저 대표여야 한다」 — {@code testing-philosophy.md}.
+     * 위반이 0건인 상태에서 초록은 <b>「막혔다」가 아니라 「지금 위반이 없다」</b>의 증거다.
      */
     private static final String SAMPLE_PEM = String.join("\n",
-            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
-            "Version: GnuPG v2",
+            "  -----BEGIN PGP PRIVATE KEY BLOCK-----",
+            "  Version: GnuPG v2",
             "",
-            FAKE_KEY_BODY,
-            "-----END PGP PRIVATE KEY BLOCK-----");
+            "  " + FAKE_KEY_BODY,
+            "  -----END PGP PRIVATE KEY BLOCK-----");
+
+    /**
+     * GCP 서비스계정 키 JSON — <b>공개 저장소에 가장 흔히 커밋되는 키 파일 포맷</b>이다.
+     *
+     * <p>헤더가 {@code "private_key": "} 뒤에 오므로 <b>줄 단위 PEM 검사가 놓친다</b> —
+     * 대시 앞이 따옴표라 {@code ^[[:space:]]*-+} 에 걸리지 않는다. 「키 파일을 커밋하지
+     * 마라」를 닫는다고 적어 놓고 그 대표 포맷을 놓치고 있었다 (#58 리뷰).
+     */
+    private static final String SAMPLE_SERVICE_ACCOUNT = String.join("\n",
+            "{",
+            "  \"type\": \"service_account\",",
+            "  \"private_key\": \"-----BEGIN PRIVATE KEY-----\\n" + FAKE_KEY_BODY
+                    + "\\n-----END PRIVATE KEY-----\\n\"",
+            "}");
 
     /**
      * 스크립트 정규식 ↔ 런타임 커버리지 대응표.
@@ -140,7 +162,10 @@ class SecretPatternDriftTest {
             new Row("github_pat_[A-Za-z0-9_]{20,}", SAMPLE_FINE_GRAINED, SAMPLE_FINE_GRAINED),
             new Row("xox[baprs]-[A-Za-z0-9-]{10,}", SAMPLE_SLACK_TOKEN, SAMPLE_SLACK_TOKEN),
             new Row("sk-ant-[A-Za-z0-9_-]{20,}", SAMPLE_ANTHROPIC_KEY, SAMPLE_ANTHROPIC_KEY),
-            new Row("^-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?", SAMPLE_PEM, FAKE_KEY_BODY));
+            new Row("\"private_key\"[[:space:]]*:[[:space:]]*\"-+ ?BEGIN",
+                    SAMPLE_SERVICE_ACCOUNT, FAKE_KEY_BODY),
+            new Row("^[[:space:]]*([-*>][[:space:]]+)?-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?",
+                    SAMPLE_PEM, FAKE_KEY_BODY));
 
     /**
      * 스크립트에 대응이 <b>없어도 되는</b> 런타임 패턴. 사유 없이 늘리지 않는다.
@@ -181,6 +206,20 @@ class SecretPatternDriftTest {
      */
     private static final int PEM_IMPLEMENTATION_PATTERNS = 2;
 
+    /**
+     * 런타임 패턴 하나를 <b>여러 스크립트 행이 공유</b>하는 수.
+     *
+     * <p>GCP 서비스계정 JSON 행이 그렇다. 커밋 차단 쪽에서는 별도 패턴이 필요하지만
+     * ({@code "private_key": "} 접두사 때문에 줄 단위 PEM 검사가 놓친다), 런타임은
+     * <b>같은 {@code PEM_HEADER} 가 이미 잡는다</b> — 한 줄 안에 헤더와 종료 표시가 함께
+     * 있어 스캐너의 한 줄짜리 경로로 처리된다.
+     *
+     * <p>⚠️ 대응이 <b>1:1 이 아니어도 된다</b>는 것을 여기서 처음 인정한다. 숫자를 맞추려고
+     * 런타임에 쓸모없는 패턴을 더하는 것이 훨씬 나쁘다 —
+     * 실제로 가려지는지는 {@link #모든_샘플이_런타임에서_사라진다_S4} 가 <b>실행으로</b> 본다.
+     */
+    private static final int SCRIPT_ROWS_SHARING_RUNTIME_PATTERN = 1;
+
     // ── 검사 ──────────────────────────────────────────────────────────────────
 
     @Test
@@ -219,7 +258,8 @@ class SecretPatternDriftTest {
 
         for (Row row : ROWS) {
             // PEM 은 줄 앵커(^)라 MULTILINE 이 없으면 입력 전체의 시작만 본다
-            Pattern scriptPattern = Pattern.compile(row.scriptRegex(), Pattern.MULTILINE);
+            Pattern scriptPattern =
+                    Pattern.compile(toJavaRegex(row.scriptRegex()), Pattern.MULTILINE);
             if (!scriptPattern.matcher(row.sample()).find()) {
                 vacuous.add(row.scriptRegex());
             }
@@ -265,7 +305,8 @@ class SecretPatternDriftTest {
                           · 커밋 차단에 쓸 수 없는 사유가 있다면 RUNTIME_ONLY 에 사유와 함께 등록한다
                         ⚠ 이 검사는 개수만 본다. 무엇을 가리는 패턴인지는 판정하지 못하므로,
                           숫자를 맞추는 것으로 때우지 않는다 — 등록표를 실제로 갱신한다.""")
-                .isEqualTo(ROWS.size() + RUNTIME_ONLY.size() + PEM_IMPLEMENTATION_PATTERNS);
+                .isEqualTo(ROWS.size() + RUNTIME_ONLY.size() + PEM_IMPLEMENTATION_PATTERNS
+                        - SCRIPT_ROWS_SHARING_RUNTIME_PATTERN);
     }
 
     @Test
@@ -345,6 +386,47 @@ class SecretPatternDriftTest {
             count++;
         }
         return count;
+    }
+
+    /** POSIX 문자 클래스 → Java 등가. 늘릴 때는 {@link #POSIX_CLASS} 도 함께 본다. */
+    private static final Map<String, String> POSIX_TO_JAVA = Map.of(
+            "[:space:]", "\\s",
+            "[:blank:]", " \\t",
+            "[:alpha:]", "\\p{Alpha}",
+            "[:digit:]", "\\d",
+            "[:alnum:]", "\\p{Alnum}",
+            "[:upper:]", "\\p{Upper}",
+            "[:lower:]", "\\p{Lower}",
+            "[:punct:]", "\\p{Punct}",
+            "[:xdigit:]", "\\p{XDigit}");
+
+    private static final Pattern POSIX_CLASS = Pattern.compile("\\[:[a-z]+:]");
+
+    /**
+     * 🔴 <b>셸 ERE 를 Java 정규식으로 옮긴다.</b> 두 엔진이 다르다는 것이 이 테스트의
+     * 전제인데, 정작 스크립트 패턴을 <b>Java 로 그대로 컴파일</b>하고 있었다.
+     *
+     * <p>{@code [[:space:]]} 가 대표적이다. ERE 에서는 공백 문자 클래스지만 Java 는 POSIX
+     * 괄호 표현을 모른다 — <b>{@code :}·{@code s}·{@code p}·{@code a}·{@code c}·{@code e}
+     * 중 한 글자</b>로 읽는다. 그러면 들여쓴 샘플이 물리지 않고, 「샘플이 스크립트 정규식에
+     * 물린다」 검사가 <b>패턴이 맞는데도</b> 빨개진다.
+     *
+     * <p>⚠️ 모르는 클래스는 <b>조용히 통과시키지 않는다.</b> 옮기지 못한 것이 남아 있으면
+     * 터뜨린다 — 번역이 빠진 채 「물리지 않는다」로 읽히면 원인을 엉뚱한 데서 찾게 된다.
+     */
+    private static String toJavaRegex(String ereRegex) {
+        String translated = ereRegex;
+        for (Map.Entry<String, String> entry : POSIX_TO_JAVA.entrySet()) {
+            translated = translated.replace(entry.getKey(), entry.getValue());
+        }
+
+        assertThat(POSIX_CLASS.matcher(translated).find())
+                .as("""
+                        번역하지 못한 POSIX 문자 클래스가 남았다: %s
+                        POSIX_TO_JAVA 에 등가를 추가한다. 그대로 두면 Java 가 그것을
+                        「괄호 안의 글자들」로 읽어, 패턴이 맞는데도 샘플이 안 물린다.""", translated)
+                .isFalse();
+        return translated;
     }
 
     private static String readScript() {

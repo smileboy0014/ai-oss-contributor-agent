@@ -136,7 +136,14 @@ class ExternalTextScrubRegistryTest {
             Map.entry("SandboxResult.output", new Decision(Mechanism.PENDING,
                     "#18·#19 — 소비자가 아직 없다. DB 에 앉는 자리는"
                             + " GeneratedChange.testResult 이고 그쪽도 PENDING 이다."
-                            + " LLM 송신은 PromptScrubber 를 거친다 (#17)")));
+                            + " LLM 송신은 PromptScrubber 를 거친다 (#17)")),
+
+            Map.entry("SelectedFile.content", new Decision(Mechanism.VALUE_TYPE,
+                    "SelectedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"
+                            + " 경로가 없다. ⚠ SecretFilePolicy 가 이것을 대신하지 않는다 —"
+                            + " 그쪽은 경로를 보고 열지 않는 방어이고, 소스에 하드코딩된 토큰은"
+                            + " 경로 정책을 정상 통과한다. 보장하는 것은 「스크럽을 거치지 않은"
+                            + " 값이 들어갈 수 없다」이지 「내용이 깨끗하다」가 아니다 (#15)")));
 
     @Test
     @DisplayName("외부 텍스트 필드는 전부 스크럽 결정이 등록돼 있다")

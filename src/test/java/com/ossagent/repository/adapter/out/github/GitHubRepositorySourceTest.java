@@ -10,6 +10,8 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryFile;
 import com.ossagent.repository.domain.RepositoryMetadata;
+import com.ossagent.repository.domain.RepositoryTree;
+import com.ossagent.repository.domain.RepositoryTreeEntry;
 import com.ossagent.support.github.GitHubApiClient;
 import com.ossagent.support.github.GitHubErrorTranslator;
 import com.ossagent.support.github.GitHubPermissionException;
@@ -218,6 +220,76 @@ class GitHubRepositorySourceTest {
 
         assertThat(file).isPresent();
         assertThat(file.get().isEmpty()).isTrue();
+    }
+
+    // ── 트리 조회 (#15) ───────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("트리를 recursive 로 한 번에 읽고 blob 만 파일로 본다")
+    void 트리를_매핑한다() {
+        server.expect(once(), requestTo(
+                        BASE_URL + "/repos/spring-projects/spring-kafka/git/trees/main?recursive=1"))
+                .andRespond(withSuccess("""
+                        {
+                          "sha": "tree-sha-1",
+                          "truncated": false,
+                          "tree": [
+                            {"path": "src", "type": "tree", "mode": "040000"},
+                            {"path": "src/main/java/A.java", "type": "blob", "mode": "100644", "size": 120},
+                            {"path": "libs/vendor", "type": "commit", "mode": "160000"},
+                            {"path": "docs/link.md", "type": "blob", "mode": "120000", "size": 12}
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        RepositoryTree tree = source.fetchTree(KAFKA, "main");
+
+        assertThat(tree.sha()).isEqualTo("tree-sha-1");
+        assertThat(tree.blobs()).extracting(RepositoryTreeEntry::path)
+                .as("서브모듈(commit)과 심볼릭링크(mode 120000)는 읽을 수 없다 — blob 으로 세면 예산만 태운다")
+                .containsExactly("src/main/java/A.java");
+        assertThat(tree.blobs().get(0).size()).isEqualTo(120);
+    }
+
+    @Test
+    @DisplayName("트리가 잘려 오면 그 사실을 값으로 들고 나온다 — 실패가 아니다")
+    void 잘린_트리를_표시한다() {
+        server.expect(once(), requestTo(
+                        BASE_URL + "/repos/spring-projects/spring-kafka/git/trees/main?recursive=1"))
+                .andRespond(withSuccess(
+                        "{\"sha\":\"s\",\"truncated\":true,\"tree\":[]}", MediaType.APPLICATION_JSON));
+
+        RepositoryTree tree = source.fetchTree(KAFKA, "main");
+
+        assertThat(tree.truncated())
+                .as("못 받은 경로는 「없는 것」이 아니라 「못 본 것」이다")
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("tree 배열이 없으면 빈 트리가 아니라 예외다")
+    void 모양이_다른_응답을_빈_트리로_읽지_않는다() {
+        server.expect(once(), requestTo(
+                        BASE_URL + "/repos/spring-projects/spring-kafka/git/trees/main?recursive=1"))
+                .andRespond(withSuccess("{\"sha\":\"s\"}", MediaType.APPLICATION_JSON));
+
+        assertThatThrownBy(() -> source.fetchTree(KAFKA, "main"))
+                .as("빈 트리로 옮기면 선별이 조용히 0건이 되고 원인이 드러나지 않는다")
+                .isInstanceOf(GitHubUnreadableContentException.class);
+    }
+
+    @Test
+    @DisplayName("ref 를 주지 않으면 기본 브랜치를 알아내 쓴다")
+    void ref_가_없으면_기본_브랜치를_해석한다() {
+        server.expect(once(), requestTo(BASE_URL + "/repos/spring-projects/spring-kafka"))
+                .andRespond(withSuccess("{\"default_branch\":\"develop\"}", MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo(
+                        BASE_URL + "/repos/spring-projects/spring-kafka/git/trees/develop?recursive=1"))
+                .andRespond(withSuccess(
+                        "{\"sha\":\"s\",\"truncated\":false,\"tree\":[]}", MediaType.APPLICATION_JSON));
+
+        assertThat(source.fetchTree(KAFKA, null).sha()).isEqualTo("s");
+        server.verify();
     }
 
     private static String contentsJson(String content, int size) {

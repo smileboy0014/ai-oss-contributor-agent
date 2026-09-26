@@ -10,6 +10,7 @@ import com.ossagent.repository.domain.RepositoryDocuments;
 import com.ossagent.repository.domain.RepositoryFile;
 import com.ossagent.repository.domain.RepositoryMetadata;
 import com.ossagent.repository.domain.RepositorySource;
+import com.ossagent.repository.domain.RepositoryTree;
 import com.ossagent.repository.domain.UnreadableReason;
 import com.ossagent.support.github.GitHubRateLimitException;
 import com.ossagent.support.github.GitHubTransientException;
@@ -62,6 +63,17 @@ class GitHubPolicyDocumentSourceTest {
         @Override
         public RepositoryMetadata fetchMetadata(RepositoryCoordinates coordinates) {
             return new RepositoryMetadata(coordinates, "main", "Java", false, false, 0);
+        }
+
+        /**
+         * 규약 수집(#7)은 고정 경로 목록만 읽으므로 트리가 필요 없다.
+         *
+         * <p>🔴 빈 트리를 돌려주지 않는다 — 이 스텁을 쓰는 테스트가 트리를 부르기 시작하면
+         * 그 사실이 <b>드러나야</b> 한다. 빈 값은 「안 쓴다」와 「썼는데 0건」을 같게 만든다.
+         */
+        @Override
+        public RepositoryTree fetchTree(RepositoryCoordinates coordinates, String ref) {
+            throw new UnsupportedOperationException("규약 수집은 트리를 읽지 않는다");
         }
 
         @Override

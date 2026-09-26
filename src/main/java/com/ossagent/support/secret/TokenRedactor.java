@@ -192,6 +192,21 @@ public final class TokenRedactor {
      * 짧아 진입 조건에 못 미쳐도, 종료 줄이 있으면 블록 전체가 가려진다.
      * 그것을 없애면 짧은 키가 새는 쪽으로 기운다. <b>한쪽을 닫으면 다른 쪽이 열리는
      * 자리라, 유출이 아니라 과차단이 남는 쪽을 골랐다.</b>
+     *
+     * <p><b>② 산문 속 헤더 언급 뒤 20줄 안에 40자 런이 오면 그 사이가 소실된다.</b>
+     * 「{@code -----BEGIN …-----} 를 커밋하지 마세요」라고 적은 뒤 빈 줄 몇 개와
+     * 파일 경로 한 줄이 오면 그 구간이 마스킹된다. 그 값은 {@code IssueSnapshot} 을 통해
+     * <b>DB 에 영속되고 원문 복구 경로가 없다.</b>
+     *
+     * <p>🔴 <b>더 조이지 않는 이유 — 조이면 키 쪽이 먼저 샌다.</b>
+     * {@link #ENTRY_PASSTHROUGH_LINES} 를 줄이면 armor 머리말이 많은 진짜 키가 진입에
+     * 실패해 통째로 나간다. 두 방향이 <b>아직 같은 손잡이 하나에</b> 남아 있고, 그것을
+     * 가르려면 「헤더가 제 줄을 통째로 차지했는가」라는 축이 필요한데 그 축도 깨끗하지 않다
+     * ({@code String k = "-----BEGIN…"} 같은 진짜 키가 산문 앞머리를 달고 있다).
+     *
+     * <p>남은 손실은 <b>유출이 아니라 본문 손실</b>이고, 조건이 「PEM 헤더 문자열이 등장」
+     * AND 「20줄 안에 40자 런이 등장」 둘 다여서 좁다. <b>새 축을 도입하는 위험이 남은
+     * 손실보다 크다고 판단했다</b> — 이슈 #59 에서 본다.
      */
     private static String redactPemBlocks(String text) {
         Matcher header = PEM_HEADER.matcher(text);
@@ -233,7 +248,7 @@ public final class TokenRedactor {
      * #28 의 6차 리뷰에서 전체 프로브로 <b>회귀 0건</b>이 확인됐다.
      * 여기서 적용하지 않은 이유는 그때 남은 blocker 를 닫는 것이 우선이었고,
      * <b>리뷰가 6라운드 돌아간 보안 핵심부에 급하지 않은 변경을 끼워 넣지 않기로</b> 했기
-     * 때문이다 — 이 PR 에서 반복해 배운 것이 그것이다. 다음 정리 때 본다.
+     * 때문이다 — 이 PR 에서 반복해 배운 것이 그것이다. 이슈 #59 에서 본다.
      */
     private static int decorationBudget(String text, int headerStart) {
         int lineStart = headerStart;

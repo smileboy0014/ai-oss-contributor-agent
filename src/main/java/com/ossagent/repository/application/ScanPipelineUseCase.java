@@ -8,8 +8,12 @@ import com.ossagent.issue.application.ScanIssuesUseCase;
 import com.ossagent.issue.application.ScanResult;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.support.github.GitHubRateLimitException;
+import com.ossagent.support.observability.PipelineMetrics;
+import com.ossagent.support.observability.PipelineStage;
+import com.ossagent.support.observability.StageOutcome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
@@ -55,11 +59,17 @@ public class ScanPipelineUseCase {
     private final ScanIssuesUseCase scanIssues;
     private final FilterIssuesUseCase filterIssues;
     private final AnalyzeIssuesUseCase analyzeIssues;
+    private final PipelineMetrics metrics;
+
+    /** ⚠️ {@code RecordingLanguageModel} 이 쓰는 키와 <b>같다</b> — 아래 javadoc. */
+    private static final String MDC_STAGE = "stage";
 
     public ScanPipelineUseCase(AnalyzeRepositoryPolicyUseCase repositoryPolicy,
             ScanIssuesUseCase scanIssues,
             FilterIssuesUseCase filterIssues,
-            AnalyzeIssuesUseCase analyzeIssues) {
+            AnalyzeIssuesUseCase analyzeIssues,
+            PipelineMetrics metrics) {
+        this.metrics = metrics;
         this.repositoryPolicy = repositoryPolicy;
         this.scanIssues = scanIssues;
         this.filterIssues = filterIssues;
@@ -75,64 +85,113 @@ public class ScanPipelineUseCase {
             throw new IllegalArgumentException("저장소 식별자는 필수다");
         }
         assertNoTransaction();
+        try {
+            return runStages(repositoryId);
+        } finally {
+            // 🔴 반드시 지운다. 실행 스레드는 풀(core=1)에서 재사용되므로 남겨 두면
+            //    다음 저장소의 로그에 앞 실행의 단계가 찍힌다 — 로그를 이어붙이려고
+            //    넣은 것이 오히려 잘못 이어붙이게 만든다
+            MDC.remove(MDC_STAGE);
+        }
+    }
 
+    private ScanPipelineResult runStages(Long repositoryId) {
         // ── 0단계. 정책 보장 (FR-0) ──────────────────────────────────
+        // ⚠ MDC 를 단계마다 채운다. 포맷에 %X{stage} 를 넣어도 이것이 없으면
+        //   LLM 호출 구간 외에는 빈 채로 찍힌다 — logging.md 의 「식별자로 로그를
+        //   이어붙인다」가 포맷만으로는 달성되지 않는다
+        MDC.put(MDC_STAGE, PipelineStage.POLICY.name());
+        long policyStart = System.nanoTime();
         ScanTarget target;
         try {
             target = repositoryPolicy.analyzeIfAbsent(repositoryId);
         } catch (GitHubRateLimitException e) {
+            stageDone(PipelineStage.POLICY, StageOutcome.SKIPPED, policyStart);
             // 🔴 지연이지 실패가 아니다. analyze() 의 catch 는 LlmTransientException 뿐이라
             //    fetchMetadata 에서 난 리밋은 맨몸으로 여기까지 올라온다
             log.info("규약 분석이 레이트리밋에 걸렸다 repositoryId={} — 다음 주기가 이어받는다",
                     repositoryId);
             return ScanPipelineResult.skipped(ScanTarget.SkipReason.RATE_LIMITED);
+        } catch (RuntimeException e) {
+            stageDone(PipelineStage.POLICY, StageOutcome.FAILED, policyStart);
+            throw e;
         }
 
         if (!target.contributionAllowed()) {
+            stageDone(PipelineStage.POLICY, StageOutcome.SKIPPED, policyStart);
             // 🔴 수집 전에 끊는다 — 반영할 수 없는 판정에 레이트리밋·토큰을 쓰지 않는다.
             //    ⚠ 게이트는 분석 단계에 그대로 남아 있다. 이것은 조기 차단일 뿐이다
             log.info("수집을 건너뛴다 repositoryId={} reason={} transient={}",
                     repositoryId, target.skipReason(), target.isTransientSkip());
             return ScanPipelineResult.skipped(target.skipReason());
         }
+        stageDone(PipelineStage.POLICY, StageOutcome.SUCCEEDED, policyStart);
 
         // ── 1단계. 수집 ─────────────────────────────────────────────
+        MDC.put(MDC_STAGE, PipelineStage.SCAN.name());
+        long scanStart = System.nanoTime();
         ScanResult scan;
         try {
             scan = scanIssues.scan(repositoryId, target.coordinates());
         } catch (RuntimeException e) {
+            stageDone(PipelineStage.SCAN, StageOutcome.FAILED, scanStart);
             throw ScanStageFailedException.at(ScanExecutionState.Stage.SCAN, repositoryId, e);
         }
+        stageDone(PipelineStage.SCAN, StageOutcome.SUCCEEDED, scanStart);
 
         // ── 2단계. 필터 ─────────────────────────────────────────────
+        MDC.put(MDC_STAGE, PipelineStage.FILTER.name());
+        long filterStart = System.nanoTime();
         FilterResult filter;
         try {
             filter = filterIssues.filter(repositoryId);
         } catch (RuntimeException e) {
+            stageDone(PipelineStage.FILTER, StageOutcome.FAILED, filterStart);
             // 수집분은 이미 DB 에 있다. 버리지 않는다 (NFR-4)
             throw ScanStageFailedException.at(ScanExecutionState.Stage.FILTER, repositoryId, e,
                     ScanPipelineResult.partial(scan, null));
         }
+        stageDone(PipelineStage.FILTER, StageOutcome.SUCCEEDED, filterStart);
 
         // ── 3단계. 분석 ─────────────────────────────────────────────
+        MDC.put(MDC_STAGE, PipelineStage.ANALYZE.name());
+        long analyzeStart = System.nanoTime();
         AnalysisResult analysis;
         try {
             analysis = analyzeIssues.analyze(repositoryId);
         } catch (ContributionNotAllowedException e) {
+            stageDone(PipelineStage.ANALYZE, StageOutcome.SKIPPED, analyzeStart);
             // 🔴 실패가 아니다 — S-5 게이트가 정상 작동한 것이다.
             //    0단계에서 걸렀어야 하지만, 그 사이 사람이 정책을 바꿨을 수 있다
             log.info("분석 게이트가 막았다 repositoryId={} reason={} — 수집·필터 결과는 남는다",
                     repositoryId, e.reason());
             return ScanPipelineResult.partial(scan, filter);
         } catch (RuntimeException e) {
+            stageDone(PipelineStage.ANALYZE, StageOutcome.FAILED, analyzeStart);
             throw ScanStageFailedException.at(ScanExecutionState.Stage.ANALYZE, repositoryId, e,
                     ScanPipelineResult.partial(scan, filter));
         }
+        stageDone(PipelineStage.ANALYZE, StageOutcome.SUCCEEDED, analyzeStart);
 
         ScanPipelineResult result = ScanPipelineResult.of(scan, filter, analysis);
         // 이슈 본문·판정 내용은 남기지 않는다 — 수치와 우리 어휘만 (logging.md · S-4)
         log.info("스캔 파이프라인 완료 repositoryId={} {}", repositoryId, result);
         return result;
+    }
+
+    /**
+     * 단계 하나를 마감한다 — 소요 시간과 결과.
+     *
+     * <p>⚠️ 벽시계({@code Clock})가 아니라 {@code nanoTime} 이다. 재는 것은 <b>경과 시간</b>
+     * 이고, 고정 {@code Clock} 을 쓰면 테스트에서 항상 0 이 된다.
+     *
+     * <p>🔴 <b>{@code MeterRegistry} 를 여기서 만지지 않는다.</b> 태그를 만드는 지점은
+     * {@link PipelineMetrics} 하나여야 한다 — 여기서 {@code Timer.builder().tag()} 를 쓰면
+     * 「이번엔 저장소 이름을」이 들어올 자리가 생긴다.
+     */
+    private void stageDone(PipelineStage stage, StageOutcome outcome, long startNanos) {
+        metrics.pipelineStage(stage, outcome,
+                java.time.Duration.ofNanos(System.nanoTime() - startNanos));
     }
 
     /**

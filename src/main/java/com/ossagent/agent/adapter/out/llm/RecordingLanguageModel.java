@@ -7,6 +7,8 @@ import com.ossagent.agent.domain.LlmException;
 import com.ossagent.agent.domain.LlmFailureReason;
 import com.ossagent.agent.domain.LlmRequest;
 import com.ossagent.agent.domain.LlmResponse;
+import com.ossagent.support.observability.LlmOutcome;
+import com.ossagent.support.observability.PipelineMetrics;
 import org.slf4j.MDC;
 
 /**
@@ -38,14 +40,26 @@ public class RecordingLanguageModel implements LanguageModel {
 
     private final LanguageModel delegate;
     private final AgentRunRecorder recorder;
+    private final PipelineMetrics metrics;
 
-    public RecordingLanguageModel(LanguageModel delegate, AgentRunRecorder recorder) {
+    public RecordingLanguageModel(LanguageModel delegate, AgentRunRecorder recorder,
+            PipelineMetrics metrics) {
         this.delegate = delegate;
         this.recorder = recorder;
+        this.metrics = metrics;
     }
 
     @Override
     public LlmResponse complete(AgentRunContext ctx, LlmRequest request) {
+        // 🔴 덮기 전에 이전 값을 챙긴다 — finally 에서 복원한다.
+        //    remove 로 끝내면 「지운다」가 되어, 바깥(ScanPipelineUseCase·AnalyzeIssuesUseCase)이
+        //    넣어 둔 stage·candidateId 가 첫 LLM 호출 이후 사라진다. 그러면 기각·실패 로그
+        //    처럼 식별자가 가장 필요한 줄에서 MDC 가 비는데, 증상이 「로그가 조금 허전하다」뿐이라
+        //    아무도 알아차리지 못한다 — 이 PR 이 고치려던 문제를 그대로 재현하는 셈이다
+        String previousCandidateId = MDC.get("candidateId");
+        String previousStage = MDC.get("stage");
+        String previousAttempt = MDC.get("attempt");
+
         MDC.put("candidateId", String.valueOf(ctx.candidateId()));
         MDC.put("stage", ctx.callSite().name());
         MDC.put("attempt", String.valueOf(ctx.attempt()));
@@ -54,20 +68,47 @@ public class RecordingLanguageModel implements LanguageModel {
             try {
                 LlmResponse response = delegate.complete(ctx, request);
                 recorder.succeeded(runId, response.usage());
+                metrics.llmCall(ctx.callSite(), LlmOutcome.SUCCEEDED, response.usage(),
+                        ctx.attempt());
                 return response;
             } catch (LlmException e) {
                 // 실패로 기록하되 아는 토큰은 함께 남긴다. 절단은 응답을 받았으므로 사용량을 안다 —
                 // 성공으로 기록하면 장부가 거짓말을 하고, 사용량을 버리면 비용이 사라진다
                 recorder.failed(runId, e.reason(), e.usage().orElse(null));
+                // 🔴 실패도 토큰을 센다 — 절단은 응답을 받았으므로 사용량을 알고,
+                //    모델은 이미 토큰을 생성했다. 성공만 세면 장부가 거짓말을 한다
+                metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, e.usage().orElse(null),
+                        ctx.attempt());
                 throw e;
             } catch (RuntimeException e) {
                 recorder.failed(runId, LlmFailureReason.INVALID_REQUEST, null);
+                metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, null, ctx.attempt());
                 throw e;
             }
         } finally {
-            MDC.remove("candidateId");
-            MDC.remove("stage");
-            MDC.remove("attempt");
+            // 이전 값으로 되돌린다 — 없었으면 지운다.
+            // ⚠ 풀 스레드는 재사용된다. 「없었으면 지운다」를 빠뜨리면 다음 실행의 로그에
+            //   앞 실행의 값이 찍혀, 이어붙이려고 넣은 것이 잘못 이어붙이게 만든다.
+            //
+            // ⚠ restore(key, previous) 헬퍼로 묶지 않는다. 그러면 MDC.put 의 키가
+            //   변수가 되어 MdcLogPatternTest 의 소스 스캐너가 「정적으로 알 수 없는 키」로
+            //   판정한다 — 가드를 느슨하게 하느니 여기가 장황한 편이 낫다.
+            //   실제로 헬퍼로 짰다가 그 가드에 잡혀 되돌렸다
+            if (previousCandidateId == null) {
+                MDC.remove("candidateId");
+            } else {
+                MDC.put("candidateId", previousCandidateId);
+            }
+            if (previousStage == null) {
+                MDC.remove("stage");
+            } else {
+                MDC.put("stage", previousStage);
+            }
+            if (previousAttempt == null) {
+                MDC.remove("attempt");
+            } else {
+                MDC.put("attempt", previousAttempt);
+            }
         }
     }
 }

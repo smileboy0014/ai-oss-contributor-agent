@@ -5,6 +5,7 @@ import com.ossagent.candidate.domain.CandidateStatus;
 import com.ossagent.candidate.domain.ContributionCandidate;
 import java.math.BigDecimal;
 import java.util.Collection;
+import java.util.List;
 import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -71,4 +72,16 @@ public interface ContributionCandidateRepository extends JpaRepository<Contribut
      */
     @Query("SELECT c.issueId FROM ContributionCandidate c WHERE c.issueId IN :issueIds")
     Set<Long> findExistingIssueIds(@Param("issueIds") Collection<Long> issueIds);
+
+    /**
+     * 상태별 후보 수 — {@code candidate_count} 게이지(#25)가 스크레이프마다 부른다.
+     *
+     * <p>🔴 <b>누적이 아니라 현재 값이다.</b> 카운터로 두면 후보가 상태를 옮길 때마다
+     * 올라가기만 해서 「지금 몇 건이 {@code ANALYZED} 인가」에 답하지 못한다.
+     *
+     * <p>⚠️ 스크레이프마다 쿼리가 나간다. {@code idx_contribution_candidate_status} 가
+     * 있고 지금은 후보가 0건이라 감당되지만, 수만 건이 되면 캐시를 붙인다.
+     */
+    @Query("SELECT c.status, count(c) FROM ContributionCandidate c GROUP BY c.status")
+    List<Object[]> countGroupedByStatus();
 }

@@ -1,7 +1,9 @@
 package com.ossagent.issue.adapter.out.persistence;
 
 import com.ossagent.issue.domain.Issue;
+import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
@@ -22,4 +24,21 @@ public interface IssueJpaRepository extends JpaRepository<Issue, Long> {
     Optional<Issue> findByRepositoryIdAndGithubIssueNumber(Long repositoryId, Integer githubIssueNumber);
 
     long countByRepositoryId(Long repositoryId);
+
+    /**
+     * 아직 규칙 필터를 거치지 않은 이슈 — #9.
+     *
+     * <p>{@code filter_result IS NULL} 이 곧 「미판정」이다. 내용이 바뀌면
+     * {@code Issue.updateFrom} 이 이 값을 비우므로, 갱신된 이슈는 자동으로 다시 대상이 된다.
+     *
+     * <p>🔴 호출자는 <b>항상 첫 페이지를 읽는다.</b> 판정이 바로 이 조건 컬럼을 채워
+     * 판정한 행이 결과 집합에서 빠지므로, {@code page=1} 로 넘기면 배치 크기만큼을
+     * 건너뛴다 — {@code IssueFilterBatchWriter}.
+     *
+     * <p>{@code Page} 가 아니라 {@code List} 를 돌려준다. 전체 건수 count 쿼리가
+     * 필요 없는데 {@code Page} 는 매 배치마다 그것을 돈다.
+     */
+    List<Issue> findByRepositoryIdAndFilterResultIsNull(Long repositoryId, Pageable pageable);
+
+    long countByRepositoryIdAndFilterResult(Long repositoryId, String filterResult);
 }

@@ -15,7 +15,11 @@
 src/main/resources/db/migration/
 ├── V1__create_oss_repositories.sql      (적용된 파일이라 이름을 바꾸지 않는다)
 ├── V2__create_pipeline_tables.sql
-└── V3__rename_oss_repositories_to_singular.sql
+├── V3__rename_oss_repositories_to_singular.sql
+├── V4__add_candidate_attempt_and_version.sql
+├── V5__policy_pending_reason_and_repository_scoped_run.sql
+├── V6__add_issue_scan_cursor.sql
+└── V7__add_issue_filter_columns.sql
 ```
 
 | 규칙 | 이유 |
@@ -139,7 +143,7 @@ oss_repository ──1:1──▶ repository_policy
 문서 본문에서만 오고 빌드 설정 파싱은 #15 다. 「NULL 인 정책으로 샌드박스에 진입할 수 있는가」는
 #15·#17 의 선결 과제다.
 
-### `issue` ✅ 실재 (V2)
+### `issue` ✅ 실재 (V2 · V6 · V7)
 
 | 컬럼 | 타입 | 비고 |
 |---|---|---|
@@ -148,11 +152,27 @@ oss_repository ──1:1──▶ repository_policy
 | `github_issue_number` | INT NOT NULL | |
 | `title` | VARCHAR | |
 | `body` | TEXT | **대용량** — 목록 조회에서 제외 |
-| `state` | VARCHAR | `OPEN` / `CLOSED` |
+| `state` | VARCHAR | `open` 고정. ⚠️ **닫힌 이슈를 조회하지 않아 영원히 open 이다** (#8 → #14) |
 | `url` | VARCHAR | |
-| `labels` | VARCHAR | PRD 에 없지만 필터에 필요 (`good first issue` 등) |
-| `filter_result` · `filter_reason` | VARCHAR · TEXT | 왜 배제됐는지. 없으면 같은 이슈를 매번 다시 판정한다 |
-| `created_at` · `updated_at` | TIMESTAMP | **`updated_at` 이 증분 수집 커서다** |
+| `labels` | VARCHAR | PRD 에 없지만 필터에 필요 (`good first issue` 등). 콤마 조인 |
+| `comment_count` | INT | V7 · #9. 규칙의 **보류** 신호이자 #11 의 LLM 판정 입력 |
+| `filter_result` | VARCHAR | `NULL`(미판정) · `PASSED` · `REJECTED` · `UNDECIDED`. **4상태다** |
+| `filter_reason` | VARCHAR(512) | V7 · #9. `FilterReason` 이름을 콤마로 이은 것. **자유 텍스트가 아니다** — 아래 |
+| `filter_priority` | SMALLINT | V7 · #9. 라벨 우선순위 점수. #11 이 **SQL 로 정렬**할 때 쓴다 |
+| `filter_judged_at` | TIMESTAMP | V7 · #9. 「판정이 언제 섰나」. `updated_at`(행을 언제 건드렸나)과 뜻이 다르다 |
+| `github_created_at` · `github_updated_at` | TIMESTAMP | **`github_updated_at` 이 증분 수집 커서다** |
+| `created_at` · `updated_at` | TIMESTAMP | |
+
+🔴 **`filter_reason` 은 `TEXT` 가 아니다** (V7 에서 내렸다). 이 프로젝트에서 `TEXT` 는
+「길어서 따로 둔 외부 텍스트」를 뜻하고 `@ExternalText` 마커가 강제된다
+(`ExternalTextMarkerTest`). 여기 들어가는 값은 `FilterReason` enum 의 이름 — **우리
+어휘**다. 이슈 본문 발췌가 들어가면 대상 저장소 사용자가 쓴 임의 텍스트가 우리 DB 를
+거쳐 LLM 프롬프트·PR 본문으로 흘러간다 (S-4). `repository_policy.pending_reason` 을
+`VARCHAR` 로 둔 것과 같은 판단이다.
+
+⚠️ **재판정 트리거는 `filter_result IS NULL` 이다.** 내용이 바뀌면 `Issue.updateFrom` 이
+필터 4컬럼을 전부 비운다. 규칙·임계를 바꾼 것은 잡지 못하므로, 그때는 운영에서
+`filter_judged_at` 으로 대상을 골라 비운다.
 
 멱등키 — **`UNIQUE(repository_id, github_issue_number)`**.
 없으면 재스캔마다 같은 이슈가 중복 적재되고, 후보도 중복 생성된다.
@@ -252,5 +272,6 @@ stage enum 문자열에 묶이기 때문이다.
 
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
+| 2026-09-26 | smileboy0014 | `issue` 에 필터 4컬럼 (V7 · #9) · `filter_reason` 을 TEXT 에서 VARCHAR 로 |
 | 2026-09-22 | smileboy0014 | 7테이블 실재로 전환 (V2 · #5) · 스키마 정본을 마이그레이션으로 명시 |
 | 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 §22 ERD 기준 · 멱등키·스크럽 대상 컬럼 지정 |

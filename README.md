@@ -68,7 +68,7 @@ curl -X POST http://localhost:8080/api/repositories \
     │   ├── github/            GitHub 읽기 클라이언트 — 토큰 · 레이트리밋 · 403 구분
     │   └── secret/            토큰 마스킹 (S-4)
     ├── repository/            대상 저장소 등록 · 메타데이터/파일 조회 · 기여 규약 분석
-    ├── issue/                 이슈 조회 · 필터            (조회 능력만)
+    ├── issue/                 이슈 증분 수집 ✅ · 규칙 필터 ✅ (트리거 없음)
     ├── candidate/             기여 후보 · 상태 전이
     ├── agent/                 LLM 능력·어댑터 ✅ / 샌드박스 (경계만)
     └── pullrequest/           Fork · Draft PR            (경계만)

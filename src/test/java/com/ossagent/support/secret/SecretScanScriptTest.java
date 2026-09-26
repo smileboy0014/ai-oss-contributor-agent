@@ -59,6 +59,39 @@ class SecretScanScriptTest {
             "-----END RSA PRIVATE KEY-----",
             "");
 
+    /**
+     * latin-1 {@code é}. 단독으로는 <b>유효한 UTF-8 이 아니다</b> — UTF-8 로케일의
+     * BSD·GNU grep 은 이 바이트를 만나면 <b>그 뒤쪽을 매칭에서 버린다</b>.
+     *
+     * <p>파일이 스캔 대상에서 빠지는 것이 아니라 <b>스캔했는데 히트 0건</b>이라,
+     * 로그로는 통과와 구분되지 않는다(#75).
+     *
+     * <p>🔴 <b>위치가 가른다.</b> 실측 — 매치 대상 <b>앞</b>에 두면 0건(샌다),
+     * <b>뒤</b>에 두면 1건이다. 그래서 표본은 전부 <b>바이트를 앞에</b> 둔다.
+     * 뒤에 두면 수정을 제거해도 초록이라 아무것도 재지 못한다.
+     */
+    private static final byte INVALID_UTF8 = (byte) 0xE9;
+
+    /**
+     * ⚠️ 런타임 조립이다. {@code testing-philosophy.md} 는 조립을 「검사 회피」로 보고
+     * 기본값에서 금지하되 <b>「토큰의 길이·문자셋이 실제로 유의미한 테스트」</b>를 예외로 둔다.
+     * 이 회귀가 정확히 그것이다 — 샘플이 스크립트 정규식에 <b>물려야</b> 「가려지지 않았다」를
+     * 증명할 수 있고, 권장 상수({@code ghp_NOT_A_REAL_TOKEN_FOR_TESTS_ONLY})는 밑줄 때문에
+     * {@code [A-Za-z0-9]{20,}} 에 물리지 않는다. {@link SecretPatternDriftTest} 와 같은 판단이다.
+     */
+    private static final String SAMPLE_TOKEN = "ghp_" + "NOTAREALTOKENFORTESTSONLY";
+
+    /**
+     * 상속 로케일을 UTF-8 로 고정한다 — 스크립트의 {@code export LC_ALL=C} 가
+     * <b>물려받은 값을 이기는지</b> 보기 위해서다.
+     *
+     * <p>⚠️ 이 로케일이 없는 환경에서는 {@code setlocale} 이 {@code C} 로 떨어져
+     * <b>구멍이 재현되지 않는다.</b> 그래도 단언은 「차단된다」 하나라 <b>거짓 실패가 나지
+     * 않는다</b> — 재현되면 수정이 막는 것을, 재현되지 않으면 원래 검사가 잡는 것을 본다.
+     */
+    private static final Map<String, String> UTF8_LOCALE =
+            Map.of("LC_ALL", "C.UTF-8", "LANG", "C.UTF-8");
+
     @Test
     @DisplayName("BOM 이 붙은 개인키 파일이 차단된다")
     void BOM_이_붙은_개인키가_차단된다_S4(@TempDir Path repo) throws Exception {
@@ -123,6 +156,107 @@ class SecretScanScriptTest {
     }
 
     @Test
+    @DisplayName("토큰과 같은 줄에 비-UTF-8 바이트가 있어도 차단된다")
+    void 같은_줄의_비UTF8_바이트가_토큰을_가리지_못한다_S4(@TempDir Path repo) throws Exception {
+        writeWithInvalidByte(repo.resolve("note.txt"), "caf", " " + SAMPLE_TOKEN + "\n");
+
+        ScanResult result = scan(repo, "note.txt");
+
+        assertThat(result.blocked())
+                .as("""
+                        토큰과 **같은 줄**에 부정한 바이트가 있으면 UTF-8 로케일의 grep 이 그 줄을
+                        통째로 건너뛴다. 파일이 스캔 대상에서 빠진 것이 아니라 **스캔했는데 0건**이라
+                        로그로는 통과와 구분되지 않는다 — 가장 나쁜 실패 모양이다.
+                        출력:
+                        %s""", result.output())
+                .isTrue();
+        assertThat(result.output()).contains("GitHub Token");
+    }
+
+    @Test
+    @DisplayName("상속 로케일이 UTF-8 이어도 토큰이 차단된다")
+    void 상속_로케일이_UTF8_이어도_토큰이_차단된다_S4(@TempDir Path repo) throws Exception {
+        // 🔴 이것이 수정의 본체다 — 스크립트가 **물려받은 로케일을 이겨야** 한다.
+        //    사람마다 LANG 이 다른 것이 이 계열 버그의 본질적 위험이고(#61), 게이트는
+        //    환경에 관계없이 같은 판정을 내야 한다.
+        writeWithInvalidByte(repo.resolve("note.txt"), "caf", " " + SAMPLE_TOKEN + "\n");
+
+        ScanResult result = scan(repo, "note.txt", Function.identity(), UTF8_LOCALE);
+
+        assertThat(result.blocked())
+                .as("""
+                        UTF-8 로케일을 물려받아도 게이트 판정이 바뀌면 안 된다.
+                        출력:
+                        %s""", result.output())
+                .isTrue();
+    }
+
+    @Test
+    @DisplayName("서비스계정 키 JSON 의 앞쪽 필드에 비-UTF-8 바이트가 있어도 차단된다")
+    void 같은_줄의_비UTF8_바이트가_서비스계정_키를_가리지_못한다_S4(@TempDir Path repo) throws Exception {
+        // 🔴 토큰 검사와 **같이 증명되지 않는** 경로다 — 키 「파일」 포맷이고, 한 줄에
+        //    담긴 JSON 은 부정 바이트가 앞 필드에 있어도 키 전체가 뒤에 온다.
+        //    client_email 에 latin-1 바이트 하나면 파일 전체가 샌다(실측).
+        //
+        //    ⚠ 앵커(^)를 쓰는 PEM 헤더 검사는 이 구멍에 **원리적으로 닿지 않는다.**
+        //    grep 이 버리는 것은 「줄 전체」가 아니라 **부정 바이트 뒤쪽**이고,
+        //    헤더는 줄 시작에 와야 하므로 그 앞의 바이트는 앵커를 정당하게 깨뜨린다.
+        //    그 경로로 테스트를 쓰면 돌연변이를 넣어도 **빨개지지 않는다** — 실제로 확인했다.
+        writeWithInvalidByte(repo.resolve("sa.json"),
+                "{\"client_email\":\"caf",
+                "@x.iam\",\"private_key\":\"-----BEGIN RSA PRIVATE KEY-----\"}\n");
+
+        ScanResult result = scan(repo, "sa.json", Function.identity(), UTF8_LOCALE);
+
+        assertThat(result.blocked())
+                .as("""
+                        서비스계정 키 JSON 은 **공개 저장소에 가장 흔히 커밋되는 키 파일 포맷**이다.
+                        앞 필드의 바이트 하나로 그 줄의 뒤쪽이 매칭에서 사라지면 파일 전체가 샌다.
+                        출력:
+                        %s""", result.output())
+                .isTrue();
+        assertThat(result.output()).contains("Private Key (JSON)");
+    }
+
+    @Test
+    @DisplayName("비-UTF-8 바이트가 든 정상 파일은 통과한다")
+    void 비UTF8_바이트만으로는_차단하지_않는다(@TempDir Path repo) throws Exception {
+        // 부정한 바이트 자체를 위험 신호로 다루지 않는다 — 과차단하면 사람이 게이트를
+        // 끄고 싶어진다. latin-1 로 저장된 옛 파일은 저장소에 정상적으로 존재할 수 있다.
+        writeWithInvalidByte(repo.resolve("legacy.txt"), "caf",
+                " 는 latin-1 로 저장된 옛 메모다.\n키는 Secret Manager 에 둔다.\n");
+
+        assertThat(scan(repo, "legacy.txt", Function.identity(), UTF8_LOCALE).blocked())
+                .as("넓힌 판정이 과차단으로 뒤집히면 수정이 아니라 다른 고장이다")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("로케일 자가 점검이 고장나면 조용히 통과하지 않고 멈춘다")
+    void 로케일_자가점검이_고장나면_시끄럽게_멈춘다_S4(@TempDir Path repo) throws Exception {
+        // 🔴 export 로도 닫히지 않는 경로가 둘 있다 — 누가 export 를 지우거나, LC_ALL 을
+        //    무시하는 grep 구현으로 도는 것. 둘 다 증상이 「히트 0건 → ✅ 통과」다.
+        //    기동 자가 점검이 그것을 잡는데, **그 점검 자체가 조용히 죽으면** 원점이다.
+        //
+        //    ⚠ 치환이 빗나가면(스크립트 문구가 바뀌면) 스크립트가 그대로 돌아 통과하고
+        //      아래 단언이 빨개진다 — 드리프트가 조용히 넘어가지 않는다.
+        Files.writeString(repo.resolve("readme.md"), "본문\n");
+
+        ScanResult result = scan(repo, "readme.md",
+                script -> script.replace("| grep -qE 'SENTINEL", "| no_such_cmd -qE 'SENTINEL"));
+
+        assertThat(result.blocked())
+                .as("""
+                        점검이 고장났는데 exit 0 이면 게이트는 눈을 감은 채 초록을 찍는다.
+                        출력:
+                        %s""", result.output())
+                .isTrue();
+        assertThat(result.output())
+                .as("무엇이 고장났는지 말해야 사람이 고칠 수 있다")
+                .contains("부정한 바이트가 섞인 줄");
+    }
+
+    @Test
     @DisplayName("스크립트를 실제로 실행했다")
     void 스크립트를_실제로_실행했다(@TempDir Path repo) throws Exception {
         // 🔴 0건 통과 방지. 스크립트는 git 저장소 밖이거나 대상 파일이 없으면
@@ -169,6 +303,15 @@ class SecretScanScriptTest {
 
     private static ScanResult scan(Path repo, String target, Function<String, String> mutate)
             throws Exception {
+        return scan(repo, target, mutate, Map.of());
+    }
+
+    /**
+     * @param extraEnv 스크립트 프로세스에만 덧씌우는 환경변수. 준비용 git 명령에는 적용하지
+     *     않는다 — 재는 것은 <b>스크립트가 물려받은 로케일</b>이지 git 의 동작이 아니다.
+     */
+    private static ScanResult scan(Path repo, String target, Function<String, String> mutate,
+            Map<String, String> extraEnv) throws Exception {
         setUp(repo, "git", "init", "-q");
         setUp(repo, "git", "config", "user.email", "test@example.com");
         setUp(repo, "git", "config", "user.name", "test");
@@ -180,7 +323,7 @@ class SecretScanScriptTest {
                 StandardCharsets.UTF_8);
 
         setUp(repo, "git", "add", target);
-        return run(repo, "bash", copied.toString());
+        return run(repo, extraEnv, "bash", copied.toString());
     }
 
     /**
@@ -192,7 +335,7 @@ class SecretScanScriptTest {
      * 바로 그 모양이고, {@link #스크립트를_실제로_실행했다()} 는 <b>자기 호출만</b> 지킨다.
      */
     private static void setUp(Path workingDir, String... command) throws Exception {
-        ScanResult result = run(workingDir, command);
+        ScanResult result = run(workingDir, Map.of(), command);
         if (result.exitCode() != 0) {
             throw new IllegalStateException("테스트 준비가 실패했습니다: " + String.join(" ", command)
                     + " (exit=" + result.exitCode() + ")\n" + result.output());
@@ -211,7 +354,8 @@ class SecretScanScriptTest {
      * {@code waitFor} 에 도달하지 못한다. 순서를 뒤집으면 이번엔 파이프 버퍼가 차서 교착이다.
      * 파일로 빼면 <b>둘 다 생기지 않는다.</b>
      */
-    private static ScanResult run(Path workingDir, String... command) throws Exception {
+    private static ScanResult run(Path workingDir, Map<String, String> extraEnv, String... command)
+            throws Exception {
         Path log = Files.createTempFile("secret-scan-out", ".log");
         try {
             // 🕳 사유는 한 줄이어야 한다 — 훅은 위반 라인의 「바로 윗줄」만 본다. 이어짐 줄은 못 본다
@@ -221,6 +365,7 @@ class SecretScanScriptTest {
                     .redirectErrorStream(true)
                     .redirectOutput(log.toFile());
             isolateGitConfig(builder.environment(), workingDir);
+            builder.environment().putAll(extraEnv);
 
             Process process = builder.start();
             if (!process.waitFor(60, TimeUnit.SECONDS)) {
@@ -246,6 +391,23 @@ class SecretScanScriptTest {
         env.put("GIT_CONFIG_GLOBAL", "/dev/null");
         env.put("HOME", workingDir.toString());
         env.remove("XDG_CONFIG_HOME");
+    }
+
+    /**
+     * {@code before} + <b>유효하지 않은 UTF-8 바이트 1개</b> + {@code after} 를 쓴다.
+     *
+     * <p>Java 문자열로는 만들 수 없다 — {@code 0xE9} 단독은 UTF-8 로 인코딩되지 않는다.
+     * 바이트로 이어 붙여야 grep 이 「부정한 바이트열」로 보는 그 입력이 된다.
+     */
+    private static void writeWithInvalidByte(Path file, String before, String after)
+            throws IOException {
+        byte[] head = before.getBytes(StandardCharsets.UTF_8);
+        byte[] tail = after.getBytes(StandardCharsets.UTF_8);
+        byte[] all = new byte[head.length + 1 + tail.length];
+        System.arraycopy(head, 0, all, 0, head.length);
+        all[head.length] = INVALID_UTF8;
+        System.arraycopy(tail, 0, all, head.length + 1, tail.length);
+        Files.write(file, all);
     }
 
     private static void writeWithBom(Path file, String content) throws IOException {

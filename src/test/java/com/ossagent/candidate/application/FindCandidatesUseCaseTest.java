@@ -135,8 +135,12 @@ class FindCandidatesUseCaseTest {
 
         assertThat(view.forkUrl())
                 .as("적재 측(#22)을 믿지 않는다 — errorMessage 에 적용한 논리와 같다")
-                .doesNotContain(FAKE_TOKEN);
-        assertThat(view.prUrl()).doesNotContain(FAKE_TOKEN);
+                .doesNotContain(FAKE_TOKEN)
+                .contains(TokenRedactor.MASK);
+        assertThat(view.prUrl())
+                .as("「없어졌다」가 아니라 「가려졌다」까지 고정한다 — 빈 문자열로 통과하지 않게")
+                .doesNotContain(FAKE_TOKEN)
+                .contains(TokenRedactor.MASK);
     }
 
     @Test

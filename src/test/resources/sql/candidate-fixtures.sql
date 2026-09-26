@@ -43,6 +43,16 @@ VALUES
 (202, 101, 'CODE',    1, 3000, 900, 'FAILED',    '빌드 실패 — 컴파일 오류',
  TIMESTAMP '2026-09-20 00:20:00+00', TIMESTAMP '2026-09-20 00:25:00+00');
 
+-- PrView 가 JSON 으로 렌더되는 유일한 경로다. 종단 상태에서만 밟히는 자리라
+-- 픽스처가 없으면 실 DB·직렬화를 한 번도 안 거친 채 배포된다.
+-- 겸사겸사 CHECK (status = 'DRAFT') 가 실제로 서는지도 증명된다 — S-2.
+INSERT INTO pull_request
+(id, candidate_id, fork_url, branch_name, github_pr_number, pr_url, status, created_at, updated_at)
+VALUES
+(401, 101, 'https://github.com/me/spring-kafka.git', 'oss-agent/issue-1-b', 7,
+ 'https://github.com/spring-projects/spring-kafka/pull/7', 'DRAFT',
+ TIMESTAMP '2026-09-20 00:50:00+00', TIMESTAMP '2026-09-20 00:50:00+00');
+
 -- 재시도마다 쌓인다. 상세는 최신 1건(302)만 요약하고 건수 2 를 함께 준다
 INSERT INTO generated_change
 (id, candidate_id, branch_name, commit_sha, diff, test_result, review_result, created_at)

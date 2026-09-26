@@ -183,6 +183,16 @@ class CandidateQueryIntegrationTest {
     }
 
     @Test
+    @DisplayName("상세에 Draft PR 메타데이터가 실린다 — status 는 DRAFT 하나뿐이다")
+    void 상세에_PR_메타데이터가_실린다_S2() throws Exception {
+        mockMvc.perform(get("/api/candidates/101"))
+                .andExpect(jsonPath("$.pullRequest.githubPrNumber").value(7))
+                .andExpect(jsonPath("$.pullRequest.branchName").value("oss-agent/issue-1-b"))
+                .andExpect(jsonPath("$.pullRequest.status")
+                        .value("DRAFT"));
+    }
+
+    @Test
     @DisplayName("목록 응답에는 analysis 조차 없다")
     void 목록_응답에_외부텍스트가_없다_S4() throws Exception {
         mockMvc.perform(get("/api/candidates"))

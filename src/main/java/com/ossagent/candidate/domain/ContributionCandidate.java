@@ -1,6 +1,7 @@
 package com.ossagent.candidate.domain;
 
 import com.ossagent.support.ExternalText;
+import com.ossagent.support.secret.TokenRedactor;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -172,9 +173,39 @@ public class ContributionCandidate {
         return transitionTo(CandidateStatus.ANALYZING, clock);
     }
 
-    /** {@code ANALYZING → ANALYZED} */
-    public StatusTransition completeAnalysis(Clock clock) {
-        return transitionTo(CandidateStatus.ANALYZED, clock);
+    /**
+     * {@code ANALYZING → ANALYZED} — <b>분석 결과를 함께 받는다</b>.
+     *
+     * <h2>왜 결과 적재와 전이를 한 메서드로 묶나</h2>
+     *
+     * <p>필드 setter 를 따로 열면 <b>「{@code ANALYZED} 인데 {@code confidence} 가 {@code null}」</b>
+     * 같은 상태가 만들어진다. Q-7 이 {@code @Setter} 를 금지한 이유가 그대로 되살아난다 —
+     * 상태와 그 상태를 정당화하는 데이터는 <b>함께 서야 한다</b>.
+     *
+     * <p>🔴 <b>{@code analysis} 는 여기서 한 번 더 스크럽한다</b> (S-4).
+     * {@link IssueAnalysis} 가 생성 시점에 이미 걸렀지만, 이것은 <b>마지막 그물</b>이다 —
+     * 같은 애그리거트의 {@link AgentRun#fail} 이 취한 것과 같은 2중 구조다.
+     * {@code TokenRedactor.redact} 는 토큰이 없으면 입력을 그대로 돌려주므로 비용이 없다.
+     *
+     * @throws IllegalArgumentException 결과가 {@code null}
+     */
+    public StatusTransition completeAnalysis(IssueAnalysis analysis, Clock clock) {
+        if (analysis == null) {
+            throw new IllegalArgumentException(
+                    "분석 결과 없이 ANALYZED 가 될 수 없습니다 candidateId=" + id);
+        }
+        StatusTransition transition = transitionTo(CandidateStatus.ANALYZED, clock);
+        this.category = analysis.category();
+        this.difficulty = analysis.difficulty().name();
+        this.estimatedFiles = analysis.estimatedFiles();
+        this.estimatedLoc = analysis.estimatedLoc();
+        this.implementationFeasible = analysis.implementationFeasible();
+        this.breakingChange = analysis.breakingChange();
+        this.confidence = analysis.confidence();
+        // 🔴 마지막 그물. IssueAnalysis 가 1차로 걸렀으나 그 경로를 타지 않고 들어오는
+        //    값(리플렉션 · 역직렬화 · 미래의 다른 생성 경로)이 있을 수 있다
+        this.analysis = TokenRedactor.redact(analysis.summary());
+        return transition;
     }
 
     /**

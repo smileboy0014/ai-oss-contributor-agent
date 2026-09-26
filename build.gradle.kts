@@ -37,6 +37,26 @@ dependencies {
     // SDK 를 써도 갇히지 않는다 — 이것이 Q-1(직접 구현)과 다른 결론을 낸 진짜 근거다
     implementation(libs.anthropic.java)
 
+    // 샌드박스 — S-3. docker CLI 를 ProcessBuilder 로 부르지 않는다(훅이 막고, 인자 조립은
+    // 주입면이 넓다). 데몬 API 를 직접 부른다 — PLAN-17 §4
+    implementation(libs.docker.java.core)
+    implementation(libs.docker.java.transport.zerodep)
+
+    // 🔴 docker-java-core 가 끌고 오는 전이 의존이 낡았다 — guava 19.0(2016) ·
+    //    commons-compress 1.21. 둘 다 알려진 취약점이 있는 버전이라 올려 고정한다.
+    //    의존성을 들이는 것과 그 전이 의존을 방치하는 것은 별개다.
+    //    ⚠ docker-java 가 쓰는 것은 두 라이브러리의 기본 API 뿐이다. 어긋나면 빌드가 아니라
+    //      런타임 NoSuchMethodError 로 나타나므로, 버전을 움직일 때는 어댑터 테스트가
+    //      실제로 그 경로를 타는지 확인한 뒤에 한다
+    constraints {
+        implementation("com.google.guava:guava:" + libs.versions.guava.get()) {
+            because("전이 버전 19.0 은 2016년 판이다 — CVE-2018-10237 · CVE-2020-8908")
+        }
+        implementation("org.apache.commons:commons-compress:" + libs.versions.commonsCompress.get()) {
+            because("전이 버전 1.21 은 CVE-2024-25710 · CVE-2024-26308 대상이다")
+        }
+    }
+
     // 엔티티 보일러플레이트를 줄인다 — Q-7 (2026-09-22 도입 결정)
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")

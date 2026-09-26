@@ -82,6 +82,32 @@ repository:
     # 판정 응답은 짧은 JSON 이다. 크게 잡을 이유가 없다
     max-output-tokens: 2000
 
+sandbox:
+  # 🔴 S-3 의 실행체 설정 (#17). 네트워크는 여기 없다 — 명령 타입이 정한다.
+  #    SANDBOX_NETWORK 를 키로 두면 실행 단계 격리가 배포 설정 한 줄로 꺼진다
+  docker-api-version: ${SANDBOX_DOCKER_API_VERSION:1.44}
+  default-image: ${SANDBOX_DOCKER_IMAGE:eclipse-temurin:21-jdk}
+  # 워밍 전용 네트워크. host·container:<id>·bridge 는 코드가 거부한다
+  warm-network: ${SANDBOX_WARM_NETWORK:oss-agent-warm}
+  # 🔴 바인드 허용 루트. 비어 있으면 「모든 경로가 루트 하위」가 되어 경로 제한이 무력해진다.
+  #    구체적인 기본 루트는 위반이 아니다 — 위반은 루트가 「없는」 것이다.
+  #    상대경로면 기동 시점에 절대경로로 확정하고, 없으면 만든다
+  workspace-root: ${SANDBOX_WORKSPACE_ROOT:build/sandbox-workspaces}
+  cpu-limit: ${SANDBOX_CPU_LIMIT:2}
+  # ⚠ 단위 필수. 단위 없는 값은 DataSize 에 바인딩되지 않는다
+  memory-limit: ${SANDBOX_MEMORY_LIMIT:4GB}
+  pids-limit: ${SANDBOX_PIDS_LIMIT:512}
+  # ⚠ @DurationUnit(SECONDS) 로 단위를 못 박았다. 없으면 1800 이 밀리초로 읽혀
+  #   1.8초가 되고, 모든 실행이 즉시 타임아웃하면서 증상은 「테스트가 자꾸 실패한다」로만 보인다.
+  #   #10 의 timeout-seconds 함정과 같은 계열의 반대 방향이다
+  timeout: ${SANDBOX_TIMEOUT_SECONDS:1800}
+  warm-timeout: ${SANDBOX_WARM_TIMEOUT_SECONDS:1200}
+  # 🔴 kill 직후 로그 조회가 매달리면 finally 의 제거에 도달하지 못해 컨테이너가 남는다
+  log-timeout: ${SANDBOX_LOG_TIMEOUT_SECONDS:60}
+  # 메모리 상한이다. 닿으면 더 쌓지 않고 truncated 로 표시한다 — 스트림 자체는
+  # 끝나거나 log-timeout 에 걸릴 때까지 흐른다
+  max-output-chars: ${SANDBOX_MAX_OUTPUT_CHARS:200000}
+
 agent:
   execution:
     max-retries: 3

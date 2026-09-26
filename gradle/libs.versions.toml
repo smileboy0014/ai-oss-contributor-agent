@@ -8,12 +8,23 @@ springDependencyManagement = "1.1.7"
 anthropicJava = "2.65.0"
 # 전송 계약 검증용 — Q-9 3계층의 세 번째 층. 4.0 은 beta 라 쓰지 않는다
 wiremock = "3.13.1"
+# Docker 데몬 제어 — S-3 샌드박스. Testcontainers 가 쓰는 것과 같은 버전으로 맞춘다.
+# ProcessBuilder 로 docker CLI 를 부르지 않는 이유는 PLAN-17 §4 (S-3 훅이 막는다)
+dockerJava = "3.4.2"
+# docker-java 의 전이 의존을 끌어올린 것. 직접 쓰지 않으므로 [libraries] 에 두지 않고
+# build.gradle.kts 의 constraints 에서만 참조한다 — 버전은 여기서만 올린다
+guava = "33.4.8-jre"
+commonsCompress = "1.27.1"
 
 [libraries]
 anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthropicJava" }
 # standalone(shaded) 을 쓴다. 일반 배포판은 Jetty 를 끌고 와 Boot 의 서블릿 컨테이너와 충돌한다.
 # 셰이딩은 Anthropic SDK 쪽에도 이득이다 — SDK 가 Jackson 버전 호환성을 직접 검사한다
 wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
+# core 가 DockerClientImpl·DefaultDockerClientConfig 를 갖는다. api 는 전이로 따라온다
+docker-java-core = { module = "com.github.docker-java:docker-java-core", version.ref = "dockerJava" }
+# 추가 HTTP 스택을 끌고 오지 않는 전송. Testcontainers 도 이것을 쓴다
+docker-java-transport-zerodep = { module = "com.github.docker-java:docker-java-transport-zerodep", version.ref = "dockerJava" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }

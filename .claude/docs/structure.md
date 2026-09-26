@@ -32,7 +32,7 @@ com.ossagent
 ├── repository/                 대상 저장소 등록 · 기여 규약 분석 ✅ (#7)
 ├── issue/                      이슈 증분 수집 ✅ (#8) · 규칙 필터 ✅ (#9)
 ├── candidate/                  기여 후보 · 상태머신 ✅ (#12)
-├── agent/                      LLM 능력·어댑터 ✅ (#10) / 샌드박스 (비어 있음)
+├── agent/                      LLM 능력·어댑터 ✅ (#10) · Docker 샌드박스 ✅ (#17)
 └── pullrequest/                Fork · Draft PR            (비어 있음)
 ```
 

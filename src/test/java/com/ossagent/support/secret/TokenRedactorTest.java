@@ -294,6 +294,71 @@ class TokenRedactorTest {
                         header + "\n" + FAKE_KEY_BODY + "-_\n" + footer));
     }
 
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("헤더_언급_뒤의_정상_텍스트")
+    @DisplayName("산문에 적힌 헤더 언급이 뒤 텍스트를 삼키지 않는다")
+    void 헤더_언급이_정상_텍스트를_삼키지_않는다(String 형태, String 살아야_할_텍스트) {
+        // 🔴 내 과차단 테스트의 샘플이 전부 「공백이 든 한국어 문장」이라 대표가 아니었다.
+        //    영문 한 단어 줄·마크다운 목록·YAML 문서 구분자는 그대로 먹히고 있었고,
+        //    그 값이 DB 에 영속된다. SecretPatternDriftTest 에 「샘플이 먼저 대표여야
+        //    한다」고 적어 놓고 정작 여기에는 적용하지 않았다
+        String text = "note: -----BEGIN RSA PRIVATE KEY----- 를 커밋하지 마세요\n"
+                + 살아야_할_텍스트;
+
+        assertThat(TokenRedactor.redact(text))
+                .as("%s — 과차단은 되돌릴 수 없다. 잘린 값이 그대로 저장된다", 형태)
+                .contains(살아야_할_텍스트);
+    }
+
+    static Stream<Arguments> 헤더_언급_뒤의_정상_텍스트() {
+        return Stream.of(
+                Arguments.of("영문 한 단어 줄", "NORMAL-2"),
+                Arguments.of("대문자 한 단어", "TODO"),
+                Arguments.of("마크다운 목록", "- deleteThisKey"),
+                Arguments.of("YAML 문서 구분자", "---\ntitle: hello"),
+                Arguments.of("마크다운 구분선", "----------\nNextSection"),
+                Arguments.of("변경 이력", "Unreleased\nFixed: stuff"));
+    }
+
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("장식이_더_붙은_키_본문")
+    @DisplayName("열거하지 않은 장식이 붙어도 키 본문을 가린다")
+    void 열거하지_않은_장식도_뚫리지_않는다_S4(String 형태, String prefix, String suffix) {
+        // 🔴 장식을 「벗길 문자 목록」으로 두면 목록에 없는 형태마다 구멍이 새로 난다.
+        //    세 번 연속 그렇게 깨졌다. 이제는 여집합 + 장식 길이 예산으로 본다 —
+        //    장식의 모양을 몰라도 양으로 판정한다
+        String body = FAKE_KEY_BODY + FAKE_KEY_BODY;   // 실제 본문 길이에 가깝게
+        String text = prefix + "-----BEGIN RSA PRIVATE KEY-----" + suffix + "\n"
+                + prefix + body + suffix + "\n"
+                + prefix + "-----END RSA PRIVATE KEY-----" + suffix;
+
+        assertThat(TokenRedactor.redact(text))
+                .as("%s — 목록에 없던 형태다. 원리적으로 닫혀야 한다", 형태)
+                .doesNotContain(body);
+    }
+
+    static Stream<Arguments> 장식이_더_붙은_키_본문() {
+        return Stream.of(
+                Arguments.of("Javadoc·C 블록 주석", " * ", ""),
+                Arguments.of("셸·YAML 주석", "# ", ""),
+                Arguments.of("번호 목록", "1. ", ""),
+                Arguments.of("줄 끝 세미콜론", "", ";"),
+                Arguments.of("줄 끝 쉼표", "", ","),
+                Arguments.of("8칸 들여쓰기", "        ", ""),
+                Arguments.of("줄이음 역슬래시", "", " \\"));
+    }
+
+    @Test
+    @DisplayName("공백만 긴 줄에서도 선형으로 돈다")
+    void 공백_런에서도_선형이다_S4() {
+        // 🔴 세 번째 2차식 지점. 꼬리 주석 판정을 \s+(?:#|//) 로 뒀더니 공백 런에서
+        //    폭발했다 — 실측 공백 128,000개에 1분 45초. -+ 를 고치자 같은 실패가
+        //    \s+ 로 옮겨간 것뿐이었다. 그래서 그 경로에서 greedy 수량자를 아예 없앴다
+        String header = "-----BEGIN RSA PRIVATE KEY-----\n";
+
+        assertLinear("공백 런", header + " ".repeat(4_000), header + " ".repeat(32_000));
+    }
+
     @Test
     @DisplayName("END 없는 헤더가 많아도 입력 길이에 선형으로 돈다")
     void 스크럽이_입력_길이에_선형이다_S4() {

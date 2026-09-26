@@ -76,35 +76,37 @@ public final class TokenRedactor {
             Pattern.compile("(?i)-{1,10} ?END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-{0,10}");
 
     /**
-     * 키 본문으로 볼 수 있는 줄 — base64 한 덩어리.
+     * 키 블록의 <b>머리말 줄</b> — 알려진 태그만 받는다.
      *
-     * <p>{@code -}·{@code _} 는 <b>base64url</b> 때문에 들어 있다. JWT·JWK 계열이 그 표기를 쓴다.
+     * <p>⚠️ 원래 {@code [A-Za-z][A-Za-z0-9-]*:.*} 였는데, 그러면 {@code title: hello} ·
+     * {@code Fixed: stuff} 같은 <b>평범한 산문</b>이 키 본문으로 먹힌다.
+     * 「콜론이 있는 줄」이 아니라 <b>「PEM 이 실제로 쓰는 태그」</b>가 기준이어야 한다.
      */
-    private static final Pattern PEM_BODY_LINE = Pattern.compile("[A-Za-z0-9+/=_-]+");
+    private static final Pattern PEM_BODY_HEADER_LINE =
+            Pattern.compile("(?i)(?:Proc-Type|DEK-Info|Comment|Subject):.*");
 
     /**
-     * 🔴 <b>키 본문에 붙은 장식.</b> 이것을 벗기지 않으면 <b>헤더만 가려지고 본문이 나간다</b> —
-     * 「가려졌다」고 보이는데 키는 새는, 가장 나쁜 모양이다.
+     * 블록에 <b>들어갈</b> 때 요구하는 최소 본문 길이.
      *
-     * <p>키가 저장소에 실제로 나타나는 형태는 맨몸 PEM 파일이 아니다.
-     *
-     * <table border="1">
-     *   <caption>장식이 붙는 자리</caption>
-     *   <tr><td>YAML 임베드</td><td>{@code   MIIE…} — k8s Secret · Actions · Ansible. <b>1순위</b></td></tr>
-     *   <tr><td>diff 문맥 줄</td><td>{@code  MIIE…} — <b>diff 가 LLM 프롬프트의 본체다</b></td></tr>
-     *   <tr><td>diff 추가·삭제 줄</td><td>{@code +MIIE…} · {@code -MIIE…}</td></tr>
-     *   <tr><td>마크다운 인용</td><td>{@code &gt; MIIE…}</td></tr>
-     *   <tr><td>Java 문자열 연결</td><td>{@code "MIIE…\n" +}</td></tr>
-     * </table>
+     * <p>🔴 <b>과차단을 막는 손잡이가 여기 하나로 모인다.</b> 산문에 적힌 헤더 언급
+     * (「{@code -----BEGIN …-----} 를 커밋하지 마세요」) 뒤에 오는 {@code NORMAL-2} ·
+     * {@code TODO} · {@code - item} 같은 짧은 줄이 키 본문으로 먹히던 것을 이 조건이 끊는다.
+     * 실제 PEM 본문 줄은 64자다.
      */
-    private static final String LINE_DECORATION = " \t>+-|\"'\\";
+    private static final int MIN_KEY_BODY_LENGTH = 20;
 
-    /** 본문 줄 뒤에 붙은 주석. */
-    private static final Pattern TRAILING_COMMENT = Pattern.compile("\\s+(?:#|//).*$");
-
-    /** {@code Proc-Type: 4,ENCRYPTED} · {@code DEK-Info: …} — 암호화된 PEM 의 머리말. */
-    private static final Pattern PEM_BODY_HEADER_LINE =
-            Pattern.compile("[A-Za-z][A-Za-z0-9-]*:.*");
+    /**
+     * 본문 줄에 붙을 수 있는 <b>장식의 최대 길이</b>.
+     *
+     * <p>🔴 <b>장식을 열거하지 않는다.</b> 예전에는 벗길 문자를 나열했는데, 그러면
+     * {@code  * }(Javadoc) · {@code # }(셸) · {@code 1. }(번호 목록) · 줄 끝 {@code ;} ·
+     * {@code ,} 처럼 <b>목록에 없는 형태마다 구멍이 새로 난다.</b> 실제로 세 번 연속
+     * 그렇게 깨졌다.
+     *
+     * <p>대신 <b>여집합</b>으로 본다 — 줄에서 가장 긴 키 문자 런을 찾고, 나머지가 이 예산
+     * 안이면 그 런이 본문이다. 장식의 <b>모양</b>을 몰라도 <b>양</b>으로 판정할 수 있다.
+     */
+    private static final int MAX_DECORATION_LENGTH = 8;
 
     private TokenRedactor() {
     }
@@ -177,6 +179,7 @@ public final class TokenRedactor {
         }
 
         int cursor = headerLineEnd;
+        boolean entered = false;
         while (cursor < text.length()) {
             int start = nextLineStart(text, cursor);
             int end = lineEnd(text, start);
@@ -185,54 +188,92 @@ public final class TokenRedactor {
             if (PEM_FOOTER.matcher(line).find()) {
                 return end;
             }
-            if (!isKeyBodyLine(line)) {
+            boolean keep = entered ? continuesKeyBody(line) : startsKeyBody(line);
+            if (!keep) {
                 return cursor;   // 이 줄은 남긴다 — 줄바꿈 앞에서 멈춘다
             }
+            entered = true;
             cursor = end;
         }
         return cursor;
     }
 
     /**
-     * 키 본문으로 볼 수 있는 줄인가.
+     * 🔴 <b>블록에 들어가도 되는가</b> — 과차단을 막는 문턱이다.
      *
-     * <p>빈 줄을 허용하는 이유 — 암호화된 PEM 은 {@code Proc-Type} 머리말과 base64 본문
-     * 사이에 <b>빈 줄</b>을 둔다(RFC 1421). 막으면 정작 키 본문이 그대로 나간다.
+     * <p>헤더가 <b>산문에서 언급</b>됐을 뿐인 경우가 흔하다(「이 헤더를 커밋하지 마세요」).
+     * 그때 뒤따르는 줄을 본문으로 먹으면 정상 텍스트가 사라지고, 그 값이 DB 에 영속된다.
+     * 그래서 <b>실제 키 본문만큼 긴 줄</b> 또는 <b>PEM 머리말</b>이 와야 들어간다.
      */
-    private static boolean isKeyBodyLine(String line) {
-        String bare = stripDecoration(line);
-        return bare.isEmpty()
-                || PEM_BODY_LINE.matcher(bare).matches()
-                || PEM_BODY_HEADER_LINE.matcher(bare).matches();
+    private static boolean startsKeyBody(String line) {
+        if (PEM_BODY_HEADER_LINE.matcher(stripComment(line).strip()).matches()) {
+            return true;
+        }
+        int[] shape = shapeOf(line);
+        return shape[0] >= MIN_KEY_BODY_LENGTH && shape[1] <= MAX_DECORATION_LENGTH;
     }
 
     /**
-     * 키 본문에 붙은 장식을 벗긴다 — {@link #LINE_DECORATION}.
+     * 블록 <b>안에서</b> 계속 본문으로 볼 줄인가.
      *
-     * <p>🔴 <b>이것이 없으면 헤더만 가려지고 본문이 나간다.</b> 들여쓰기 한 칸에 키가 새는데
-     * 겉보기에는 {@code ***REDACTED***} 가 찍혀 있어 <b>막혔다고 착각하게 된다.</b>
-     *
-     * <p>벗겨서 얻는 것과 잃는 것 — 키 블록 <b>안에서만</b> 쓰이므로, 과하게 벗겨 산문 한 줄을
-     * 더 먹는 손해는 그 블록 주변에 한정된다. 반대로 벗기지 않으면 <b>키 전체</b>가 나간다.
+     * <p>들어온 뒤에는 느슨하게 본다 — base64 마지막 줄은 패딩만 남아 짧고, 암호화된 PEM 은
+     * 머리말과 본문 사이에 <b>빈 줄</b>을 둔다(RFC 1421). 여기서 끊으면 정작 키가 나간다.
+     * 문턱은 {@link #startsKeyBody} 한 곳에만 둔다.
      */
-    private static String stripDecoration(String line) {
-        String bare = TRAILING_COMMENT.matcher(line).replaceFirst("");
-        int start = 0;
-        int end = bare.length();
-        while (true) {
-            while (start < end && LINE_DECORATION.indexOf(bare.charAt(start)) >= 0) {
-                start++;
-            }
-            while (end > start && LINE_DECORATION.indexOf(bare.charAt(end - 1)) >= 0) {
-                end--;
-            }
-            // 자바 문자열 리터럴의 줄바꿈 이스케이프 — "MIIE…\n" + 형태에서 남는 꼬리
-            if (end - start >= 2 && bare.charAt(end - 2) == '\\' && bare.charAt(end - 1) == 'n') {
-                end -= 2;
-                continue;
-            }
-            return bare.substring(start, end);
+    private static boolean continuesKeyBody(String line) {
+        String bare = stripComment(line);
+        if (bare.isBlank() || PEM_BODY_HEADER_LINE.matcher(bare.strip()).matches()) {
+            return true;
         }
+        int[] shape = shapeOf(line);
+        return shape[0] >= 1 && shape[1] <= MAX_DECORATION_LENGTH;
+    }
+
+    /**
+     * 줄의 <b>모양</b> — {@code [가장 긴 키 문자 런, 나머지 길이]}.
+     *
+     * <p>장식의 모양을 열거하지 않고 <b>양</b>으로 판정하기 위한 것이다. 각 문자를 한 번만
+     * 본다 — 정규식 greedy 수량자를 이 경로에서 없앤 이유가 그것이다(세 번 연속 거기서
+     * 2차식이 났다).
+     */
+    private static int[] shapeOf(String line) {
+        String bare = stripComment(line);
+        int longest = 0;
+        int run = 0;
+        for (int i = 0; i < bare.length(); i++) {
+            if (isKeyChar(bare.charAt(i))) {
+                run++;
+                longest = Math.max(longest, run);
+            } else {
+                run = 0;
+            }
+        }
+        return new int[] {longest, bare.length() - longest};
+    }
+
+    /** base64 와 base64url({@code -}·{@code _})에 쓰이는 문자. */
+    private static boolean isKeyChar(char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+                || c == '+' || c == '/' || c == '=' || c == '_' || c == '-';
+    }
+
+    /**
+     * 줄 끝 주석을 잘라낸다 — {@code MIIE… # 운영 키}.
+     *
+     * <p>⚠️ <b>정규식을 쓰지 않는다.</b> {@code \s+(?:#|//)} 로 두었더니 공백만 긴 줄에서
+     * 2차식이 됐다 — 실측 공백 128,000개에 1분 45초. {@code -+} 를 고치자 같은 실패가
+     * {@code \s+} 로 옮겨갔을 뿐이었다. 인덱스 스캔은 그 자리가 없다.
+     */
+    private static String stripComment(String line) {
+        for (int i = 1; i < line.length(); i++) {
+            char c = line.charAt(i);
+            boolean marker = c == '#'
+                    || (c == '/' && i + 1 < line.length() && line.charAt(i + 1) == '/');
+            if (marker && (line.charAt(i - 1) == ' ' || line.charAt(i - 1) == '\t')) {
+                return line.substring(0, i);
+            }
+        }
+        return line;
     }
 
     /** {@code from} 이후 첫 줄바꿈의 위치. 없으면 입력의 끝. */

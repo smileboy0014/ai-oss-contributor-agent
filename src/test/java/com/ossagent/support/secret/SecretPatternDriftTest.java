@@ -153,16 +153,20 @@ class SecretPatternDriftTest {
     /**
      * 스크립트의 PEM 한 행에 대응하는 <b>런타임 구현 패턴 수 - 1</b>.
      *
-     * <p>런타임은 PEM 을 정규식 하나로 처리하지 않는다 — <b>헤더 · 푸터 · 본문 줄 ·
-     * 머리말 줄 · 꼬리 주석</b> 다섯 패턴을 줄 단위 스캐너가 쓴다(2차식 폭발과 본문 파괴를
-     * 피하려고 그렇게 했다, {@code TokenRedactor.redactPemBlocks}).
-     * 그중 헤더가 {@link #ROWS} 의 PEM 행에 대응하고 나머지 넷이 여기 잡힌다.
+     * <p>런타임은 PEM 을 정규식 하나로 처리하지 않는다 — <b>헤더 · 푸터 · 머리말 줄</b>
+     * 세 패턴을 줄 단위 스캐너가 쓴다. 그중 헤더가 {@link #ROWS} 의 PEM 행에 대응하고
+     * 나머지 둘이 여기 잡힌다.
+     *
+     * <p>본문 줄 판정과 꼬리 주석 절단에는 <b>정규식을 쓰지 않는다.</b> 거기 greedy
+     * 수량자를 두었더니 <b>세 번 연속</b> 2차식이 났다({@code -+} → {@code \s+}).
+     * 그래서 인덱스 스캔으로 바꿨고, 그 결과 이 숫자가 줄었다 —
+     * {@code TokenRedactor.shapeOf} · {@code stripComment}.
      *
      * <p>⚠️ 이 숫자는 <b>맞추라고</b> 있는 것이 아니라 <b>세라고</b> 있는 것이다.
      * 패턴을 더하면 이 검사가 빨개지는데, 그때 숫자만 올리고 넘어가면 이 표는 알리바이가
      * 된다. 더한 패턴이 {@link #ROWS} 나 {@link #RUNTIME_ONLY} 에 속하지 않는지 먼저 본다.
      */
-    private static final int PEM_IMPLEMENTATION_PATTERNS = 4;
+    private static final int PEM_IMPLEMENTATION_PATTERNS = 2;
 
     // ── 검사 ──────────────────────────────────────────────────────────────────
 

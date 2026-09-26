@@ -59,8 +59,11 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
 | `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
+| `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
 | `IssueSnapshot` | — | 수집 시점의 이슈 원본 **값**. 영속 엔티티 `Issue` 와 다르다 |
+| `AnalyzableIssue` | — | 분석 단계로 넘기는 이슈 **값**. `issue` 가 소유하고 `candidate` 가 import 한다 — 규율 ④ |
+| `IssueAnalysis` | — | 분석 결과 **값**. 생성자가 스키마와 **스크럽을 함께 강제**한다 (`ScrubbedRules` 와 같은 수법) |
 
 ## 증분 수집 — 「언제 돌렸나」와 「어디까지 봤나」는 다르다 (#8)
 

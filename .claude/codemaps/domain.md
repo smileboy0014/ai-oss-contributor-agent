@@ -77,10 +77,10 @@
 | From | To | 트리거 | 주체 |
 |---|---|---|---|
 | — | `DISCOVERED` | **배제되지 않은** 이슈로 후보 생성 | 스캐너 |
-| `DISCOVERED` | `ANALYZING` | 분석 요청 (`POST /candidates/{id}/analyze`) | 시스템 |
+| `DISCOVERED` | `ANALYZING` | 분석 배치가 집어 든다 — `AnalyzeIssuesUseCase`(#11). ⚠️ PRD §23 의 `POST /candidates/{id}/analyze` 는 **아직 없다**; 지금은 저장소 단위 배치뿐이고 트리거는 #14 | 시스템 |
 | `ANALYZING` | `ANALYZED` | LLM 분석 산출물 저장 | 시스템 |
 | `ANALYZING` | `FAILED` ● | **분석 실패 — 즉시 종단** (Q-6: `ANALYZE`·`PLAN` 은 재시도 없음) | 시스템 |
-| `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` 또는 `breaking_change=true` | 시스템 |
+| `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` · `breaking_change=true` · **`confidence < agent.analysis.min-confidence`**(#11) | 시스템 |
 | `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
 | `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject` | **사람** |
 | `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`) | **사람이 트리거** |

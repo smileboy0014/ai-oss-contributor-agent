@@ -194,7 +194,7 @@ public AnalysisResult analyze(Long repositoryId)   // ← 전역 배치가 아�
 | `candidate/domain/AnalysisRejectedException.java` | 신규 | 스키마 검증 실패 |
 | `candidate/domain/ContributionCandidate.java` | 수정 | ⚠️ **계약 표면** — `completeAnalysis` 시그니처 |
 | `candidate/adapter/out/llm/LlmIssueAnalyst.java` | 신규 | 기술 구현 (기술 이름) |
-| `candidate/adapter/out/llm/IssueAnalysisProperties.java` | 신규 | 임계·상한 |
+| `candidate/application/IssueAnalysisProperties.java` | 신규 | 임계·상한. ⚠️ **`adapter/out/llm` 이 아니다** — 값의 대부분을 UseCase 가 쓰고, `ExternalAdapterIsolationTest` 가 그 패키지의 잔존 빈을 잡는다 |
 | `candidate/adapter/out/persistence/ContributionCandidateRepository.java` | 수정 | `findIssueIdsIn` 추가 |
 | `candidate/application/AnalyzeIssuesUseCase.java` | 신규 | 배치 조율 · **트랜잭션 분할** |
 | `candidate/application/AnalysisResult.java` | 신규 | 배치 집계 반환값 |
@@ -312,9 +312,14 @@ A-2 가 `testRequired` 를 컬럼 대신 여기에 남기기로 했기 때문이
 
 ```
 implementationFeasible == false   → REJECTED
+breakingChange == true            → REJECTED
 confidence < min-confidence       → REJECTED
 그 외                              → ANALYZED
 ```
+
+⚠️ `breakingChange` 는 이슈 본문에 없지만 **`codemaps/domain.md` 전이표가 이미 정의**해 두었고,
+#9 의 `FilterReason.BREAKING_CHANGE` 도 `REJECTED` 쪽이다. **두 단계가 같은 판정을 해야 한다** —
+갈리면 탐지 시점(규칙이냐 LLM 이냐)에 따라 결과가 달라진다.
 
 전이 경로는 `ANALYZING → ANALYZED → REJECTED` **2단**이다 — 상태머신이
 `ANALYZING → REJECTED` 를 허용하지 않는다(#12). **우회하지 않는다.**
@@ -557,4 +562,5 @@ S-6 게이트를 검증하지 못한다.
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-26 | smileboy0014 | 초안 |
+| 2026-09-26 | smileboy0014 | rev 3 — 구현 반영: `breakingChange` 기각 추가(domain.md 전이표와 일치) · `IssueAnalysisProperties` 를 `application` 으로 · FR-6 검증 방식(대역 프로필에 기록 데코레이터 부재) |
 | 2026-09-26 | smileboy0014 | rev 2 — `gap-analyzer` 검토 반영. 🔴 `UNDECIDED` 누락(#9 인계분) · 🔴 S-4 적재 측을 도메인 그물로 · 저장소 스코프 고정 · `filter_priority` 정렬 · A-2 근거 정정 · R-7·R-8 신설 |

@@ -93,13 +93,14 @@ for f in $files; do
     "AWS 키는 코드에 두지 않습니다. 환경변수 또는 Secret Manager 로 주입하고, 노출된 키는 즉시 폐기·재발급하세요." \
     'AKIA[0-9A-Z]{16}' "$f"
 
-  scan_pattern "GitHub PAT (classic)" \
+  # classic PAT(ghp_) · OAuth(gho_) · user-to-server(ghu_) · server-to-server(ghs_) · refresh(ghr_)
+  # ⚠ 원래 ghp_·gho_ 만 각각 {36} 으로 봤다. 그래서 ghu_·ghs_·ghr_ 형태 토큰을 커밋해도
+  #   통과했고, TokenRedactor 는 이미 다섯을 전부 {20,} 로 가리고 있었다 — 어긋남이
+  #   양방향이었다는 뜻이다(#28). 런타임 쪽에 맞춰 합친다.
+  #   SecretPatternDriftTest 가 이 줄과 TokenRedactor 가 다시 갈라지는 것을 막는다.
+  scan_pattern "GitHub Token" \
     "GITHUB_TOKEN 환경변수로 주입하세요. 이미 커밋에 남았다면 토큰을 즉시 revoke 하세요." \
-    'ghp_[A-Za-z0-9]{36}' "$f"
-
-  scan_pattern "GitHub OAuth Token" \
-    "GITHUB_TOKEN 환경변수로 주입하세요. 이미 노출됐다면 즉시 revoke 하세요." \
-    'gho_[A-Za-z0-9]{36}' "$f"
+    'gh[pousr]_[A-Za-z0-9]{20,}' "$f"
 
   scan_pattern "GitHub Fine-grained PAT" \
     "GITHUB_TOKEN 환경변수로 주입하세요. 이미 노출됐다면 즉시 revoke 하세요." \
@@ -114,7 +115,10 @@ for f in $files; do
     'sk-ant-[A-Za-z0-9_-]{20,}' "$f"
 
   # 개인키는 별도 처리 (하이픈으로 시작하는 정규식이 grep 인자로 오해되는 것을 피한다)
-  pk_hits=$(read_file "$f" | grep -nE '^-+BEGIN [A-Z ]*PRIVATE KEY-+' || true)
+  # ⚠ PRIVATE KEY 뒤에 곧바로 대시를 요구하면 PGP 가 통째로 빠져나간다 —
+  #   -----BEGIN PGP PRIVATE KEY BLOCK----- 은 사이에 「 BLOCK」이 낀다.
+  #   대시와 BEGIN 사이 공백도 마찬가지다(RFC4716/SSH2: ---- BEGIN SSH2 … ----).
+  pk_hits=$(read_file "$f" | grep -nE '^-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?' || true)
   if [ -n "$pk_hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue

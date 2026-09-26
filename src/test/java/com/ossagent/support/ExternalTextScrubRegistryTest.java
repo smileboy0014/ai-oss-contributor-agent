@@ -100,15 +100,43 @@ class ExternalTextScrubRegistryTest {
             Map.entry("FetchedDocument.content", new Decision(Mechanism.FORCED_POINT,
                     "DB 에 저장되지 않는다. LLM 송신은 PromptScrubber 를 거치고,"
                             + " 어댑터 생성자가 scrubber == null 을 거부한다 (#10)")),
-            Map.entry("ContributionCandidate.analysis", new Decision(Mechanism.PENDING,
-                    "#13 — LLM 응답 원문이 들어온다. ScrubbedRules 같은 값 타입이 필요하다")),
+            // #11 이 머지되며 PENDING 에서 올라왔다. 낡은 PENDING 을 그대로 두면
+            // 이 표가 알리바이가 된다 — 「아직 없다」가 「이미 있다」를 가린다.
+            Map.entry("ContributionCandidate.analysis", new Decision(Mechanism.FORCED_POINT,
+                    "completeAnalysis(...) — 이 필드에 대입하는 유일한 지점이고 거기서"
+                            + " redact 한다. IssueAnalysis 가 1차로 거르지만 그 경로를 타지"
+                            + " 않고 들어오는 값(역직렬화 등)을 위한 마지막 그물이다 (#11)")),
             Map.entry("GeneratedChange.diff", new Decision(Mechanism.PENDING,
                     "#18 — 대상 저장소 코드 조각이 그대로 담긴다. 저장소가 시크릿을"
                             + " 커밋해 뒀으면 diff 에 실려 온다")),
             Map.entry("GeneratedChange.testResult", new Decision(Mechanism.PENDING,
                     "#18 — 빌드·테스트 출력. 환경변수를 찍는 빌드 스크립트가 흔하다")),
             Map.entry("GeneratedChange.reviewResult", new Decision(Mechanism.PENDING,
-                    "#19 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다")));
+                    "#19 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다")),
+
+            // ── 아래 5행은 #11·#17 이 이 표와 병렬로 머지되며 빠졌다 ──────────
+            // 세 PR 이 서로의 CI 를 보지 못했다. 이 표가 있었기에 main 이 빨개져서
+            // 드러났다 — 표가 없었으면 마커만 달린 채 조용히 지나갔을 자리다.
+            // 방어 자체는 전부 서 있었고 등록만 빠져 있었다.
+
+            Map.entry("IssueAnalysis.summary", new Decision(Mechanism.VALUE_TYPE,
+                    "IssueAnalysis compact 생성자가 redact 한다. String 을 그대로 받는"
+                            + " 생성 경로가 없다 — ScrubbedRules 와 같은 수법이다 (#11)")),
+            Map.entry("ContributionCandidate.category", new Decision(Mechanism.VALUE_TYPE,
+                    "IssueAnalysis compact 생성자가 redact 한 값만 들어온다."
+                            + " 모델이 프롬프트의 토큰을 되뱉으면 255자 안에 들어가 그대로"
+                            + " 적재되고 #13 조회 API 가 HTTP 로 내보낸다 (#11)")),
+
+            Map.entry("AnalyzableIssue.title", new Decision(Mechanism.FORCED_POINT,
+                    "issue 행에서 읽어 온 값이고, 그 행은 IssueSnapshot compact 생성자를"
+                            + " 거쳐야만 만들어진다 — 상류가 이미 강제 지점이다 (#8·#28)")),
+            Map.entry("AnalyzableIssue.body", new Decision(Mechanism.FORCED_POINT,
+                    "위와 같다. 대상 저장소 본문이 DB 에 앉기 전에 스크럽된다 (#8·#28)")),
+
+            Map.entry("SandboxResult.output", new Decision(Mechanism.PENDING,
+                    "#18·#19 — 소비자가 아직 없다. DB 에 앉는 자리는"
+                            + " GeneratedChange.testResult 이고 그쪽도 PENDING 이다."
+                            + " LLM 송신은 PromptScrubber 를 거친다 (#17)")));
 
     @Test
     @DisplayName("외부 텍스트 필드는 전부 스크럽 결정이 등록돼 있다")

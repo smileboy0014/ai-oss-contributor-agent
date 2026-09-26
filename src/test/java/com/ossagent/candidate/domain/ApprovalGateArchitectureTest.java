@@ -24,6 +24,7 @@ import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
@@ -125,7 +126,7 @@ class ApprovalGateArchitectureTest {
      */
     private static ArchRule 사람_전이_메서드는_승인_UseCase_만_부른다() {
         return noClasses()
-                .that().doNotBelongToAnyOf(SelectCandidateUseCase.class, ContributionCandidate.class)
+                .that().doNotBelongToAnyOf(SelectCandidateUseCase.class)
                 .should(사람_전이_메서드를_부른다())
                 .as("「사람이 골랐다·물렸다」를 만드는 메서드는 승인 UseCase 를 통해서만 불린다 (S-6)")
                 .allowEmptyShould(true);
@@ -147,16 +148,33 @@ class ApprovalGateArchitectureTest {
 
     private static final Set<String> 사람이_부르는_전이 = Set.of("selectByHuman", "cancelSelection");
 
+    /**
+     * ⚠️ <b>호출과 메서드 참조를 함께 본다.</b> ArchUnit 은 {@code Type::method} 를
+     * {@code JavaMethodReference} 로 <b>따로 모델링</b>해서 {@code getMethodCallsFromSelf()} 에
+     * 넣지 않는다. 호출만 보면 「람다를 메서드 참조로 정리한다」는 흔한 리팩토링 한 번에
+     * 규칙이 조용히 통과시킨다 — 이 UseCase 가 이미 {@code BiFunction} 모양을 쓰고 있어
+     * 가설이 아니다.
+     *
+     * <p>⚠️ <b>엔티티 자신도 면제하지 않는다.</b> 면제하면 엔티티 안에
+     * {@code autoCancel() -> cancelSelection()} 같은 래퍼를 두는 것으로 이 규칙과
+     * 규칙 ①을 <b>둘 다</b> 우회할 수 있다. 지금 엔티티 안에서 이 둘을 부르는 곳이
+     * 없으므로 면제할 이유도 없다.
+     *
+     * <p>🕳 <b>남는 구멍</b> — 리플렉션은 못 본다. 그리고 {@code isAssignableTo} 라
+     * 하위 타입은 잡지만 <b>상위 타입은 못 잡는다</b>: 나중에 이 메서드들을 인터페이스로
+     * 추출하면 그 인터페이스 타입으로 부르는 경로가 빠져나간다.
+     */
     private static ArchCondition<JavaClass> 사람_전이_메서드를_부른다() {
-        return new ArchCondition<>("사람 전이 메서드를 직접 부른다") {
+        return new ArchCondition<>("사람 전이 메서드를 직접 부르거나 참조한다") {
             @Override
             public void check(JavaClass item, ConditionEvents events) {
-                item.getMethodCallsFromSelf().stream()
-                        .filter(call -> call.getTargetOwner()
+                Stream.concat(item.getMethodCallsFromSelf().stream(),
+                                item.getMethodReferencesFromSelf().stream())
+                        .filter(access -> access.getTargetOwner()
                                 .isAssignableTo(ContributionCandidate.class))
-                        .filter(call -> 사람이_부르는_전이.contains(call.getName()))
-                        .forEach(call -> events.add(
-                                SimpleConditionEvent.satisfied(call, call.getDescription())));
+                        .filter(access -> 사람이_부르는_전이.contains(access.getName()))
+                        .forEach(access -> events.add(
+                                SimpleConditionEvent.satisfied(access, access.getDescription())));
             }
         };
     }

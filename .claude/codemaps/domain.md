@@ -82,7 +82,7 @@
 | `ANALYZING` | `FAILED` ● | **분석 실패 — 즉시 종단** (Q-6: `ANALYZE`·`PLAN` 은 재시도 없음) | 시스템 |
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` · `breaking_change=true` · **`confidence < agent.analysis.min-confidence`**(#11) | 시스템 |
 | `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
-| `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject` | **사람** |
+| `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject`. 🔴 `cancelSelection` 이 출발 상태를 **직접** 본다 — 전이표에는 `ANALYZED → REJECTED` 도 있어서 맡겨 두면 `rejectAsInfeasible`(시스템 판정)과 같은 것이 된다 | **사람** |
 | `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`) | **사람이 트리거** |
 | `IMPLEMENTING` | `TESTING` | 코드 생성 완료 | 시스템 |
 | `TESTING` | `REVIEWING` | 빌드·테스트 통과 | 시스템 |
@@ -98,16 +98,49 @@
 
 S-6 이 요구하는 승인 지점이다. **스케줄러·워커가 이 선을 넘지 않는다.**
 
-| 게이트 | 엔드포인트 | 넘으면 |
-|---|---|---|
-| 선정 | `POST /candidates/{id}/select` | 자동 선정 — 제품 정의 붕괴 |
-| 착수 | `POST /candidates/{id}/implement` | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
-| **PR 생성** | `POST /candidates/{id}/pull-request` | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
+| 게이트 | 엔드포인트 | 구현 | 넘으면 |
+|---|---|---|---|
+| 선정 | `POST /candidates/{id}/select` | ✅ #24 | 자동 선정 — 제품 정의 붕괴 |
+| 착수 | `POST /candidates/{id}/implement` | ⬜ #18 | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
+| **PR 생성** | `POST /candidates/{id}/pull-request` | ⬜ #23 | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
 
 ⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스는 `implement` 한 번으로
 Draft PR 까지 그렸는데, 그대로 구현하면 위 세 번째 게이트가 사라진다 — PRD 결함이다(#30).
 
 선택 취소(`SELECTED → REJECTED`)도 **사람 행위로만** 일어난다. 자동 취소 경로를 만들지 않는다.
+구현된 엔드포인트는 `POST /candidates/{id}/reject` 다 — 🔴 `DELETE` 가 아니다.
+지우는 것이 아니라 **종단 상태로 전이시키는 행위**이고, 후보 행은 그대로 남아
+「골랐다가 물렸다」는 기록이 된다.
+
+### 🔴 뒤의 둘을 「아직 안 만든 것」으로 읽지 않는다 (2026-09-26 · #24)
+
+#24 는 셋 중 **하나만** 열었다. 나머지 둘은 일정 문제가 아니라 **지금 열면 후보가
+빠져나올 수 없는 상태에 갇히기 때문**에 미룬 것이다.
+
+| 엔드포인트 | 지금 열면 |
+|---|---|
+| `implement` | `IMPLEMENTING` 에서 **나갈 트리거가 없다.** 실행기(#18)가 없으니 후보가 거기 영원히 멈춘다 |
+| `pull-request` | PR 을 만들 코드가 없으니 **PR 없이 종단 `PR_CREATED`** 가 된다. 종단이라 나올 수도 없다 — S-2 에도 닿는다 |
+
+`CandidateApprovalApiTest` 가 **둘 다 404 인 것을 회귀로 고정**한다. 열 때는
+그 테스트를 함께 고쳐야 하고, 그것이 「실행기와 같은 PR 에서 연다」를 강제한다.
+
+### 승인 게이트를 구조로 고정한 것 — #24
+
+단위 테스트는 **부른 코드**를 보지만, S-6 이 막으려는 것은 **누군가 나중에 부르게 되는 것**이다.
+`ApprovalGateArchitectureTest`(ArchUnit)가 넷을 고정한다.
+
+| 규칙 | 막는 것 |
+|---|---|
+| `..adapter.in.scheduler..`·`..adapter.in.event..` → `SelectCandidateUseCase` 금지 | 자동 진입점이 게이트를 부르는 것 |
+| `selectedAt` 은 `selectByHuman` 에서만 대입 | 「사람이 골랐다」의 증거가 다른 데서 만들어지는 것 |
+| `PolicyClearance` 가 `..adapter.in..` 에 없음 | 외부가 통행증을 주입하는 것 (S-5) |
+| `candidate` → `repository.adapter` 금지 · 남의 UseCase 는 `application` 에서만 | 규율 ①④ |
+
+⚠️ 첫 규칙은 **지금 위반 0건이다** — `ScanScheduler`(#14)가 유일한 스케줄러이고 스캔만
+기동한다. 위반이 없으면 규칙이 잘못 쓰여 있어도 초록이라, 미끼(`AutoSelectProbe`)를 두고
+**같은 규칙이 그것을 무는지**를 함께 단언한다. 규칙이 실제로 필요해지는 시점은
+스케줄러가 후보를 건드리기 시작하는 때다.
 
 ---
 
@@ -122,8 +155,8 @@ Draft PR 까지 그렸는데, 그대로 구현하면 위 세 번째 게이트가
 | 3 | **PR 은 항상 `draft`** | 검증 안 된 AI 코드가 메인테이너 리뷰 큐에 올라간다 = 스팸 | S-2 |
 | 4 | **push 대상은 Fork 뿐** | 남의 저장소 히스토리 오염. 되돌릴 수 없다 | S-1 |
 | 5 | **대상 저장소 실행은 샌드박스 안** | 악의적 저장소 하나로 호스트 장악 | S-3 |
-| 6 | **`RepositoryPolicy` 없이 구현 단계로 못 간다** | 규약 위반 PR 은 읽히지 않고 닫힌다 | S-5 |
-| 7 | **`ai_contribution_allowed` 판정 실패는 「보류」다** | AI 기여를 금지한 저장소에 PR 을 연다 | S-5 · Q-8 |
+| 6 | **`RepositoryPolicy` 없이 구현 단계로 못 간다** — `startImplementing` 이 `PolicyClearance` 를 **인자로 요구**한다(#24). 확인 없이 부르는 것이 컴파일되지 않고, `null` 은 런타임 가드가 막는다 | 규약 위반 PR 은 읽히지 않고 닫힌다 | S-5 |
+| 7 | **`ai_contribution_allowed` 판정 실패는 「보류」다** — 푸는 길은 `POST /repositories/{id}/policy/resolution` 하나이고 **사람만 부른다**(#24) | AI 기여를 금지한 저장소에 PR 을 연다 | S-5 · Q-8 |
 | 8 | **재시도 상한을 무한으로 바꾸지 않는다** — 판정 필드는 `contribution_candidate.attempt`, 절대 상한은 도메인 상수 | LLM 비용이 조용히 폭주하고 `FAILED` 신호가 사라진다 | S-6 |
 | 9 | **후보는 이슈당 1건** | 같은 작업 이중 실행 · 중복 PR | [`data.md`](./data.md) |
 | 10 | **종단 상태 행을 삭제하지 않는다** | 같은 이슈를 다음 스캔에서 또 분석한다. LLM 비용 반복 | 〃 |

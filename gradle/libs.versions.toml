@@ -13,6 +13,9 @@ wiremock = "3.13.1"
 dockerJava = "3.4.2"
 # docker-java 의 전이 의존을 끌어올린 것. 직접 쓰지 않으므로 [libraries] 에 두지 않고
 # build.gradle.kts 의 constraints 에서만 참조한다 — 버전은 여기서만 올린다
+# 구조 규칙을 테스트로 고정한다 — 「selectedAt 을 쓰는 메서드가 하나뿐」 같은 것.
+# 손으로 열거하면 새 메서드가 추가될 때 조용히 빠진다 (#24 · FR-5)
+archunit = "1.4.1"
 guava = "33.4.8-jre"
 commonsCompress = "1.27.1"
 
@@ -22,6 +25,7 @@ anthropic-java = { module = "com.anthropic:anthropic-java", version.ref = "anthr
 # 셰이딩은 Anthropic SDK 쪽에도 이득이다 — SDK 가 Jackson 버전 호환성을 직접 검사한다
 wiremock-standalone = { module = "org.wiremock:wiremock-standalone", version.ref = "wiremock" }
 # core 가 DockerClientImpl·DefaultDockerClientConfig 를 갖는다. api 는 전이로 따라온다
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 docker-java-core = { module = "com.github.docker-java:docker-java-core", version.ref = "dockerJava" }
 # 추가 HTTP 스택을 끌고 오지 않는 전송. Testcontainers 도 이것을 쓴다
 docker-java-transport-zerodep = { module = "com.github.docker-java:docker-java-transport-zerodep", version.ref = "dockerJava" }

@@ -14,6 +14,7 @@ import com.ossagent.repository.domain.PolicyDocumentSource;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryDocuments;
 import com.ossagent.repository.domain.RepositoryNotFoundException;
+import com.ossagent.repository.domain.PolicyClearance;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.repository.domain.RuleReading;
@@ -215,27 +216,68 @@ public class AnalyzeRepositoryPolicyUseCase {
      */
     @Transactional(readOnly = true)
     public void assertContributionAllowed(Long repositoryId) {
+        // 🔴 판정 로직을 두 벌 두지 않는다. 둘이 각자 진화하면 한쪽에만 새 규칙이
+        //    들어가고, S-5 게이트가 부르는 문에 따라 다르게 판정하게 된다 (#24)
+        //
+        // ⚠️ self-invocation 이라 clearanceFor 의 @Transactional 은 적용되지 않는다.
+        //    지금은 무해하다 — 이 메서드가 같은 설정(readOnly=true · REQUIRED)으로 이미
+        //    트랜잭션을 열었고, 안쪽은 그것을 그대로 쓴다.
+        //    🔴 clearanceFor 의 전파·readOnly 를 바꾸는 사람은 이 경로에 그것이 먹지 않는다는
+        //    것을 알아야 한다. 증상은 예외가 아니라 「설정이 조용히 무시된다」라 눈에 안 띈다 —
+        //    #11·#16 이 같은 함정에서 「저장이 사라진다」를 겪었다. 바꿔야 하면 별도 빈으로 뺀다
+        clearanceFor(repositoryId);
+    }
+
+    /**
+     * 🔴 구현 단계 통행증을 발급한다 — S-5 · #24.
+     *
+     * <p>{@code ContributionCandidate.startImplementing} 이 이것을 <b>인자로 요구</b>하므로,
+     * 정책을 확인하지 않고 구현 단계로 넘어가는 것이 <b>컴파일되지 않는다.</b>
+     * #12 가 건 에스컬레이션 조건(「정책 확인 없이 부르면 블로킹」)을 문서가 아니라
+     * 타입으로 옮긴 것이다.
+     *
+     * <p>🔴 <b>{@code Optional} 을 돌려주지 않는다.</b> 그러면 {@code .orElse(null)} 한 줄로
+     * <b>무시할 수 있는 게이트</b>가 된다 — 위 {@link ContributionNotAllowedException} 의
+     * javadoc 이 「{@code boolean} 이 아니라 예외인 것이 설계다. 반환값은 무시할 수 있지만
+     * 예외는 무시하기 어렵다」로 못 박아 둔 그 함정이고, <b>같은 클래스의 두 문이 다른 기준을
+     * 쓰지 않는다.</b>
+     *
+     * <p>⚠️ <b>정책 행이 없는 경우는 여기서만 판정할 수 있다.</b>
+     * {@code RepositoryPolicy.clearance()} 는 엔티티의 메서드라 행이 없으면 부를 대상이
+     * 없다 — {@code NOT_ANALYZED} 는 이 자리의 몫이다.
+     *
+     * <p>⚠️ 트랜잭션 안에서 조회한다 — {@code RepositoryPolicy.repository} 가 LAZY 라
+     * 밖에서 {@code clearance()} 를 부르면 {@code LazyInitializationException} 이 난다.
+     * <b>게이트가 그런 이유로 죽으면 호출자가 그것을 {@code catch} 해 넘길 위험이 생긴다.</b>
+     *
+     * <p>⚠️ 돌려주는 통행증은 <b>스냅샷</b>이다. 같은 트랜잭션 안에서 쓰는 것을 전제한다 —
+     * {@code PolicyClearance} javadoc.
+     *
+     * @throws ContributionNotAllowedException 행 없음({@code NOT_ANALYZED}) · 보류 · 금지
+     */
+    @Transactional(readOnly = true)
+    public PolicyClearance clearanceFor(Long repositoryId) {
+        // 🔴 계측을 assertContributionAllowed 가 아니라 여기 단다 (#25).
+        //    #24 가 판정을 이쪽으로 옮기면서 두 개의 문이 생겼는데, 바깥 문에만 달면
+        //    이쪽을 직접 부르는 경로(구현 단계 통행증 발급)가 집계에서 통째로 빠진다.
+        //    판정이 일어나는 곳이 하나이므로 여기가 유일하게 중복 없는 지점이다
         try {
             RepositoryPolicy policy = policies.findByRepositoryId(repositoryId)
                     .orElseThrow(() -> new ContributionNotAllowedException(
                             repositoryId, ContributionNotAllowedException.Reason.NOT_ANALYZED));
 
-            if (policy.isAiContributionUndetermined()) {
-                throw new ContributionNotAllowedException(
-                        repositoryId, ContributionNotAllowedException.Reason.UNDETERMINED);
-            }
-            if (policy.isAiContributionForbidden()) {
-                throw new ContributionNotAllowedException(
-                        repositoryId, ContributionNotAllowedException.Reason.FORBIDDEN);
-            }
+            // 보류·금지 판정은 엔티티가 한다 — 여기서 다시 쓰면 두 벌이 된다
+            PolicyClearance clearance = policy.clearance();
+
+            // 🔴 통과도 센다 — logging.md 「통과한 것도 남긴다. 사고 후 「막았는가」를
+            //    증명할 수 있어야 한다」. 차단만 세면 분모가 없어 막힌 비율을 계산할 수 없고,
+            //    「0건 차단」과 「계측 고장」이 구분되지 않는다
+            metrics.safetyGate(SafetyClause.S5, GateOutcome.PASSED, null);
+            return clearance;
         } catch (ContributionNotAllowedException e) {
             metrics.safetyGate(SafetyClause.S5, GateOutcome.BLOCKED, e.reason());
             throw e;
         }
-        // 🔴 통과도 센다 — logging.md 「통과한 것도 남긴다. 사고 후 「막았는가」를
-        //    증명할 수 있어야 한다」. 차단만 세면 분모가 없어 막힌 비율을 계산할 수 없고,
-        //    「0건 차단」과 「계측 고장」이 구분되지 않는다
-        metrics.safetyGate(SafetyClause.S5, GateOutcome.PASSED, null);
     }
 
     /**

@@ -565,4 +565,26 @@ class AnalyzeRepositoryPolicyUseCaseTest {
                 .as("🔴 같은 문서로 다시 강등하면 사람의 해소가 무력화되고 보류가 영구 루프가 된다")
                 .isTrue();
     }
+
+    @Test
+    void 판정을_유지하는_경우에도_비교_기준은_세운다_S5() {
+        // 🔴 필수 경로 하나가 계속 안 읽히는 저장소. 판정만 유지하고 돌려보내면
+        //    비교 기준이 영영 서지 않아, **읽히는 다른 문서가 바뀌어도 탐지되지 않는다** —
+        //    「낡은 판정이 굳는다」가 다른 모양으로 남는다
+        policies.save(RepositoryPolicy.analyzed(
+                repositories.findById(repositoryId).orElseThrow(), allowed(), CLOCK));
+
+        documents.givenRead("CONTRIBUTING.md", "기여 방법")
+                .givenUnreadable("AGENTS.md", UnreadableReason.UNKNOWN);
+
+        RepositoryPolicy after = useCase.analyze(repositoryId).orElseThrow();
+
+        assertThat(after.allowsContribution()).isTrue();
+        assertThat(after.fingerprints().get("CONTRIBUTING.md"))
+                .as("읽은 문서의 지문은 남아야 다음 변경을 잡을 수 있다")
+                .isPresent();
+        assertThat(after.getDocumentsCheckedAt())
+                .as("「마지막으로 확인한 시각」이 전진해야 「모르는 상태가 오래됐다」를 구분할 수 있다")
+                .isNotNull();
+    }
 }

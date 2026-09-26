@@ -137,7 +137,10 @@ public class AnalyzeRepositoryPolicyUseCase {
                     return Optional.of(writer.saveUnverifiable(
                             existing.getId(), changedUnreadableReason(documents, blind), prints));
                 }
-                // 겹치지 않으면 기존 규칙 그대로 — 신규 행이면 보류, 기존 행이면 판정 유지
+                // 겹치지 않으면 기존 규칙 그대로 — 신규 행이면 보류, 기존 행이면 판정 유지.
+                // ⚠ 안전하지만 계속 쌓이면 곤란하다 — 그 저장소는 규약 변경을 탐지할 수단이
+                //   없다는 뜻이다. 계측하지 않으면 이 분기만 통계에서 사라진다
+                metrics.policyDocuments(PolicyChangeOutcome.UNREADABLE_KEPT);
                 return Optional.of(writer.savePending(
                         snapshot.repository(), existing, documents.requiredPendingReason(), prints));
             }
@@ -177,7 +180,9 @@ public class AnalyzeRepositoryPolicyUseCase {
             //    🔴 엔티티 가드는 그대로 둔다 — 최종 방어는 거기다
             if (existing != null && existing.isHumanResolved()
                     && Boolean.TRUE.equals(reading.aiContributionAllowed())) {
-                metrics.policyDocuments(PolicyChangeOutcome.UNCHANGED);
+                // ⚠ UNCHANGED 가 아니다 — 문서는 실제로 바뀌었고 LLM 도 불렀다.
+                //   UNCHANGED 로 세면 「LLM 을 아꼈다」는 뜻이 되어 비용 지표가 거짓이 된다
+                metrics.policyDocuments(PolicyChangeOutcome.CHANGED_REANALYZED);
                 log.info("사람이 해소한 판정이 재분석으로도 허용이다 repo={} — 판정을 유지하고 지문만 갱신한다",
                         snapshot.coordinates().fullName());
                 return Optional.of(writer.saveVerified(existing.getId(), prints));

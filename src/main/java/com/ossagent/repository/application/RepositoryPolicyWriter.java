@@ -54,6 +54,10 @@ public class RepositoryPolicyWriter {
     /**
      * 보류를 기록한다.
      *
+     * <p>⚠️ {@code prints} 는 <b>양쪽 경로에서 모두 기록된다</b> — 신규 행이면 판정과 함께,
+     * 기존 행이면 판정을 건드리지 않고 관측만. 기존 행에서 버리면 필수 경로 하나가 계속
+     * 안 읽히는 저장소는 비교 기준이 영영 서지 않는다 (#68).
+     *
      * <p>🔴 <b>이미 판정이 선 정책을 보류로 되돌리지 않는다.</b> {@code pending()} 은 새 엔티티를
      * 만드는데 {@code UNIQUE(repository_id)} 가 있어 제약 위반이 나고, 무엇보다 한 번 확인한
      * 판정을 지우면 사람이 풀어야 하는 상태가 된다(#24 미구현).
@@ -64,7 +68,12 @@ public class RepositoryPolicyWriter {
         if (existing != null) {
             log.warn("규약을 다시 읽지 못했다 repo={} reason={} — 기존 판정을 유지한다",
                     repository.getUrl(), reason);
-            return existing;
+            // 🔴 판정은 유지하되 **관측은 기록한다** (#68). 그냥 돌려보내면 필수 경로 하나가
+            //    계속 안 읽히는 저장소는 비교 기준이 영영 서지 않아, 읽히는 다른 문서가
+            //    바뀌어도 탐지되지 않는다 — 「낡은 판정이 굳는다」가 다른 모양으로 남는다
+            RepositoryPolicy managed = managed(existing.getId());
+            managed.markVerified(prints, clock);
+            return policies.save(managed);
         }
         log.info("규약 판정 보류 repo={} reason={} — 사람이 해소한다 (#24)",
                 repository.getUrl(), reason);

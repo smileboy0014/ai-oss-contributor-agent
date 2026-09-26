@@ -282,8 +282,11 @@ pre-commit 이 통과시킨다). 스크립트의 `ghp_{36}` · `gho_{36}` 두 �
 | 7 | `support/secret/SecretFilePolicyTest.java` | 신규 | 배제 규칙 |
 | 8 | `support/ExternalTextScrubRegistryTest.java` | 신규 | 🔴 `@ExternalText` 등록표 (FR-6 · FR-4) |
 | 9 | `issue/domain/IssueSnapshotTest.java` | 수정/신규 | 본문에 섞인 토큰이 스냅샷에 남지 않는다 |
-| 10 | `agent/LlmSdkBoundaryTest.java` | 신규 | `com.anthropic` 사용처 제한 (FR-1 · §3.4) |
-| 11 | `agent/PromptLoggingTest.java` | 신규 | 프롬프트 경로 로그 검사 (FR-5 · §3.5) |
+| 10 | `agent/PromptBoundaryTest.java` | 신규 | `com.anthropic` 사용처 제한 (FR-1) + 프롬프트 경로 로그 검사 (FR-5) |
+
+⚠️ **계획에서 바뀐 것** — 10·11 을 두 파일로 두려 했으나 **한 파일로 합쳤다.**
+둘 다 「프롬프트가 조립·송신되는 경계」 규칙이고 같은 소스 워커를 쓴다. 나눠 두면
+같은 파일 순회 헬퍼가 두 벌이 되고, 그게 갈라지면 한쪽이 다른 범위를 훑게 된다.
 | 12 | `.claude/rules/conventions/logging.md` | 수정 | 프롬프트 전문 규칙 + 검사 위치 |
 | 12b | `.claude/rules/conventions/testing-philosophy.md` | 수정 | 🔴 `ghp_`·`gho_` 폭 서술 정정 (§8) |
 | 13 | `.claude/rules/context/safety-boundaries.md` | 수정 | S-4 에 「실행체는 `support/secret`」 링크 |

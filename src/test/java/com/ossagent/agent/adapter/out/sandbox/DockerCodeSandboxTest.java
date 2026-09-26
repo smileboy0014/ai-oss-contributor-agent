@@ -46,7 +46,7 @@ class DockerCodeSandboxTest {
         workspace = SandboxWorkspace.under(
                 Files.createDirectories(root.resolve("candidate-1")), props.workspaceRoot());
         cache = SandboxCacheVolume.forRepository("spring-projects", "spring-kafka");
-        sandbox = new DockerCodeSandbox(operations, props, "instance-a",
+        sandbox = new DockerCodeSandbox(operations, props, new SandboxInstanceId("instance-a"),
                 Clock.fixed(Instant.parse("2026-09-26T10:00:00Z"), ZoneOffset.UTC));
     }
 
@@ -192,7 +192,7 @@ class DockerCodeSandboxTest {
         assertThat(operations.ensuredNetworks()).containsExactly("oss-agent-warm");
 
         RecordingContainerOperations other = new RecordingContainerOperations();
-        new DockerCodeSandbox(other, props, "instance-a", Clock.systemUTC()).run(execute());
+        new DockerCodeSandbox(other, props, new SandboxInstanceId("instance-a"), Clock.systemUTC()).run(execute());
 
         assertThat(other.calls())
                 .as("실행 단계는 네트워크가 none 이라 보장할 네트워크가 없다")

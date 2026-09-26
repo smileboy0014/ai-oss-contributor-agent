@@ -44,11 +44,11 @@ public class DockerCodeSandbox implements CodeSandbox {
 
     private final ContainerOperations operations;
     private final SandboxProperties properties;
-    private final String instanceId;
+    private final SandboxInstanceId instanceId;
     private final Clock clock;
 
     public DockerCodeSandbox(ContainerOperations operations, SandboxProperties properties,
-            String instanceId, Clock clock) {
+            SandboxInstanceId instanceId, Clock clock) {
         this.operations = operations;
         this.properties = properties;
         this.instanceId = instanceId;
@@ -131,6 +131,6 @@ public class DockerCodeSandbox implements CodeSandbox {
                 SandboxContainerSpec.environmentAsList(command),
                 command.workspace().containerPath(),
                 SandboxContainerSpec.hostConfig(command, properties),
-                SandboxContainerSpec.labels(instanceId));
+                SandboxContainerSpec.labels(instanceId.value()));
     }
 }

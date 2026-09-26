@@ -2,6 +2,7 @@ package com.ossagent.support.testing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ossagent.agent.domain.CodeSandbox;
 import com.ossagent.agent.domain.LanguageModel;
 import com.ossagent.issue.domain.IssueSource;
 import com.ossagent.repository.domain.RepositorySource;
@@ -88,6 +89,11 @@ class ExternalAdapterIsolationTest {
 
         assertThat(context.getBean(LanguageModel.class).getClass().getName())
                 .as("LanguageModel 이 페이크가 아니다 — 실물이 뜨면 테스트가 LLM 을 실제로 호출하고 돈을 태운다")
+                .startsWith("com.ossagent.agent.domain.Fake");
+
+        assertThat(context.getBean(CodeSandbox.class).getClass().getName())
+                .as("CodeSandbox 가 페이크가 아니다 — 실물이 뜨면 테스트가 실제 Docker 데몬을 잡고, "
+                        + "샌드박스는 신뢰할 수 없는 대상 저장소 코드를 실행하는 물건이다 (S-3)")
                 .startsWith("com.ossagent.agent.domain.Fake");
     }
 

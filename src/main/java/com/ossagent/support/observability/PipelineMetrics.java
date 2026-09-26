@@ -128,6 +128,20 @@ public class PipelineMetrics {
     }
 
     /**
+     * 규약 문서를 다시 확인한 결과 — 이슈 #68.
+     *
+     * <p>🔴 <b>경로를 태그로 내보내지 않는다.</b> 경로는 우리 상수라 시크릿이 아니지만,
+     * 카디널리티를 열 이유가 없다. 「어느 경로가 바뀌었나」는 {@code pending_reason} 과
+     * 로그에 남는다 — 메트릭은 「몇 건인가」만 답한다.
+     */
+    public void policyDocuments(PolicyChangeOutcome outcome) {
+        record(() -> Counter.builder(MetricNames.POLICY_DOCUMENTS)
+                .tag(MetricNames.TAG_OUTCOME, outcome.name())
+                .register(registry)
+                .increment());
+    }
+
+    /**
      * 후보 상태 게이지를 등록한다 — 값은 호출자가 들고 있는 {@link AtomicLong} 을 읽는다.
      *
      * <p>🔴 <b>이 메서드가 있는 이유는 「태그를 만드는 유일한 지점」을 사실로 유지하기

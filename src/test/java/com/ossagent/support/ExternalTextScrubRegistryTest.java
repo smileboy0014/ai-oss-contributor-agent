@@ -32,6 +32,23 @@ import org.springframework.util.ClassUtils;
  * <b>원문 그대로 저장되고 있었다</b>(#28 에서 닫았다).
  *
  * <h2>🕳 한계 — 숨기지 않는다</h2>
+ *
+ * <p><b>아래 셋은 「조용히 통과」한다.</b> 빨개지지 않으므로 아무도 모른다 —
+ * 그래서 한계 목록의 맨 앞에 둔다.
+ *
+ * <ol>
+ *   <li>{@link ClassPathScanningCandidateComponentProvider} 의 기본 판정이
+ *       <b>independent &amp;&amp; concrete</b> 다. 그래서 <b>abstract 클래스</b>에 선언된
+ *       {@link ExternalText} 필드가 후보에서 빠진다</li>
+ *   <li>같은 이유로 <b>비정적 내부 클래스</b>({@code @Nested} 등)도 빠진다</li>
+ *   <li>{@code getDeclaredFields()} 라 <b>상속받은 필드</b>를 보지 못한다. 상위가 abstract
+ *       이면 상위도 스캔되지 않으므로 그 필드는 <b>어디서도</b> 검사되지 않는다</li>
+ * </ol>
+ *
+ * <p>지금 이 저장소의 엔티티는 전부 구체·최상위 클래스라 실효 손실이 없다. 다만
+ * <b>「지금 없다」와 「막혀 있다」는 다르다</b> — 공통 상위 엔티티를 도입하는 순간 뚫린다.
+ *
+ * <p>나머지 한계 — 이쪽은 빨개지므로 덜 위험하다.
  * <ul>
  *   <li>{@link Mechanism#PENDING} 행이 실제로 지켜지는지는 <b>그 이슈의 테스트</b>가 본다.
  *       여기서는 「아직 없다」를 기록만 한다</li>
@@ -67,12 +84,13 @@ class ExternalTextScrubRegistryTest {
     private static final Map<String, Decision> REGISTRY = Map.ofEntries(
             Map.entry("Issue.body", new Decision(Mechanism.FORCED_POINT,
                     "IssueSnapshot compact 생성자 — 모든 이슈 본문이 통과하는 유일한 문 (#28)")),
-            // ⚠️ #9 가 머지되면 이 행은 「갱신」이 아니라 「삭제」다. 그쪽이 마커를 떼고
-            //    컬럼을 TEXT → VARCHAR(512) 로 내리기 때문에 이 필드가 검사 대상에서
-            //    사라진다. 남겨 두면 아래 유령 행 검사가 잡는다 — 그게 정상 동작이다.
-            Map.entry("Issue.filterReason", new Decision(Mechanism.PENDING,
-                    "#9 — FilterVerdict.reasonCodes()(FilterReason enum 의 name() 을 이은 것)"
-                            + " 만이 이 필드를 채운다. 자유 문자열을 받는 경로가 없다")),
+            // 📌 {@code Issue.filterReason} 행이 여기 있었다. #9 가 머지되며 지웠다 —
+            //    그쪽이 「값 타입을 거치게 한다」가 아니라 「자유 텍스트를 담을 수 없게
+            //    타입을 바꾼다」로 풀었기 때문이다. FilterVerdict.reasonCodes()(enum name()
+            //    을 이은 것)만 그 필드를 채우고, 컬럼도 TEXT → VARCHAR(512) 로 내려가
+            //    @ExternalText 대상 자체가 아니게 됐다.
+            //    이 표가 강제한 것은 스크럽이 아니라 「결정을 하라」였고, 나온 결정이
+            //    스크럽이 아니었다. 그게 이 표가 기대한 결과다.
             Map.entry("AgentRun.errorMessage", new Decision(Mechanism.FORCED_POINT,
                     "AgentRun.fail(...) — 이 필드에 대입하는 유일한 지점이고 거기서 redact (#6)")),
             Map.entry("RepositoryPolicy.contributionRules", new Decision(Mechanism.VALUE_TYPE,

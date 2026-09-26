@@ -38,10 +38,25 @@ import org.junit.jupiter.api.Test;
  * 그래서 {@link #ROWS} 의 각 행이 시크릿 모양의 샘플을 들고, 그것이
  * <b>(ⓐ 스크립트 정규식에 실제로 물리고 ⓑ 런타임에서 실제로 사라지는지</b>를 실행으로 본다.
  *
- * <h2>🕳 한계</h2>
- * 런타임 쪽 검사는 {@code TokenRedactor.java} 의 <b>소스 텍스트</b>를 읽어
- * {@code Pattern.compile} 개수를 세는 수준이다. 패턴이 늘거나 줄면 빨개져 등록을
- * 강제하지만, <b>그 패턴이 무엇을 가리는지까지 판정하지는 못한다.</b>
+ * <h2>🕳 한계 — 추출기를 우회하는 법이 있다</h2>
+ *
+ * <p>아래는 전부 <b>조용히 통과</b>한다. 빨개지지 않으므로 아무도 모른다.
+ *
+ * <p><b>스크립트 쪽</b> — {@code scan_pattern} 인자형과 {@code grep -nE '…'} 인라인형만 문다.
+ * {@code grep -nE "$pat"}(<b>큰따옴표</b>) · {@code grep -nEf} · {@code grep -P} ·
+ * {@code egrep} 으로 패턴을 추가하면 추출되지 않고, 그러면 <b>커밋은 막는데 런타임에는
+ * 없는</b> 상태가 검출되지 않는다.
+ *
+ * <p><b>런타임 쪽</b> — {@code Pattern.compile("…")} 의 <b>리터럴</b>만 센다.
+ * {@code Pattern.compile(CONSTANT)} 이나 {@code compile("a" + "b")} 로 패턴을 늘리면
+ * 개수 단언이 물지 않는다.
+ *
+ * <p>그리고 런타임 검사는 <b>개수를 셀 뿐</b> 그 패턴이 무엇을 가리는지 판정하지 못한다.
+ * 숫자를 맞추는 것으로 때울 수 있다 — 그래서 이 표는 <b>강제 장치가 아니라 리뷰를
+ * 부르는 장치</b>다.
+ *
+ * <p>✅ 반대로 <b>변수에 담아 {@code scan_pattern "$pat"} 로 넘기는 것</b>은 막힌다 —
+ * 작은따옴표 인자가 하나가 아니게 되어 추출기가 빨갛게 터진다.
  */
 class SecretPatternDriftTest {
 

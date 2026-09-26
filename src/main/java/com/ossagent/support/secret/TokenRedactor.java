@@ -13,9 +13,10 @@ import java.util.regex.Pattern;
  * <p>이 클래스는 **문자열 마지막 방어선**이다. 1차 방어는 토큰을 애초에 URL 에 싣지 않는 것이고
  * ({@code GitHubApiClient} 는 헤더로만 보낸다), 여기는 그 전제가 깨졌을 때를 위한 그물이다.
  *
- * <p><b>범위</b> — 토큰 패턴 치환만 한다. 저장소 컨텍스트를 LLM 프롬프트에 넘기기 전의
- * 파일 단위 배제({@code .env} · {@code *.pem} · {@code credentials} 류)는 다른 문제이고
- * 이슈 #28 이 이 클래스 위에 쌓는다.
+ * <p><b>범위</b> — <b>알려진 패턴</b>의 치환만 한다. 파일 단위 배제({@code .env} ·
+ * {@code *.pem} · {@code credentials} 류)는 {@link SecretFilePolicy} 가 맡는다.
+ * 둘은 겹치는 방어가 아니라 순서가 다른 방어다 — 키 파일에는 우리가 모르는 형식의
+ * 자격증명이 얼마든지 들어 있어, <b>패턴 매칭만으로는 「가렸다」고 말할 수 없다.</b>
  */
 public final class TokenRedactor {
 

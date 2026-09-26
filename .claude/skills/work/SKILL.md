@@ -219,17 +219,6 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      ⚠ **여기서 「CI 로 받겠다」는 성립하지 않는다** — CI 는 PR 이 생긴 뒤(Phase 5)에야 돈다.
      Phase 2 의 ℹ️ 를 CI 로 미루면 **게이트 없이 Phase 3~4 를 지나간다**
 
-     🔴 **이 표는 열거다 — 요구 4 를 여기에도 적용한다**
-     (`testing-philosophy.md` 「열거로 정의한 가드는 **열거에 없는 형태를 적는다**」).
-
-     | 열거에 없는 것 | 왜 지금 안 나오나 | 나오게 되는 조건 |
-     |---|---|---|
-     | `FROM-CACHE` | **빌드 캐시가 꺼져 있다** — `gradle.properties` 없음 · `buildCache {}` 없음 · CI 에 `--build-cache` 없음 | 누군가 `org.gradle.caching=true` 를 켜면 `:test` 가 캐시에서 온다. **그러면 「돌았다」가 아니다** |
-     | `NO-SOURCE` | 테스트 소스가 항상 있다 | 〃 |
-     | **다른 이름의 테스트 태스크** | `build.gradle.kts` 에 `Test` 태스크가 **하나뿐**이다(`withType<Test>().configureEach` 만) | `integrationTest` 같은 걸 등록하면 위 grep 이 **그것을 안 본다** |
-
-     ⚠️ 셋 중 하나라도 생기면 **이 표와 grep 을 함께 다시 본다.** 안 보면 조용히 통과한다
-
      ⚠ **요약 줄(`N actionable tasks: M executed`)은 보조다.** `executed 0` 이면
      아무것도 안 돈 것이 확실하지만, **`M executed` 는 `:test` 를 이름으로 지목하지 않는다** —
      `compileTestJava` 만 돌아도 같은 숫자다. **요약 줄은 「0건」을, 태스크 줄은 「그 태스크가」를** 잡는다
@@ -237,6 +226,17 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      🔴 **소요 시간(`in 1s`)을 판정에 쓰지 않는다.** 오염이 **양방향**이다 —
      부분 실행(`--tests`)은 **짧게**, 시스템 절전은 **길게** 만든다(실측: 절전 940초가
      한 빌드에 통째로 들어갔다). 「너무 짧다」도 「너무 길다」도 근거가 아니다
+
+     🔴 **위 접미사 표는 열거다 — 요구 4 를 여기에도 적용한다**
+     (`testing-philosophy.md` 「열거로 정의한 가드는 **열거에 없는 형태를 적는다**」).
+
+     | 열거에 없는 것 | 왜 지금 안 나오나 | 나오게 되는 조건 |
+     |---|---|---|
+     | `FROM-CACHE` | **빌드 캐시가 꺼져 있다** — `gradle.properties` 없음 · `buildCache {}` 없음 · CI 에 `--build-cache` 없음 | `org.gradle.caching=true` · `--build-cache` · 🔴 **사용자 홈 `~/.gradle/gradle.properties`**(저장소 diff 에 안 보인다) 중 무엇이든 |
+     | `NO-SOURCE` | 테스트 소스가 항상 있다 | ⚠️ **`src/test` 가 비거나 사라지면** — 소스셋 재배치 · 모듈 분리. **캐시와 무관하다** |
+     | **다른 이름의 테스트 태스크** | `build.gradle.kts` 에 `Test` 태스크가 **하나뿐**이다(`withType<Test>().configureEach` 만) | `integrationTest` 같은 걸 등록하면 위 grep 이 **그것을 안 본다** |
+
+     ⚠️ 셋 중 하나라도 생기면 **접미사 표와 grep 을 함께 다시 본다.** 안 보면 조용히 통과한다
 
   ③ ⚠ **로그를 `build/` 에 쓰지 않는다.** `clean` 이 지우는데, 위 ℹ️ 에서 빠져나오는 방법이
      **바로 `clean build`** 다 — 규칙이 자기 탈출로와 부딪힌다.
@@ -386,6 +386,7 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
 | **안전 경계(S-1~S-6) 접촉** | 계획서에 조항·준수 방법 명시 없이 Phase 2 로 넘어가지 않는다 |
 | 미결(open-questions) 접촉 | 추측 금지 — 선택 게이트 (가정 명시 진행 / 확인 대기 / 중단) |
 | 빌드·테스트 실패 | Phase 2 중단 — 원인 수정 후 재검증. **파이프 출력만 보고 통과 판정 금지** |
+| **`> Task :test` 가 `UP-TO-DATE` 이거나 줄이 없음** | 빌드는 초록이지만 **테스트가 이번 실행에 안 돌았다.** 「통과」라고 하지 않는다 — `--rerun-tasks` 로 다시 받는다. Phase 2 를 CI 로 미루지 않는다 |
 | 시크릿 훅 차단 (secret-scan) | 값을 지우고 환경변수·`<REPLACE_WITH_SECRET_MANAGER>` 로 대체. 훅 skip 금지 |
 | 안전 경계 훅 차단 (safety-boundary-check) | 위반 수정 — `safety-ok` 예외는 **사유 필수**, 사유 없는 예외는 반려 |
 | `./gradlew` 부재 | 빌드 게이트 없음 — 「통과」라고 하지 않는다. 사실을 보고에 남긴다 |
@@ -411,7 +412,7 @@ PR: {URL}
 |------|------|
 | 0.5 worktree 격리 | ✅ |
 | 1 계획 (+안전 경계·미결 대조 · PLAN 커밋) | ✅ / skip |
-| 2 구현·테스트 (gradlew build) | ✅ |
+| 2 구현·테스트 (gradlew build) | ✅ / **ℹ️ 테스트 미실행 (사유)** |
 | 3 자가 점검 | ✅ |
 | 4 문서 동기화 | ✅ / skip (근거) |
 | 5 PR (+메타데이터 승계) | ✅ |

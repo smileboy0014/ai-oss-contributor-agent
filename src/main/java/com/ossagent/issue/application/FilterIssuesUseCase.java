@@ -53,14 +53,26 @@ public class FilterIssuesUseCase {
 
         Map<FilterOutcome, Integer> total = new EnumMap<>(FilterOutcome.class);
         boolean hasMore = false;
+        IssueFilterBatchWriter.Batch previous = null;
 
-        for (int batch = 0; batch < properties.maxBatchesPerRun(); batch++) {
-            Map<FilterOutcome, Integer> counts =
+        for (int i = 0; i < properties.maxBatchesPerRun(); i++) {
+            IssueFilterBatchWriter.Batch batch =
                     writer.judgeBatch(repositoryId, filter, properties.batchSize());
-            counts.forEach((outcome, count) -> total.merge(outcome, count, Integer::sum));
 
-            int judged = counts.values().stream().mapToInt(Integer::intValue).sum();
-            if (judged < properties.batchSize()) {
+            // 🔴 앞 배치와 같은 구간이 다시 왔다 = 판정이 커밋되지 않았다.
+            //    여기서 멈추지 않으면 상한까지 돌고 「전부 판정했다」를 반환한다 —
+            //    DB 는 하나도 바뀌지 않았는데 로그도 반환값도 성공이다
+            if (batch.repeats(previous)) {
+                throw new IllegalStateException(
+                        "판정이 진행되지 않았다 — 같은 배치가 반복된다. "
+                                + "호출자가 트랜잭션을 감싸 flush 가 막히지 않았는지 본다 "
+                                + "(repositoryId=" + repositoryId + ", firstId=" + batch.firstId() + ")");
+            }
+            previous = batch;
+
+            batch.counts().forEach((outcome, count) -> total.merge(outcome, count, Integer::sum));
+
+            if (batch.size() < properties.batchSize()) {
                 // 배치를 못 채웠다 = 미판정 이슈를 다 읽었다.
                 // ⚠ 이 사이에 스캔이 새 이슈를 넣으면 놓치지만, 다음 실행이 이어받는다
                 hasMore = false;
@@ -72,6 +84,26 @@ public class FilterIssuesUseCase {
         FilterResult result = FilterResult.of(total, hasMore);
         // 이슈 본문·라벨은 남기지 않는다 — 판정 어휘와 수치만 (logging.md · S-4)
         log.info("이슈 필터 완료 repositoryId={} {}", repositoryId, result);
+        warnIfNothingPasses(repositoryId, result);
         return result;
+    }
+
+    /**
+     * 🔴 {@code PASSED} 가 한 건도 나오지 않았으면 경고한다.
+     *
+     * <p>「{@code PASSED} 는 도달 가능해야 한다」는 이 단계의 불변식인데, <b>설정만으로도
+     * 깨진다</b> — {@code min-body-length} 를 크게 잡으면 전건이 보류가 된다. 그러면 하류
+     * #11 은 보류를 통과로 취급할 수밖에 없고, 판정을 흐리지 않겠다는 설계가 무력해진다.
+     *
+     * <p>예외로 막지 않는 이유 — 「전건 보류」가 <b>정상인 경우</b>가 실제로 있다(대상
+     * 저장소의 이슈가 전부 짧은 경우). 판정 자체를 실패시키면 되돌릴 수 없는 쪽으로 틀린다.
+     * 신호만 남기고 사람이 본다.
+     */
+    private static void warnIfNothingPasses(Long repositoryId, FilterResult result) {
+        if (result.judged() > 0 && result.countOf(FilterOutcome.PASSED) == 0) {
+            log.warn("통과한 이슈가 한 건도 없다 repositoryId={} judged={} — "
+                            + "issue.filter 임계가 너무 빡빡하지 않은지 본다",
+                    repositoryId, result.judged());
+        }
     }
 }

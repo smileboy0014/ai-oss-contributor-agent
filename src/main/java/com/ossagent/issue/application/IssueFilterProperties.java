@@ -32,6 +32,16 @@ public record IssueFilterProperties(
         Integer batchSize,
         Integer maxBatchesPerRun) {
 
+    /**
+     * 🔴 본문 길이 하한의 상한이다. 말장난 같지만 이것이 없으면
+     * <b>설정 한 줄로 {@code PASSED} 가 죽은 값이 된다</b> — 전건이 {@code SHORT_BODY} →
+     * {@code UNDECIDED} 가 되고, 하류 #11 은 보류를 통과로 취급할 수밖에 없다.
+     *
+     * <p>5,000자는 「정상적인 이슈 본문이 이보다 길 이유가 없다」는 선이다. 넘기려면
+     * <b>코드를 고쳐야 하고 그것이 리뷰에 보인다</b> — Q-6 의 재시도 절대 상한과 같은 장치다.
+     */
+    private static final int MAX_MIN_BODY_LENGTH = 5000;
+
     private static final int DEFAULT_MIN_BODY_LENGTH = 200;
     private static final int DEFAULT_MAX_COMMENT_COUNT = 30;
     private static final int DEFAULT_BATCH_SIZE = 200;
@@ -46,8 +56,15 @@ public record IssueFilterProperties(
         if (minBodyLength < 0) {
             throw new IllegalArgumentException("본문 길이 하한은 음수일 수 없습니다: " + minBodyLength);
         }
-        if (maxCommentCount < 0) {
-            throw new IllegalArgumentException("코멘트 수 상한은 음수일 수 없습니다: " + maxCommentCount);
+        if (minBodyLength > MAX_MIN_BODY_LENGTH) {
+            throw new IllegalArgumentException(
+                    "본문 길이 하한이 너무 큽니다 — 전건이 보류가 되어 PASSED 가 도달 불가능해집니다: "
+                            + minBodyLength);
+        }
+        if (maxCommentCount < 1) {
+            // 0 이면 코멘트가 하나라도 달린 이슈가 전부 보류다. 활발한 저장소에서는
+            // 사실상 전건 보류이고, 위와 같은 이유로 PASSED 가 죽는다
+            throw new IllegalArgumentException("코멘트 수 상한은 1 이상이어야 합니다: " + maxCommentCount);
         }
         if (batchSize < 1) {
             throw new IllegalArgumentException("배치 크기는 1 이상이어야 합니다: " + batchSize);

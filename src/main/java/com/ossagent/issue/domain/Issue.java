@@ -119,6 +119,17 @@ public class Issue {
     private static final Pattern SEPARATORS = Pattern.compile("[\\s_-]+");
 
     /**
+     * 🔴 걷어내도 되는 분류 접두 — <b>화이트리스트다.</b>
+     *
+     * <p>모든 {@code 접두:} 를 걷어내면 배제 규칙의 사정거리가 넓어진다.
+     * {@code area: architecture} · {@code component: design} 은 작업 <b>규모</b>가 아니라
+     * <b>영역</b>을 가리키는 흔한 관례인데, 접두를 지우면 대규모 변경으로 오인돼
+     * 이슈가 배제된다. 오탐의 대가가 되돌릴 수 없는 배제라는 점에서
+     * {@code LargeChangeRule} 이 본문 키워드를 거부한 것과 같은 판단이다.
+     */
+    private static final List<String> CLASSIFYING_PREFIXES = List.of("type", "kind", "category");
+
+    /**
      * 수집한 스냅샷으로 새 이슈 행을 만든다 — #8.
      *
      * <p>⚠ {@code state} 는 {@code "open"} 으로 고정한다. 조회가 {@code state=open} 이라
@@ -256,8 +267,13 @@ public class Issue {
      *   <caption>같게 보는 것</caption>
      *   <tr><td>대소문자</td><td>{@code Bug} = {@code bug}</td></tr>
      *   <tr><td>구분자</td><td>{@code breaking change} = {@code breaking-change} = {@code breaking_change}</td></tr>
-     *   <tr><td>접두 분류</td><td>{@code type: enhancement} = {@code enhancement}</td></tr>
+     *   <tr><td><b>분류</b> 접두</td><td>{@code type: enhancement} = {@code enhancement}</td></tr>
+     *   <tr><td><b>영역</b> 접두</td><td>{@code area: architecture} ≠ {@code architecture} — 아래</td></tr>
      * </table>
+     *
+     * <p>🔴 접두를 <b>전부</b> 걷어내지 않는다. {@code area:}·{@code component:} 는 작업
+     * 규모가 아니라 영역을 가리키므로, 지우면 {@code area: architecture} 가 대규모 변경으로
+     * 오인돼 배제된다 — {@link #CLASSIFYING_PREFIXES} 만 걷어낸다.
      *
      * <p>저장소마다 라벨 표기 관례가 다른데 라벨은 규칙 ④ 의 <b>유일한 신호</b>다.
      * 여기가 약하면 배제 규칙과 우선순위가 같이 약해진다.
@@ -273,11 +289,12 @@ public class Issue {
         return labelList().stream().anyMatch(it -> normalizeLabel(it).equals(target));
     }
 
-    /** 대소문자·구분자·{@code 분류:} 접두를 걷어낸 비교용 형태. */
+    /** 대소문자·구분자·<b>분류</b> 접두를 걷어낸 비교용 형태. */
     private static String normalizeLabel(String raw) {
         String value = raw.trim().toLowerCase(Locale.ROOT);
-        int colon = value.lastIndexOf(':');
-        if (colon >= 0 && colon < value.length() - 1) {
+        int colon = value.indexOf(':');
+        if (colon > 0 && colon < value.length() - 1
+                && CLASSIFYING_PREFIXES.contains(value.substring(0, colon).trim())) {
             value = value.substring(colon + 1);
         }
         return SEPARATORS.matcher(value).replaceAll(" ").trim();

@@ -22,9 +22,15 @@ public final class LargeChangeRule implements FilterRule {
     private static final List<String> BREAKING_LABELS = List.of(
             "breaking-change", "breaking");
 
-    /** 설계 단위 작업. 이슈 하나가 여러 PR 로 쪼개진다. */
+    /**
+     * 설계 단위 작업. 이슈 하나가 여러 PR 로 쪼개진다.
+     *
+     * <p>⚠ {@code architecture} 를 넣지 않았다. 저장소에 따라 <b>영역 라벨</b>로 쓰이고
+     * (「아키텍처 영역의 버그」), 그것까지 배제하면 평범한 수정을 잃는다. 배제의 대가는
+     * 되돌릴 수 없으므로 <b>확실한 것만</b> 넣는다 — 라벨 실측 근거가 생기면 늘린다.
+     */
     private static final List<String> LARGE_SCOPE_LABELS = List.of(
-            "epic", "rfc", "design", "architecture");
+            "epic", "rfc", "design");
 
     @Override
     public List<FilterReason> evaluate(Issue issue) {

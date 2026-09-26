@@ -197,6 +197,7 @@ LLM·PR 본문으로 흘러가는 경로**가 같은 문제다 — #7 의 `contr
 |---|---|
 | `breaking-change`·`breaking` 라벨 | `REJECTED` |
 | `epic`·`rfc`·`design` 라벨 | `REJECTED` |
+| ~~`architecture` 라벨~~ | ⚠️ **넣지 않는다** (리뷰 반영) — 저장소에 따라 영역 라벨로 쓰인다. 실측 근거가 생기면 늘린다 |
 | **본문 키워드** | 🔴 **쓰지 않는다** — 「refactor」가 본문에 있다고 대규모가 아니다. 오탐이 크다 |
 
 라벨은 **메인테이너가 붙인 명시적 신호**라 신뢰도가 다르다.
@@ -241,7 +242,8 @@ REJECTED 가 하나라도 있으면        → REJECTED
 |---|---|
 | 대소문자 | 무시 |
 | `breaking change` vs `breaking-change` | 구분자(`-`·`_`·공백) 동일 취급 |
-| `type: enhancement` | `:` 뒤를 접미로 인정 |
+| `type: enhancement` | **분류 접두만** 걷어낸다 (`type`·`kind`·`category`) |
+| `area: architecture` | ⚠️ **걷어내지 않는다** — 영역 접두다. 지우면 「아키텍처 영역의 버그」가 대규모 변경으로 오인돼 배제된다. 오탐의 대가가 되돌릴 수 없는 배제라는 점에서 본문 키워드를 거부한 것과 같은 판단이다 (리뷰 반영) |
 
 ### 생성 파일
 

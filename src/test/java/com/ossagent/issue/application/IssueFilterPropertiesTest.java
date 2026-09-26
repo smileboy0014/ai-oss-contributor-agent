@@ -63,6 +63,19 @@ class IssueFilterPropertiesTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    @DisplayName("설정만으로 PASSED 를 죽일 수 없다")
+    void 전건_보류가_되는_설정은_거부한다() {
+        assertThatThrownBy(() -> new IssueFilterProperties(100_000, 30, 200, 100))
+                .as("본문 길이 하한이 너무 크면 전건이 SHORT_BODY 로 보류되고, "
+                        + "PASSED 가 도달 불가능해져 하류가 보류를 통과로 취급하게 된다")
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> new IssueFilterProperties(200, 0, 200, 100))
+                .as("코멘트 상한이 0 이면 코멘트가 하나라도 달린 이슈가 전부 보류다")
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private static IssueFilterProperties bindFromApplicationYml() throws IOException {
         List<PropertySource<?>> sources = new YamlPropertySourceLoader()
                 .load("application.yml", new ClassPathResource("application.yml"));

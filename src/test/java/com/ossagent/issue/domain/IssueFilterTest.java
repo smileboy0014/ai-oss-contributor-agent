@@ -168,6 +168,18 @@ class IssueFilterTest {
         assertThat(issue(longBody(), List.of("enhancement-request"), 0).hasLabel("enhancement")).isFalse();
     }
 
+    @Test
+    void 영역_접두는_걷어내지_않는다() {
+        Issue areaLabeled = issue(longBody(), List.of("area: design"), 0);
+
+        assertThat(areaLabeled.hasLabel("design"))
+                .as("area:·component: 는 작업 규모가 아니라 영역을 가리킨다. 접두를 전부 걷어내면 "
+                        + "「아키텍처 영역의 버그」가 대규모 변경으로 오인돼 배제되는데, "
+                        + "배제의 대가는 되돌릴 수 없다")
+                .isFalse();
+        assertThat(filter.evaluate(areaLabeled).outcome()).isEqualTo(FilterOutcome.PASSED);
+    }
+
     // ─────────────────────────────────────────────────────────
     // 우선순위 — 배제 규칙이 아니다 (FR-4)
     // ─────────────────────────────────────────────────────────

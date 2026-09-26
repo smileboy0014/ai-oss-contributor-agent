@@ -142,15 +142,28 @@ scan_pattern() {
   local regex="$3"
   local f="$4"
 
+  # $5: 플레이스홀더 면제를 줄 것인가 (기본 yes). 🔴 「키 하나 = 줄 하나」가 성립하는
+  #     검사에만 준다 — 아래 Private Key (JSON) 이 그 반례다.
+  local allow_placeholder="${5:-yes}"
+
   local hits
-  hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
+  if [ "$allow_placeholder" = "yes" ]; then
+    hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
+  else
+    hits=$(read_file "$f" | grep -nE "$regex" || true)
+  fi
   if [ -n "$hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       local lineno="${line%%:*}"
       violations="${violations}\n  ❌ ${label} — ${f}:${lineno}\n     → ${advice}"
       found=$((found+1))
-      placeholder_found=1
+      # 면제를 안 주는 검사는 플레이스홀더 안내도 받지 않는다 — 없는 경로를 안내하지 않는다
+      if [ "$allow_placeholder" = "yes" ]; then
+        placeholder_found=1
+      else
+        pk_found=1
+      fi
     done <<< "$hits"
   fi
 }
@@ -199,18 +212,25 @@ for f in $files; do
   # GCP 서비스계정 키 JSON — 공개 저장소에 가장 흔히 커밋되는 키 「파일」 포맷이다.
   # 헤더가 "private_key": " 뒤에 오므로 아래 줄 단위 검사가 놓친다(대시 앞이 따옴표다).
   #
-  # ⚠ 이 패턴은 scan_pattern 을 쓰므로 <REPLACE_WITH_SECRET_MANAGER> 면제를 상속한다.
-  #   아래 PEM 검사에서 그 면제를 뺀 이유(줄 하나 = 시크릿의 머리)가 여기는 해당하지
-  #   않는다 — GCP SA JSON 은 키 값이 한 줄에 다 들어 있어 「줄 하나 = 시크릿 전체」다.
-  #   🕳 단 그것은 **포맷팅에 기댄 전제**다. pretty-printer 가 값을 줄바꿈하면 깨지고,
-  #   그때는 이 패턴 자체가 헤더 줄만 보게 된다. 실측으로 그 변종은 지금도 놓친다.
+  # 🔴 이 검사는 플레이스홀더 면제를 **받지 않는다** (5번째 인자 no).
+  #
+  #   전에는 scan_pattern 을 쓴다는 이유로 면제를 상속했고, 근거는 「GCP SA JSON 은 키 값이
+  #   한 줄에 다 들어 있어 줄 하나 = 시크릿 전체」였다. **그 전제가 면제와 맞물리면 뒤집힌다.**
+  #
+  #   🕳 실측으로 확인한 우회 (#66) — minify 된 SA JSON 은 모든 필드가 한 줄이므로
+  #   **private_key 는 진짜 값 그대로 두고 다른 필드 하나만 <REPLACE_WITH_SECRET_MANAGER>
+  #   로 바꾸면 줄 전체가 면제**되어 키가 통과했다. 면제가 줄 단위라 생긴 구멍이다.
+  #   PEM 검사에서 면제를 뺀 이유(#58)가 여기에도 그대로 성립했던 것이다.
+  #
+  #   🕳 남은 한계 — **포맷팅에 기댄 전제**는 여전하다. pretty-printer 가 값을 줄바꿈하면
+  #   이 패턴이 헤더 줄만 보게 된다. 실측으로 그 변종은 지금도 놓친다.
   #
   # 덤 — 한 줄 임베드({"private_key":"-----BEGIN…"})도 같이 잡힌다. 아래 줄 단위
   # 검사가 「의도적으로 안 잡는다」고 적은 그 형태인데, 여기서 넓게 잡히는 것은
   # 더 막는 방향이라 그대로 둔다.
   scan_pattern "Private Key (JSON)" \
     "서비스계정 키 파일은 저장소에 두지 않습니다. Secret Manager 또는 Workload Identity 를 쓰세요." \
-    '"private_key"[[:space:]]*:[[:space:]]*"-+ ?BEGIN' "$f"
+    '"private_key"[[:space:]]*:[[:space:]]*"-+ ?BEGIN' "$f" no
 
   # 개인키는 별도 처리 (하이픈으로 시작하는 정규식이 grep 인자로 오해되는 것을 피한다)
   # ⚠ PRIVATE KEY 뒤에 곧바로 대시를 요구하면 PGP 가 통째로 빠져나간다 —
@@ -293,6 +313,8 @@ if [ "$found" -gt 0 ]; then
     echo ""
     echo "  토큰·키 값 검사에 걸린 건:"
     echo "    값을 <REPLACE_WITH_SECRET_MANAGER> 로 바꾸면 통과합니다 (.env.example 에만 남깁니다)."
+    echo "    ⚠ 면제는 **줄 단위**입니다 — 그 줄에 플레이스홀더가 있으면 같은 줄의 진짜 값도"
+    echo "      함께 면제됩니다. 다른 필드가 아니라 **그 값 자체**를 바꾸세요."
   fi
 
   if [ "$pk_found" -eq 1 ]; then
@@ -300,8 +322,10 @@ if [ "$found" -gt 0 ]; then
     echo "  ⚠ 개인키 검사에는 플레이스홀더 경로가 없습니다 — 그것이 의도입니다."
     echo "    플레이스홀더 면제는 한때 있었고, 그 때문에 **진짜 키 파일이 통과했습니다**(#58)."
     echo "    키 파일이라면: 스테이징에서 빼고 .gitignore 에 넣은 뒤 그 키를 폐기·재발급하세요."
-    echo "    문서의 예시 때문에 막혔다면 그것은 이 검사의 알려진 한계입니다."
-    echo "    게이트를 넓히지 말고 이슈로 올려 주세요 — 넓히면 위 회귀가 그대로 재발합니다."
+    echo "    문서의 예시라면(보호할 값이 없다면): 헤더를 줄 시작에서 떼어 놓으세요."
+    echo "      쓸 수 있는 것 — │ 접두 · {@code …} · 코드 펜스 안의 다른 접두."
+    echo "      ⚠ 인용 기호(>)·목록(- *)은 안 됩니다. 이 검사가 그것들까지 잡습니다."
+    echo "    어느 쪽도 아니면 이슈로 올려 주세요 — 화이트리스트를 되살리는 것은 답이 아닙니다."
   fi
 
   echo ""

@@ -146,7 +146,10 @@ class SecretScanScriptTest {
         //    테스트하면 「통과했다」가 화이트리스트 덕인지 애초에 안 물려서인지 구분되지 않는다
         //    (testing-philosophy.md 요구 3 · 샘플의 대표성). 소스에 리터럴로 두면 이 파일이
         //    커밋되지 않으므로 조립이 유일한 방법이기도 하다.
-        String tokenShaped = "ghp_" + "A".repeat(36);
+        //    ⚠ 「"ghp_" + "x".repeat(36)」 형태는 규약이 ❌ 로 든 바로 그 구문이다.
+        //       본질은 조립이 아니라 **가짜임이 값에 드러나는가**이므로 이름을 박는다.
+        //       영숫자뿐이라 gh[pousr]_[A-Za-z0-9]{20,} 에는 그대로 물린다 — 대표성 유지.
+        String tokenShaped = "ghp_" + "NOTAREALTOKENFORTESTSONLY" + "A".repeat(11);
         Files.writeString(repo.resolve("docs-sample.md"),
                 "예: " + tokenShaped + " → 실제 값은 " + PLACEHOLDER + " 로 둡니다\n");
 
@@ -179,6 +182,47 @@ class SecretScanScriptTest {
                         출력:
                         %s""", result.output())
                 .contains("플레이스홀더 경로가 없습니다");
+        assertThat(result.output())
+                .as("""
+                        🔴 거울상도 막는다 — **있는 경로를 없다고** 말하면 안 된다.
+                        문서 예시는 헤더를 줄 시작에서 떼어 놓으면 통과한다(이 파일의 KEY_BLOCK 이
+                        쓰는 방법이다). 그 길을 안 알려주면 막힌 사람에게 남는 선택지가
+                        **화이트리스트**뿐이 된다 — #58 이 간 경로 그대로다.
+                        출력:
+                        %s""", result.output())
+                .contains("줄 시작에서 떼어 놓으세요");
+    }
+
+    /**
+     * 🔴 플레이스홀더 면제는 <b>줄 단위</b>라, 「줄 하나 = 시크릿 전체」인 검사에만 줄 수 있다 — #66.
+     *
+     * <p>{@code Private Key (JSON)} 은 그 전제로 면제를 상속했는데, <b>minify 된 SA JSON 은
+     * 모든 필드가 한 줄</b>이라 전제가 뒤집힌다. {@code private_key} 는 진짜 값 그대로 두고
+     * <b>다른 필드 하나만</b> 플레이스홀더로 바꾸면 줄 전체가 면제되어 <b>키가 통과했다.</b>
+     *
+     * <p>PEM 검사에서 면제를 뺀 이유({@code #58})가 여기에도 그대로 성립했던 것이다.
+     */
+    @Test
+    @DisplayName("다른 필드의 플레이스홀더가 진짜 키를 면제시키지 않는다")
+    void 다른_필드의_플레이스홀더가_진짜_키를_면제시키지_않는다_S4(@TempDir Path repo) throws Exception {
+        String decoy = "{\"type\":\"service_account\","
+                + "\"private_key\":\"-----BEGIN PRIVATE KEY-----\\n"
+                + "NOTAREALKEYFORTESTSONLYNOTAREALKEY\\n-----END PRIVATE KEY-----\\n\","
+                + "\"client_email\":\"" + PLACEHOLDER + "\"}\n";
+        Files.writeString(repo.resolve("sa.json"), decoy);
+
+        ScanResult result = scan(repo, "sa.json");
+
+        assertThat(result.blocked())
+                .as("""
+                        진짜 private_key 가 그대로 있는데 다른 필드의 플레이스홀더 때문에
+                        줄 전체가 면제되면 **키가 커밋된다**. 실측으로 재현했던 구멍이다.
+                        출력:
+                        %s""", result.output())
+                .isTrue();
+        assertThat(result.output())
+                .as("면제가 없는 검사이므로 플레이스홀더 안내를 찍으면 안 된다 — 없는 경로다")
+                .doesNotContain("로 바꾸면 통과합니다");
     }
 
     @Test

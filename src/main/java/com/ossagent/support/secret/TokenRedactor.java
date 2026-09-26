@@ -42,6 +42,36 @@ public final class TokenRedactor {
     private static final Pattern AUTHORIZATION_VALUE =
             Pattern.compile("(?i)(authorization\\s*[:=]\\s*)(bearer|token|basic)\\s+\\S+");
 
+    /**
+     * PEM 개인키 <b>블록 전체</b>. 대상 저장소가 키 파일을 커밋해 뒀고 우리가 그 내용을
+     * 프롬프트에 실으면 여기서 걸린다 — 이슈 #28.
+     *
+     * <p>🔴 <b>헤더 한 줄만 가리면 아무 소용이 없다.</b>
+     * {@code .claude/scripts/secret-scan.sh} 의 대응 패턴은
+     * {@code ^-+BEGIN [A-Z ]*PRIVATE KEY-+} 로 <b>줄 앵커</b>인데, 그것은 「이 파일을
+     * 커밋하지 마라」를 판정하면 충분하기 때문이다. 런타임의 일은 다르다 —
+     * 내보낼 문자열에서 <b>키 본문을 지우는 것</b>이라 {@code BEGIN} 부터
+     * {@code END} 까지를 통째로 먹어야 한다. 그래서 두 곳의 정규식이 다르고,
+     * {@code SecretPatternDriftTest} 가 그 차이를 「샘플이 실제로 가려지는가」로 본다.
+     *
+     * <p>줄 앵커를 쓰지 않는 것도 같은 이유다. {@code ^} 는 {@code MULTILINE} 없이는
+     * <b>입력 전체의 시작</b>을 뜻해, 파일 내용 한가운데 낀 블록을 놓친다 —
+     * 프롬프트에 파일을 싣는 현실 케이스가 정확히 그 모양이다.
+     */
+    private static final Pattern PEM_PRIVATE_KEY_BLOCK = Pattern.compile(
+            "-+BEGIN [A-Z0-9 ]*PRIVATE KEY-+[\\s\\S]*?-+END [A-Z0-9 ]*PRIVATE KEY-+");
+
+    /**
+     * {@code END} 가 없는 개인키 — 잘린 파일·앞부분만 인용된 로그.
+     *
+     * <p>이것이 없으면 <b>블록이 완결되지 않았다는 이유로 키 본문이 그대로 나간다.</b>
+     * 종료 표시가 없으면 어디까지가 키인지 알 수 없으므로 <b>끝까지</b> 가린다.
+     * 반드시 {@link #PEM_PRIVATE_KEY_BLOCK} <b>다음에</b> 적용한다 — 먼저 걸면
+     * 완결된 블록 뒤의 정상 텍스트까지 삼킨다.
+     */
+    private static final Pattern PEM_PRIVATE_KEY_UNTERMINATED =
+            Pattern.compile("-+BEGIN [A-Z0-9 ]*PRIVATE KEY-+[\\s\\S]*");
+
     private TokenRedactor() {
     }
 
@@ -54,7 +84,9 @@ public final class TokenRedactor {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        String result = AUTHORIZATION_VALUE.matcher(text).replaceAll("$1$2 " + MASK);
+        String result = PEM_PRIVATE_KEY_BLOCK.matcher(text).replaceAll(MASK);
+        result = PEM_PRIVATE_KEY_UNTERMINATED.matcher(result).replaceAll(MASK);
+        result = AUTHORIZATION_VALUE.matcher(result).replaceAll("$1$2 " + MASK);
         for (Pattern pattern : TOKEN_PATTERNS) {
             result = pattern.matcher(result).replaceAll(MASK);
         }

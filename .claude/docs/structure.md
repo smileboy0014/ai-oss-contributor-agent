@@ -29,12 +29,15 @@ com.ossagent
 ├── config/                     조립 전용. 비즈니스 코드 금지 (ClockConfig)
 ├── support/                    도메인 없는 공통
 │   └── web/                    ApiExceptionHandler — HTTP 매핑은 여기 한 곳
-├── repository/                 대상 저장소 등록 · 기여 규약 분석
-├── issue/                      이슈 수집 · 필터            (비어 있음)
-├── candidate/                  기여 후보 · 상태머신
-├── agent/                      LLM · 샌드박스 실행         (비어 있음)
+├── repository/                 대상 저장소 등록 · 기여 규약 분석 ✅ (#7)
+├── issue/                      이슈 증분 수집 ✅ (#8) · 규칙 필터 ✅ (#9)
+├── candidate/                  기여 후보 · 상태머신 ✅ (#12)
+├── agent/                      LLM 능력·어댑터 ✅ (#10) / 샌드박스 (비어 있음)
 └── pullrequest/                Fork · Draft PR            (비어 있음)
 ```
+
+⚠️ **✅ 는 「그 코드가 있다」이지 「파이프라인이 흐른다」가 아니다.** 단계를 잇는 트리거가
+아직 없다 — 규칙 필터는 부르는 곳이 없고(#14), 후보 생성도 마찬가지다(#11).
 
 비어 있는 도메인에는 `package-info.java` 만 있다. **경계를 먼저 그어 둔 것**이다 —
 나중에 `candidate` 안에 수집 로직이, `agent` 안에 PR 생성이 섞여 들어가는 것을 구조로 막는다.

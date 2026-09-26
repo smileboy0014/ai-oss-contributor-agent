@@ -67,9 +67,12 @@ class ExternalTextScrubRegistryTest {
     private static final Map<String, Decision> REGISTRY = Map.ofEntries(
             Map.entry("Issue.body", new Decision(Mechanism.FORCED_POINT,
                     "IssueSnapshot compact 생성자 — 모든 이슈 본문이 통과하는 유일한 문 (#28)")),
+            // ⚠️ #9 가 머지되면 이 행은 「갱신」이 아니라 「삭제」다. 그쪽이 마커를 떼고
+            //    컬럼을 TEXT → VARCHAR(512) 로 내리기 때문에 이 필드가 검사 대상에서
+            //    사라진다. 남겨 두면 아래 유령 행 검사가 잡는다 — 그게 정상 동작이다.
             Map.entry("Issue.filterReason", new Decision(Mechanism.PENDING,
-                    "#9 — RejectionReason enum 의 name() 만 들어간다. 자유 텍스트 경로를"
-                            + " 만들지 않는 것이 그쪽 계약이다")),
+                    "#9 — FilterVerdict.reasonCodes()(FilterReason enum 의 name() 을 이은 것)"
+                            + " 만이 이 필드를 채운다. 자유 문자열을 받는 경로가 없다")),
             Map.entry("AgentRun.errorMessage", new Decision(Mechanism.FORCED_POINT,
                     "AgentRun.fail(...) — 이 필드에 대입하는 유일한 지점이고 거기서 redact (#6)")),
             Map.entry("RepositoryPolicy.contributionRules", new Decision(Mechanism.VALUE_TYPE,

@@ -93,13 +93,22 @@ class DockerCodeSandboxTest {
     }
 
     @Test
-    void 로그_수집이_예외로_끝나도_제거한다_S3() {
-        operations.thenLogsThrows(new SandboxTransientException("로그 조회 실패"));
+    void 로그를_못_받아도_제거하고_실행_결과를_지킨다_S3() {
+        operations.thenExitWith(1).thenLogsThrows(new SandboxTransientException("로그 조회 실패"));
 
-        assertThatThrownBy(() -> sandbox.run(execute()))
-                .isInstanceOf(SandboxTransientException.class);
+        SandboxResult result = sandbox.run(execute());
 
         assertThat(operations.calls()).endsWith("remove");
+        assertThat(result.exitCode())
+                .as("""
+                        로그를 못 받았다고 실행 결과를 버리면 exitCode·timedOut·cleanedUp 이
+                        통째로 사라진다. 실행은 이미 끝났는데 그 사실을 호출자가 알 수 없게 된다 —
+                        「빌드 실패는 예외가 아니라 결과다」와 어긋난다.""")
+                .isEqualTo(1);
+        assertThat(result.cleanedUp()).isTrue();
+        assertThat(result.truncated())
+                .as("로그가 없다는 사실은 truncated 로 하류에 전달한다")
+                .isTrue();
     }
 
     @Test

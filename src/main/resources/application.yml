@@ -104,6 +104,8 @@ sandbox:
   warm-timeout: ${SANDBOX_WARM_TIMEOUT_SECONDS:1200}
   # 🔴 kill 직후 로그 조회가 매달리면 finally 의 제거에 도달하지 못해 컨테이너가 남는다
   log-timeout: ${SANDBOX_LOG_TIMEOUT_SECONDS:60}
+  # 메모리 상한이다. 닿으면 더 쌓지 않고 truncated 로 표시한다 — 스트림 자체는
+  # 끝나거나 log-timeout 에 걸릴 때까지 흐른다
   max-output-chars: ${SANDBOX_MAX_OUTPUT_CHARS:200000}
 
 agent:

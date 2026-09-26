@@ -7,6 +7,11 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.ossagent.agent.adapter.out.sandbox.SandboxInstanceId;
 import com.ossagent.agent.adapter.out.sandbox.SandboxProperties;
 import com.ossagent.support.ExternalAdapter;
+import java.io.IOException;
+import java.nio.file.Files;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,6 +30,8 @@ import org.springframework.context.annotation.Configuration;
 @ExternalAdapter
 @EnableConfigurationProperties(SandboxProperties.class)
 public class SandboxConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(SandboxConfig.class);
 
     /**
      * 🔴 <b>API 버전을 명시한다</b> — Q-9b 가 운영 코드로 번진 자리.
@@ -57,6 +64,29 @@ public class SandboxConfig {
                 .build();
 
         return DockerClientImpl.getInstance(config, httpClient);
+    }
+
+    /**
+     * 워크스페이스 루트를 준비한다 — <b>조립 단계에서 한다.</b>
+     *
+     * <p>🔴 설정 객체({@code SandboxProperties})가 이 일을 하지 않는 이유 — record 를
+     * 만드는 것만으로 파일시스템에 쓰게 되고, 그러면 읽기전용 FS·권한 문제에서
+     * <b>샌드박스를 쓰지 않는 경로까지 기동이 막힌다.</b> 위 {@link #dockerClient} 가
+     * 「Docker 가 없다고 기동이 막히면 안 된다」고 한 것과 같은 원칙이다.
+     *
+     * <p>⚠ <b>실패해도 기동을 막지 않는다.</b> 경고만 남기고, 실제 실행 시점에
+     * {@code SandboxWorkspace.under} 가 거부한다 — 그쪽이 더 정확한 자리다.
+     */
+    @Bean
+    public ApplicationRunner sandboxWorkspaceRootInitializer(SandboxProperties properties) {
+        return args -> {
+            try {
+                Files.createDirectories(properties.workspaceRoot());
+            } catch (IOException e) {
+                log.warn("워크스페이스 루트를 만들지 못했다 — 샌드박스 실행이 거부된다 root={}",
+                        properties.workspaceRoot(), e);
+            }
+        };
     }
 
     /**

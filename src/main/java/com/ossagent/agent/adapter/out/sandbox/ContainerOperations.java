@@ -46,8 +46,9 @@ public interface ContainerOperations {
     /**
      * 출력을 모은다.
      *
-     * <p>🔴 {@code maxChars} 는 <b>받은 뒤 자르는 상한이 아니라 스트리밍 중 끊는 지점</b>이다.
-     * 빌드 로그는 수백 MB 가 될 수 있어, 다 받아 놓고 자르면 우리 프로세스가 죽는다.
+     * <p>🔴 {@code maxChars} 는 <b>메모리 상한</b>이다. 빌드 로그는 수백 MB 가 될 수 있어,
+     * 다 받아 놓고 자르면 우리 프로세스가 죽는다. 상한에 닿으면 <b>더 쌓지 않는다</b> —
+     * 스트림 자체는 끝나거나 {@code timeout} 에 걸릴 때까지 흐른다.
      *
      * <p>🔴 {@code timeout} 이 필요한 이유 — kill 직후 로그 조회가 매달릴 수 있다.
      * 여기서 멈추면 {@code finally} 의 {@link #remove} 에 도달하지 못해

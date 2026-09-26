@@ -86,7 +86,7 @@ public class DockerCodeSandbox implements CodeSandbox {
 
             // kill 뒤에도 로그를 모은다 — 무엇을 하다 멈췄는지가 진단의 전부다.
             // ⚠ 여기서 매달리면 아래 제거에 도달하지 못하므로 자체 타임아웃이 있다
-            logs = operations.logs(containerId, properties.maxOutputChars(), properties.logTimeout());
+            logs = collectLogsQuietly(containerId);
         } finally {
             cleanedUp = removeQuietly(containerId);
         }
@@ -98,6 +98,26 @@ public class DockerCodeSandbox implements CodeSandbox {
         //    SandboxResult.toString 이 길이만 남기도록 만들어져 있다
         log.info("샌드박스 실행 완료 stage={} {}", command.getClass().getSimpleName(), result);
         return result;
+    }
+
+    /**
+     * 🔴 로그를 못 받았다고 <b>실행 결과를 버리지 않는다.</b>
+     *
+     * <p>여기서 예외를 전파하면 {@link SandboxResult} 자체가 만들어지지 않아
+     * {@code exitCode}·{@code timedOut}·{@code cleanedUp} 이 통째로 사라진다.
+     * <b>실행은 이미 끝났는데</b> 그 사실을 호출자가 알 수 없게 되는 것이다 —
+     * 「빌드 실패는 예외가 아니라 결과다」라는 이 클래스의 전제와 어긋난다.
+     *
+     * <p>로그가 없는 것은 {@code truncated} 로 표시해 하류가 알게 한다.
+     */
+    private ContainerOperations.ContainerLogs collectLogsQuietly(String containerId) {
+        try {
+            return operations.logs(containerId, properties.maxOutputChars(), properties.logTimeout());
+        } catch (RuntimeException e) {
+            log.warn("로그를 수집하지 못했다 containerId={} — 실행 결과는 그대로 돌려준다",
+                    containerId, e);
+            return new ContainerOperations.ContainerLogs("", true);
+        }
     }
 
     /**

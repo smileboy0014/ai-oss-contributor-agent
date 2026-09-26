@@ -80,7 +80,14 @@ public record SandboxWorkspace(Path path) {
     /**
      * {@code sandbox.workspace-root} 자체를 검증한다 — <b>기동 시점</b>에 부른다.
      *
-     * <p>미설정·상대경로·부재를 런타임까지 끌고 가면, 첫 샌드박스 실행에서야 드러난다.
+     * <p>미설정·상대경로를 런타임까지 끌고 가면 첫 샌드박스 실행에서야 드러난다.
+     *
+     * <p>⚠ <b>디렉토리를 만들지도, 존재를 확인하지도 않는다.</b> 순수 검증이다 —
+     * 설정 객체를 만드는 것만으로 파일시스템에 쓰면, 읽기전용 FS·권한 문제에서
+     * <b>샌드박스를 쓰지 않는 경로까지 기동이 막힌다.</b> {@code SandboxConfig} 가
+     * 「Docker 가 없다고 기동이 막히면 안 된다」고 한 것과 같은 원칙이다.
+     * 생성은 조립 단계가 하고, 실패해도 기동을 막지 않는다 — 그때는 {@link #under}
+     * 가 실행 시점에 거부한다.
      */
     public static Path requireValidRoot(Path root) {
         if (root == null || root.toString().isBlank()) {
@@ -92,19 +99,33 @@ public record SandboxWorkspace(Path path) {
         // 상대경로는 작업 디렉토리에 따라 가리키는 곳이 달라진다. 기동 시점에 절대경로로
         // 확정해 두면 그 흔들림이 사라진다 — 운영자에게 절대경로를 강요할 이유는 없다
         Path absolute = root.toAbsolutePath().normalize();
-        try {
-            // 없으면 만든다. 「루트가 없어서 기동 실패」는 운영자에게 아무것도 알려주지 않고,
-            // 무엇보다 이 디렉토리는 우리가 소유하는 작업 공간이다
-            Files.createDirectories(absolute);
-        } catch (IOException e) {
+
+        // 🔴 blank 를 막은 논리를 값에도 그대로 적용한다. `/` 나 홈을 루트로 주면
+        //    「모든 경로가 루트 하위」가 blank 일 때와 똑같이 성립한다 —
+        //    같은 무력화가 다른 값으로 들어오는 것을 막지 않으면 앞의 검사가 무의미하다
+        if (absolute.getNameCount() < MIN_ROOT_DEPTH) {
             throw new SandboxPermanentException(
-                    "sandbox.workspace-root 를 만들 수 없다 (S-3)");
+                    "sandbox.workspace-root 가 너무 얕다 — 시스템 디렉토리를 통째로 내주게 된다 (S-3)");
         }
-        Path resolved = realPathOf(absolute);
-        if (!Files.isDirectory(resolved)) {
-            throw new SandboxPermanentException("sandbox.workspace-root 가 디렉토리가 아니다 (S-3)");
+        Path home = homeDirectory();
+        if (home != null && absolute.equals(home)) {
+            throw new SandboxPermanentException(
+                    "sandbox.workspace-root 를 홈 디렉토리로 둘 수 없다 (S-3)");
         }
-        return resolved;
+        return absolute;
+    }
+
+    /**
+     * 루트가 가져야 할 최소 깊이.
+     *
+     * <p>{@code /} (0) · {@code /tmp} (1) 은 거부하고 {@code /tmp/oss-agent} (2)부터 받는다.
+     * 정확한 선이 있는 것은 아니지만, <b>한 단계짜리 경로는 대개 시스템 디렉토리</b>다.
+     */
+    private static final int MIN_ROOT_DEPTH = 2;
+
+    private static Path homeDirectory() {
+        String home = System.getProperty("user.home");
+        return home == null || home.isBlank() ? null : Path.of(home).toAbsolutePath().normalize();
     }
 
     /** 컨테이너 안에서의 마운트 지점. 고정이다 — 대상 저장소가 정하지 않는다. */

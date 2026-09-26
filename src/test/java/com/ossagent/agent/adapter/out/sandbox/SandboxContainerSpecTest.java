@@ -172,6 +172,38 @@ class SandboxContainerSpecTest {
     }
 
     @Test
+    void 루트가_시스템_디렉토리거나_홈이면_거부한다_S3() {
+        // 🔴 blank 를 막은 논리를 값에도 적용한다. `/` 나 홈을 루트로 주면
+        //    「모든 경로가 루트 하위」가 blank 일 때와 똑같이 성립한다 —
+        //    같은 무력화가 다른 값으로 들어오는 것을 막지 않으면 앞 검사가 무의미하다
+        assertThatThrownBy(() -> SandboxWorkspace.requireValidRoot(Path.of("/")))
+                .isInstanceOf(SandboxPermanentException.class);
+        assertThatThrownBy(() -> SandboxWorkspace.requireValidRoot(Path.of("/tmp")))
+                .as("한 단계짜리 경로는 대개 시스템 디렉토리다")
+                .isInstanceOf(SandboxPermanentException.class);
+        assertThatThrownBy(() -> SandboxWorkspace.requireValidRoot(
+                Path.of(System.getProperty("user.home"))))
+                .as("홈을 내주면 .ssh·.docker/config.json 의 부모가 전부 루트 하위가 된다")
+                .isInstanceOf(SandboxPermanentException.class);
+        assertThatThrownBy(() -> SandboxWorkspace.requireValidRoot(Path.of("")))
+                .isInstanceOf(SandboxPermanentException.class);
+    }
+
+    @Test
+    void 루트_검증은_파일시스템에_쓰지_않는다_S3() {
+        Path notYet = root.resolve("a").resolve("b").resolve("nonexistent");
+
+        Path validated = SandboxWorkspace.requireValidRoot(notYet);
+
+        assertThat(validated).isAbsolute();
+        assertThat(Files.exists(notYet))
+                .as("설정 객체를 만드는 것만으로 파일시스템에 쓰면, 읽기전용 FS·권한 문제에서 "
+                        + "샌드박스를 쓰지 않는 경로까지 기동이 막힌다. 생성은 조립 단계가 하고, "
+                        + "실패해도 기동을 막지 않는다")
+                .isFalse();
+    }
+
+    @Test
     void 루트_자체는_워크스페이스가_될_수_없다_S3() {
         assertThatThrownBy(() -> SandboxWorkspace.under(root, props.workspaceRoot()))
                 .as("루트를 통째로 내주면 다른 후보의 워크스페이스가 함께 노출된다")

@@ -9,9 +9,10 @@ import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.Network;
 import com.ossagent.agent.domain.SandboxTransientException;
 import com.ossagent.support.ExternalAdapter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -103,38 +104,42 @@ public class DockerContainerOperations implements ContainerOperations {
             return WaitOutcome.timeout();
         } catch (DockerException | IllegalStateException e) {
             throw daemonFailure("컨테이너 대기", e);
-        } catch (Exception e) {
+        } catch (IOException e) {
+            // try-with-resources 의 close 가 던지는 것. 넓게 잡지 않는다 —
+            // 위 javadoc 이 경고한 것을 여기서 어기면 NPE 가 「일시 장애」로 위장돼
+            // 재시도 루프를 돈다. RuntimeException 은 그대로 전파시킨다
             throw daemonFailure("컨테이너 대기", e);
         }
     }
 
     /**
-     * 🔴 <b>스트리밍 중 끊는다.</b> 다 받아 놓고 자르면 수백 MB 로그에 우리 프로세스가 죽는다.
+     * 🔴 <b>상한에 닿으면 더 쌓지 않는다.</b> 다 받아 놓고 자르면 수백 MB 로그에 우리
+     * 프로세스가 죽는다 — 막아야 할 것은 <b>메모리</b>이고, 그것이 여기서 유계가 된다.
+     *
+     * <p>⚠ <b>스트림 자체를 끊지는 않는다.</b> 끊으려면 콜백 안에서 {@code onComplete()} 를
+     * 불러야 하는데, docker-java 의 그것은 내부적으로 {@code close()} 다 — <b>리더 스레드가
+     * 자기 스트림을 닫는</b> 꼴이라 거기서 난 {@code IOException} 이
+     * {@code awaitCompletion} 에서 다시 튀어나온다. 그러면 <b>정상적인 절단마다
+     * 경고와 스택트레이스가 찍힌다.</b> 시간은 아래 타임아웃이 이미 묶고 있으므로,
+     * 검증하지 못한 동작으로 조금 더 빨리 끊는 것보다 이쪽이 낫다.
      *
      * <p>🔴 자체 타임아웃이 있는 이유 — kill 직후 조회가 매달릴 수 있고, 여기서 멈추면
      * 호출자의 {@code finally} 제거에 도달하지 못해 컨테이너가 남는다.
      */
     @Override
     public ContainerLogs logs(String containerId, int maxChars, Duration timeout) {
-        StringBuilder buffer = new StringBuilder();
-        AtomicBoolean truncated = new AtomicBoolean(false);
+        // 🔴 콜백 스레드가 쓰고 이 스레드가 읽는다. 정상 완료는 래치가 happens-before 를
+        //    주지만 타임아웃·인터럽트 경로에서는 콜백이 아직 쓰는 중일 수 있다 —
+        //    그때 StringBuilder 를 쓰면 깨진 출력이나 IndexOutOfBounds 가 나고,
+        //    증상은 「가끔 이상하다」로만 보인다
+        LogBuffer buffer = new LogBuffer(maxChars);
 
         ResultCallback.Adapter<Frame> callback = new ResultCallback.Adapter<>() {
             @Override
             public void onNext(Frame frame) {
-                if (truncated.get()) {
-                    return;
-                }
-                String chunk = new String(frame.getPayload());
-                int room = maxChars - buffer.length();
-                if (chunk.length() >= room) {
-                    buffer.append(chunk, 0, Math.max(room, 0));
-                    truncated.set(true);
-                    // 상한에 닿으면 더 받지 않는다 — 스트림을 끊는 것이 핵심이다
-                    onComplete();
-                    return;
-                }
-                buffer.append(chunk);
+                // 여기서 스트림을 끊지 않는다 — 위 javadoc 참조.
+                // 상한을 넘은 프레임은 버려지므로 메모리는 더 늘지 않는다
+                buffer.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
             }
         };
 
@@ -142,18 +147,63 @@ public class DockerContainerOperations implements ContainerOperations {
                 .withStdOut(true)
                 .withStdErr(true)
                 .exec(callback)) {
-            open.awaitCompletion(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (!open.awaitCompletion(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                // 🔴 타임아웃도 「잘린 것」이다. 여기서 표시하지 않으면 잘린 로그가
+                //    「완전한 로그」로 하류에 가고, LLM 이 그것을 전부로 읽고
+                //    「테스트가 통과했다」로 판단하면 게이트가 무력해진다
+                log.warn("로그 수집이 상한 시간 안에 끝나지 않았다 containerId={}", containerId);
+                buffer.markTruncated();
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            truncated.set(true);
+            buffer.markTruncated();
         } catch (DockerException | IllegalStateException e) {
             throw daemonFailure("로그 수집", e);
-        } catch (Exception e) {
+        } catch (IOException e) {
             // 로그를 못 받은 것이 실행 결과를 버릴 이유는 아니다 — 잘린 것으로 표시한다
-            log.warn("로그 수집이 끝나지 않았다 containerId={}", containerId, e);
-            truncated.set(true);
+            log.warn("로그 수집을 닫는 중 오류 containerId={}", containerId, e);
+            buffer.markTruncated();
         }
-        return new ContainerLogs(buffer.toString(), truncated.get());
+        return buffer.toLogs();
+    }
+
+    /**
+     * 콜백 스레드와 호출 스레드가 함께 보는 버퍼.
+     *
+     * <p>🔴 동기화가 필요한 이유는 성능이 아니라 <b>가시성</b>이다. 타임아웃·인터럽트로
+     * 빠져나올 때 콜백 스레드가 아직 쓰고 있을 수 있고, 그 상태에서 읽으면 깨진 문자열이
+     * 판정 입력이 된다.
+     */
+    private static final class LogBuffer {
+
+        private final StringBuilder buffer = new StringBuilder();
+        private final int maxChars;
+        private boolean truncated;
+
+        LogBuffer(int maxChars) {
+            this.maxChars = maxChars;
+        }
+
+        synchronized void append(String chunk) {
+            if (truncated) {
+                return;
+            }
+            int room = maxChars - buffer.length();
+            if (chunk.length() >= room) {
+                buffer.append(chunk, 0, Math.max(room, 0));
+                truncated = true;
+                return;
+            }
+            buffer.append(chunk);
+        }
+
+        synchronized void markTruncated() {
+            truncated = true;
+        }
+
+        synchronized ContainerLogs toLogs() {
+            return new ContainerLogs(buffer.toString(), truncated);
+        }
     }
 
     @Override

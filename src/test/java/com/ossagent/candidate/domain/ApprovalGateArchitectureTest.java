@@ -10,8 +10,11 @@ import static com.tngtech.archunit.core.domain.JavaClass.Predicates.belongToAnyO
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 
 import com.ossagent.candidate.application.SelectCandidateUseCase;
+import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.PolicyClearance;
 import com.ossagent.repository.domain.RepositoryCoordinates;
+import com.ossagent.repository.domain.RepositoryContext;
+import com.ossagent.repository.domain.SelectedFile;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaField;
@@ -290,9 +293,32 @@ class ApprovalGateArchitectureTest {
                 .should().dependOnClassesThat(
                         resideInAPackage("com.ossagent.repository.domain..")
                                 .and(not(belongToAnyOf(
-                                        PolicyClearance.class, RepositoryCoordinates.class))))
-                .as("값 타입(PolicyClearance · RepositoryCoordinates)만 예외다 — "
-                        + "엔티티가 넘어오면 컴파일 결합이 생겨 떼어낼 때 코드를 고쳐야 한다")
+                                        PolicyClearance.class, RepositoryCoordinates.class,
+                                        // ── #16 구현 계획이 쓰는 값들 ───────────────────
+                                        // 전부 record 다. @Entity 가 아니므로 떼어낼 때
+                                        // 고칠 것이 없다 — 규칙이 허용하려던 바로 그 종류.
+                                        //
+                                        // ⚠ 허용 목록이라 모르는 타입은 기본이 차단이다.
+                                        //    여기 줄을 더하는 것이 곧 「값임을 확인했다」는
+                                        //    선언이고, 그 확인이 리뷰에 보인다.
+                                        //
+                                        // ⚠ 🔴 직접 의존하는 것만 올린다. RepositoryContext 가
+                                        //    품는 ContextBudget 등은 candidate 가 이름을 부르지
+                                        //    않아 컴파일 결합이 없다 — 없는 결합을 목록에 올리면
+                                        //    「있는 결합」처럼 읽히고, dependOnClassesThat 이
+                                        //    직접 의존만 보므로 죽은 줄이 된다.
+                                        //    나중에 candidate 가 실제로 부르기 시작하면 그때
+                                        //    빌드가 빨개진다 — 목록은 그렇게 자기유지된다
+                                        ContributionConstraints.class,
+                                        RepositoryContext.class,
+                                        // 🔴 SelectedFile 은 대상 저장소 「파일 내용」을 든다.
+                                        //    값이라 규율 ④ 예외인 것과, 스크럽된 값이라 건너가도
+                                        //    안전한 것은 다른 보증이다. 후자는 #15 가 세웠다 —
+                                        //    compact 생성자가 TokenRedactor 를 강제하고, String 을
+                                        //    그대로 받는 생성 경로가 없다. 둘 다 성립해서 올린다
+                                        SelectedFile.class))))
+                .as("값 타입만 예외다 — 엔티티가 넘어오면 컴파일 결합이 생겨 떼어낼 때 코드를 고쳐야 한다. "
+                        + "새 타입을 더할 때는 그것이 정말 값(record·enum)인지 먼저 본다")
                 .check(PRODUCTION);
     }
 

@@ -39,7 +39,12 @@ class CandidateStatusTest {
         EXPECTED.put(DISCOVERED, Set.of(ANALYZING));
         EXPECTED.put(ANALYZING, Set.of(ANALYZED, FAILED));
         EXPECTED.put(ANALYZED, Set.of(SELECTED, REJECTED));
-        EXPECTED.put(SELECTED, Set.of(IMPLEMENTING, REJECTED));
+        // FAILED 는 「구현 계획을 세우지 못했다」다 — #16.
+        // 계획 수립은 IMPLEMENTING 전이 앞이라(PLAN 시점 attempt 가 0 이어야 한다),
+        // 계획 재생성 상한이 소진되는 시점의 상태가 SELECTED 다.
+        // 이 전이가 없으면 후보가 거기 박혀 「사람에게 넘기는 신호」가 없다 — S-6.
+        // ANALYZING → FAILED 가 같은 이유로 열려 있다
+        EXPECTED.put(SELECTED, Set.of(IMPLEMENTING, REJECTED, FAILED));
         EXPECTED.put(IMPLEMENTING, Set.of(TESTING, FAILED));
         EXPECTED.put(TESTING, Set.of(REVIEWING, IMPLEMENTING, FAILED));
         EXPECTED.put(REVIEWING, Set.of(READY_FOR_PR, IMPLEMENTING, FAILED));

@@ -44,8 +44,19 @@ public enum CandidateStatus {
         ANALYZED.allowedNext = setOf(SELECTED, REJECTED);
 
         // SELECTED → REJECTED 는 사람의 선택 취소다 — Q-5 확정 ②.
-        // SELECTED 는 종단이 아니므로 「종단에서 나가는 전이 금지」에 걸리지 않는다
-        SELECTED.allowedNext = setOf(IMPLEMENTING, REJECTED);
+        // SELECTED 는 종단이 아니므로 「종단에서 나가는 전이 금지」에 걸리지 않는다.
+        //
+        // 🔴 SELECTED → FAILED 는 「구현 계획을 세우지 못했다」다 — #16.
+        //    계획 수립은 IMPLEMENTING 전이 「앞」에서 일어난다(ANALYZE·PLAN 행의 attempt 가
+        //    1 인데 candidate.attempt 는 0 이어야 하기 때문이다 — ContributionCandidate 참조).
+        //    그래서 계획 재생성 상한이 소진되는 시점의 상태가 SELECTED 이고, 이 전이가 없으면
+        //    후보가 거기 영구히 박혀 「사람에게 넘기는 신호」가 발생하지 않는다 (S-6).
+        //    ANALYZING → FAILED 가 같은 이유로 열려 있다 — 선례 그대로다.
+        //
+        //    ⚠ REJECTED 가 아니라 FAILED 다. REJECTED 는 Q-5 가 「사람 행위로만」이라고 못 박은
+        //    상태라, 기계가 그리로 보내면 「선택 취소는 사람만」이 무너진다.
+        //    「사람이 안 고른 것」이 아니라 「기계가 못 한 것」이다
+        SELECTED.allowedNext = setOf(IMPLEMENTING, REJECTED, FAILED);
 
         IMPLEMENTING.allowedNext = setOf(TESTING, FAILED);
 

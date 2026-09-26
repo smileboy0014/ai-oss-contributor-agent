@@ -1,6 +1,7 @@
 package com.ossagent.support.secret;
 
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -44,34 +45,37 @@ public final class TokenRedactor {
             Pattern.compile("(?i)(authorization\\s*[:=]\\s*)(bearer|token|basic)\\s+\\S+");
 
     /**
-     * PEM 개인키 <b>블록 전체</b>. 대상 저장소가 키 파일을 커밋해 뒀고 우리가 그 내용을
-     * 프롬프트에 실으면 여기서 걸린다 — 이슈 #28.
+     * URL 에 박힌 자격증명 — {@code https://user:p4ssw0rd@host/path}.
      *
-     * <p>🔴 <b>헤더 한 줄만 가리면 아무 소용이 없다.</b>
-     * {@code .claude/scripts/secret-scan.sh} 의 대응 패턴은
-     * {@code ^-+BEGIN [A-Z ]*PRIVATE KEY-+} 로 <b>줄 앵커</b>인데, 그것은 「이 파일을
-     * 커밋하지 마라」를 판정하면 충분하기 때문이다. 런타임의 일은 다르다 —
-     * 내보낼 문자열에서 <b>키 본문을 지우는 것</b>이라 {@code BEGIN} 부터
-     * {@code END} 까지를 통째로 먹어야 한다. 그래서 두 곳의 정규식이 다르고,
-     * {@code SecretPatternDriftTest} 가 그 차이를 「샘플이 실제로 가려지는가」로 본다.
-     *
-     * <p>줄 앵커를 쓰지 않는 것도 같은 이유다. {@code ^} 는 {@code MULTILINE} 없이는
-     * <b>입력 전체의 시작</b>을 뜻해, 파일 내용 한가운데 낀 블록을 놓친다 —
-     * 프롬프트에 파일을 싣는 현실 케이스가 정확히 그 모양이다.
+     * <p>이 클래스의 javadoc 이 존재 이유로 든 것이 바로 <b>예외 메시지에 실려 나오는 요청
+     * URL</b> 인데, 정작 URL <b>안에</b> 자격증명이 박힌 형태를 오래 놓치고 있었다.
+     * 대상 저장소의 CI 설정·문서에 흔한 모양이다.
      */
-    private static final Pattern PEM_PRIVATE_KEY_BLOCK = Pattern.compile(
-            "-+BEGIN [A-Z0-9 ]*PRIVATE KEY-+[\\s\\S]*?-+END [A-Z0-9 ]*PRIVATE KEY-+");
+    private static final Pattern URL_CREDENTIALS =
+            Pattern.compile("(?i)([a-z][a-z0-9+.\\-]*://)[^\\s/@:]+:[^\\s/@]+@");
 
     /**
-     * {@code END} 가 없는 개인키 — 잘린 파일·앞부분만 인용된 로그.
+     * PEM 계열 개인키의 시작 줄.
      *
-     * <p>이것이 없으면 <b>블록이 완결되지 않았다는 이유로 키 본문이 그대로 나간다.</b>
-     * 종료 표시가 없으면 어디까지가 키인지 알 수 없으므로 <b>끝까지</b> 가린다.
-     * 반드시 {@link #PEM_PRIVATE_KEY_BLOCK} <b>다음에</b> 적용한다 — 먼저 걸면
-     * 완결된 블록 뒤의 정상 텍스트까지 삼킨다.
+     * <p>⚠️ <b>{@code PRIVATE KEY} 뒤에 곧바로 대시를 요구하면 PGP 가 통째로 샌다</b> —
+     * {@code -----BEGIN PGP PRIVATE KEY BLOCK-----} 는 사이에 {@code  BLOCK} 이 낀다.
+     * 대시와 {@code BEGIN} 사이의 공백도 마찬가지다 — RFC4716/SSH2 는
+     * {@code ---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----} 로 쓴다.
+     * 소문자 헤더까지 포함해 {@code (?i)} 로 받는다.
      */
-    private static final Pattern PEM_PRIVATE_KEY_UNTERMINATED =
-            Pattern.compile("-+BEGIN [A-Z0-9 ]*PRIVATE KEY-+[\\s\\S]*");
+    private static final Pattern PEM_HEADER =
+            Pattern.compile("(?i)-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-+");
+
+    /** 같은 형식의 종료 줄. */
+    private static final Pattern PEM_FOOTER =
+            Pattern.compile("(?i)-+ ?END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-+");
+
+    /** 키 본문으로 볼 수 있는 줄 — base64 한 덩어리. 공백이 없다는 것이 산문과의 차이다. */
+    private static final Pattern PEM_BODY_LINE = Pattern.compile("[A-Za-z0-9+/=]+[ \\t]*");
+
+    /** {@code Proc-Type: 4,ENCRYPTED} · {@code DEK-Info: …} — 암호화된 PEM 의 머리말. */
+    private static final Pattern PEM_BODY_HEADER_LINE =
+            Pattern.compile("[A-Za-z][A-Za-z0-9-]*:.*");
 
     private TokenRedactor() {
     }
@@ -85,13 +89,111 @@ public final class TokenRedactor {
         if (text == null || text.isEmpty()) {
             return text;
         }
-        String result = PEM_PRIVATE_KEY_BLOCK.matcher(text).replaceAll(MASK);
-        result = PEM_PRIVATE_KEY_UNTERMINATED.matcher(result).replaceAll(MASK);
+        String result = redactPemBlocks(text);
         result = AUTHORIZATION_VALUE.matcher(result).replaceAll("$1$2 " + MASK);
+        result = URL_CREDENTIALS.matcher(result).replaceAll("$1" + MASK + "@");
         for (Pattern pattern : TOKEN_PATTERNS) {
             result = pattern.matcher(result).replaceAll(MASK);
         }
         return result;
+    }
+
+    /**
+     * PEM 개인키 블록을 <b>줄 단위로</b> 걷어낸다.
+     *
+     * <h2>왜 정규식 한 방이 아닌가 — 둘 다 실측으로 드러난 결함이다</h2>
+     *
+     * <p><b>① 2차식 폭발.</b> 원래 {@code BEGIN…[\s\S]*?…END} 였는데, {@code END} 없는
+     * {@code BEGIN} 이 여럿이면 <b>헤더마다 입력 끝까지 재스캔</b>한다. 실측으로
+     * 8KB 294ms → 33KB 4.4초 → <b>131KB 76초</b>였다. GitHub 이슈 본문 상한이 65,536자이고
+     * 이 코드는 {@code IssueSnapshot} 을 통해 <b>수집되는 모든 이슈</b>가 지나는 자리다.
+     * 아래 스캐너는 각 문자를 한 번만 본다.
+     *
+     * <p><b>② 정상 본문 파괴.</b> {@code END} 가 없으면 입력 끝까지 가렸다. 그래서
+     * 「{@code -----BEGIN RSA PRIVATE KEY-----} 를 커밋하지 마세요」라고 적힌 이슈 본문이
+     * <b>그 지점부터 통째로 잘린 채 DB 에 영속</b>됐다. 원문 복구 경로는 없다.
+     * 이제는 <b>키처럼 생긴 줄까지만</b> 먹고 멈춘다 — 산문에는 공백이 있고 base64 에는 없다.
+     *
+     * <p>⚠️ 과차단은 「안전한 방향」이라고만 볼 수 없다. 정상 텍스트를 망가뜨리면
+     * 분석 품질이 떨어지고, 결국 <b>스크럽을 끄고 싶어진다.</b> 그것이 진짜 위험이다.
+     */
+    private static String redactPemBlocks(String text) {
+        Matcher header = PEM_HEADER.matcher(text);
+        if (!header.find()) {
+            return text;
+        }
+
+        StringBuilder out = new StringBuilder(text.length());
+        int cursor = 0;
+        do {
+            out.append(text, cursor, header.start()).append(MASK);
+            cursor = endOfKeyBlock(text, header.end());
+        } while (cursor < text.length() && header.find(cursor));
+
+        return out.append(text, cursor, text.length()).toString();
+    }
+
+    /**
+     * 헤더 바로 뒤에서 시작해 키 블록이 끝나는 위치를 찾는다.
+     *
+     * <p>끝은 셋 중 하나다 — 종료 줄 · 키 본문이 아닌 첫 줄의 <b>앞</b> · 입력의 끝.
+     */
+    private static int endOfKeyBlock(String text, int afterHeader) {
+        int headerLineEnd = lineEnd(text, afterHeader);
+
+        // 한 줄짜리 형식: 헤더와 같은 줄에 종료 표시가 온다
+        Matcher footer = PEM_FOOTER.matcher(text).region(afterHeader, headerLineEnd);
+        if (footer.find()) {
+            return footer.end();
+        }
+
+        int cursor = headerLineEnd;
+        while (cursor < text.length()) {
+            int start = nextLineStart(text, cursor);
+            int end = lineEnd(text, start);
+            String line = text.substring(start, end);
+
+            if (PEM_FOOTER.matcher(line).find()) {
+                return end;
+            }
+            if (!isKeyBodyLine(line)) {
+                return cursor;   // 이 줄은 남긴다 — 줄바꿈 앞에서 멈춘다
+            }
+            cursor = end;
+        }
+        return cursor;
+    }
+
+    /**
+     * 키 본문으로 볼 수 있는 줄인가.
+     *
+     * <p>빈 줄을 허용하는 이유 — 암호화된 PEM 은 {@code Proc-Type} 머리말과 base64 본문
+     * 사이에 <b>빈 줄</b>을 둔다(RFC 1421). 막으면 정작 키 본문이 그대로 나간다.
+     */
+    private static boolean isKeyBodyLine(String line) {
+        return line.isBlank()
+                || PEM_BODY_LINE.matcher(line).matches()
+                || PEM_BODY_HEADER_LINE.matcher(line).matches();
+    }
+
+    /** {@code from} 이후 첫 줄바꿈의 위치. 없으면 입력의 끝. */
+    private static int lineEnd(String text, int from) {
+        for (int i = from; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\n' || c == '\r') {
+                return i;
+            }
+        }
+        return text.length();
+    }
+
+    /** 줄바꿈 위치에서 다음 줄의 시작으로. {@code \r\n} 을 한 덩어리로 본다. */
+    private static int nextLineStart(String text, int lineEnd) {
+        if (lineEnd < text.length() && text.charAt(lineEnd) == '\r'
+                && lineEnd + 1 < text.length() && text.charAt(lineEnd + 1) == '\n') {
+            return lineEnd + 2;
+        }
+        return Math.min(lineEnd + 1, text.length());
     }
 
     /**

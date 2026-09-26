@@ -115,7 +115,10 @@ for f in $files; do
     'sk-ant-[A-Za-z0-9_-]{20,}' "$f"
 
   # 개인키는 별도 처리 (하이픈으로 시작하는 정규식이 grep 인자로 오해되는 것을 피한다)
-  pk_hits=$(read_file "$f" | grep -nE '^-+BEGIN [A-Z ]*PRIVATE KEY-+' || true)
+  # ⚠ PRIVATE KEY 뒤에 곧바로 대시를 요구하면 PGP 가 통째로 빠져나간다 —
+  #   -----BEGIN PGP PRIVATE KEY BLOCK----- 은 사이에 「 BLOCK」이 낀다.
+  #   대시와 BEGIN 사이 공백도 마찬가지다(RFC4716/SSH2: ---- BEGIN SSH2 … ----).
+  pk_hits=$(read_file "$f" | grep -nE '^-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?' || true)
   if [ -n "$pk_hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue

@@ -32,8 +32,26 @@ import java.util.Set;
  */
 public final class SecretFilePolicy {
 
-    /** 확장자 — 자격증명 컨테이너. 내용 형식이 제각각이라 패턴 스크럽으로 덮이지 않는다. */
-    private static final Set<String> SECRET_EXTENSIONS = Set.of("pem", "key", "p12");
+    /**
+     * 확장자 — 자격증명 컨테이너. 내용 형식이 제각각이라 패턴 스크럽으로 덮이지 않는다.
+     *
+     * <p>⚠️ 이슈가 예시로 든 셋({@code pem}·{@code key}·{@code p12})만 두면
+     * <b>바이너리 키스토어가 통째로 빠진다.</b> 「소비자가 없어 계약이 미정」이라는 사유는
+     * <b>API 모양</b>에 대한 것이지 <b>목록 내용</b>에 대한 것이 아니다 — 목록은 소비자와
+     * 무관하게 지금 맞출 수 있고, {@code Set.of} 에 리터럴을 더하는 변경이다.
+     */
+    private static final Set<String> SECRET_EXTENSIONS = Set.of(
+            "pem", "key", "p12", "p8", "pfx", "jks", "keystore", "ppk", "asc", "gpg");
+
+    /**
+     * 확장자가 <b>없는</b> 개인키 파일. SSH 가 만드는 기본 이름이다.
+     *
+     * <p>{@code id_rsa} 에는 확장자가 없어 위 규칙이 닿지 않는다. 공개키({@code .pub})까지
+     * 함께 배제되지만 그쪽은 손해가 없다 — 프롬프트에 공개키가 필요할 일이 없다.
+     */
+    private static final Set<String> SECRET_FILE_NAMES = Set.of(
+            "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+            ".netrc", "_netrc", ".npmrc", ".pypirc", ".git-credentials", ".dockercfg");
 
     /** 디렉토리 이름 — 경로 어디에 있어도 배제한다. */
     private static final Set<String> SECRET_DIRECTORIES = Set.of("secrets");
@@ -61,7 +79,8 @@ public final class SecretFilePolicy {
      * <p>{@link #DOTFILE_PREFIXES} 와 규칙이 다른 것은 일관성 부족이 아니라,
      * 점 파일은 이름공간이고 단어는 클래스 이름에 나타나기 때문이다.
      */
-    private static final List<String> SECRET_NAME_PREFIXES = List.of("credentials");
+    private static final List<String> SECRET_NAME_PREFIXES =
+            List.of("credentials", "serviceaccount");
 
     private static final List<String> NAME_SEPARATORS = List.of(".", "-", "_");
 
@@ -96,6 +115,11 @@ public final class SecretFilePolicy {
             return true;
         }
 
+        if (SECRET_FILE_NAMES.contains(fileName)
+                || SECRET_FILE_NAMES.contains(stripExtension(fileName))) {
+            return true;
+        }
+
         for (String prefix : DOTFILE_PREFIXES) {
             if (fileName.startsWith(prefix)) {
                 return true;
@@ -115,5 +139,11 @@ public final class SecretFilePolicy {
 
         int dot = fileName.lastIndexOf('.');
         return dot >= 0 && SECRET_EXTENSIONS.contains(fileName.substring(dot + 1));
+    }
+
+    /** {@code id_rsa.pub} 처럼 개인키 이름에 확장자가 붙은 형태를 함께 잡기 위한 것. */
+    private static String stripExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 }

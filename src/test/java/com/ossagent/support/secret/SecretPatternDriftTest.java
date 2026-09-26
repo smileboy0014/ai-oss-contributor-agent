@@ -78,12 +78,23 @@ class SecretPatternDriftTest {
     private static final String SAMPLE_AWS_KEY = "AKIA" + "EFGHIJKLMNOPQRST";
     private static final String SAMPLE_SLACK_TOKEN = "xox" + "b-" + "1".repeat(20);
 
-    /** 개인키 <b>본문</b>은 조립하지 않는다 — 가짜임이 한눈에 보이는 고정 문자열이다. */
-    private static final String FAKE_KEY_BODY = "NOT-A-REAL-KEY-FOR-TESTS-ONLY";
+    /**
+     * 개인키 <b>본문</b>은 조립하지 않는다 — 가짜임이 한눈에 보이는 고정 문자열이다.
+     *
+     * <p>실제 PEM 본문처럼 base64 문자만 쓴다 — 스캐너가 「키 본문으로 볼 수 있는 줄」을
+     * base64 모양으로 판정하기 때문이다.
+     */
+    private static final String FAKE_KEY_BODY = "NOTAREALKEYFORTESTSONLY";
+
+    /**
+     * 🔴 <b>PGP 형식을 대표 샘플로 둔다.</b> {@code PRIVATE KEY} 뒤에 {@code  BLOCK} 이
+     * 끼는 형식이고, 이 PR 이전에는 <b>양쪽 모두</b> 이것을 놓치고 있었다.
+     * 가장 잘 빠져나가는 모양을 대표로 세워야 대응표가 알리바이가 되지 않는다.
+     */
     private static final String SAMPLE_PEM = String.join("\n",
-            "-----BEGIN RSA PRIVATE KEY-----",
+            "-----BEGIN PGP PRIVATE KEY BLOCK-----",
             FAKE_KEY_BODY,
-            "-----END RSA PRIVATE KEY-----");
+            "-----END PGP PRIVATE KEY BLOCK-----");
 
     /**
      * 스크립트 정규식 ↔ 런타임 커버리지 대응표.
@@ -101,7 +112,7 @@ class SecretPatternDriftTest {
             new Row("github_pat_[A-Za-z0-9_]{20,}", SAMPLE_FINE_GRAINED, SAMPLE_FINE_GRAINED),
             new Row("xox[baprs]-[A-Za-z0-9-]{10,}", SAMPLE_SLACK_TOKEN, SAMPLE_SLACK_TOKEN),
             new Row("sk-ant-[A-Za-z0-9_-]{20,}", SAMPLE_ANTHROPIC_KEY, SAMPLE_ANTHROPIC_KEY),
-            new Row("^-+BEGIN [A-Z ]*PRIVATE KEY-+", SAMPLE_PEM, FAKE_KEY_BODY));
+            new Row("^-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?", SAMPLE_PEM, FAKE_KEY_BODY));
 
     /**
      * 스크립트에 대응이 <b>없어도 되는</b> 런타임 패턴. 사유 없이 늘리지 않는다.
@@ -119,10 +130,20 @@ class SecretPatternDriftTest {
                     "Authorization: Bearer 사내프록시토큰값1234567890",
                     "사내프록시토큰값1234567890"),
             new RuntimeOnly(
-                    "END 가 없는 개인키 — 잘린 파일·앞부분만 인용된 로그. 스크립트는 파일을"
-                            + " 통째로 보므로 블록이 완결되지 않는 경우를 따로 다룰 이유가 없다",
-                    "앞부분\n-----BEGIN EC PRIVATE KEY-----\n" + FAKE_KEY_BODY,
-                    FAKE_KEY_BODY));
+                    "URL 에 박힌 자격증명 — 'https://user:pass@host' 형태는 문서·예시에"
+                            + " 정상적으로 등장한다. 커밋 차단에 넣으면 오탐이 잦다",
+                    "clone 실패: https://ci-bot:s3cr3tPassw0rd@git.example.com/x.git",
+                    "s3cr3tPassw0rd"));
+
+    /**
+     * 스크립트의 PEM 한 행에 대응하는 <b>런타임 구현 패턴 수 - 1</b>.
+     *
+     * <p>런타임은 PEM 을 정규식 하나로 처리하지 않는다 — 헤더·푸터·본문 줄·머리말 줄
+     * 네 패턴을 줄 단위 스캐너가 쓴다(2차식 폭발과 본문 파괴를 피하려고 그렇게 했다,
+     * {@code TokenRedactor.redactPemBlocks}). 그중 헤더가 {@link #ROWS} 의 PEM 행에
+     * 대응하고 나머지 셋이 여기 잡힌다.
+     */
+    private static final int PEM_IMPLEMENTATION_PATTERNS = 3;
 
     // ── 검사 ──────────────────────────────────────────────────────────────────
 
@@ -208,7 +229,7 @@ class SecretPatternDriftTest {
                           · 커밋 차단에 쓸 수 없는 사유가 있다면 RUNTIME_ONLY 에 사유와 함께 등록한다
                         ⚠ 이 검사는 개수만 본다. 무엇을 가리는 패턴인지는 판정하지 못하므로,
                           숫자를 맞추는 것으로 때우지 않는다 — 등록표를 실제로 갱신한다.""")
-                .isEqualTo(ROWS.size() + RUNTIME_ONLY.size());
+                .isEqualTo(ROWS.size() + RUNTIME_ONLY.size() + PEM_IMPLEMENTATION_PATTERNS);
     }
 
     @Test

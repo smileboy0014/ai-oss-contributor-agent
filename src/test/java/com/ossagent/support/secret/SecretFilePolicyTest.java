@@ -30,6 +30,20 @@ class SecretFilePolicyTest {
             "credentials-prod.yml",
             "secrets/db.yml",
             "config/secrets/nested/token.txt",
+            // 확장자가 없거나 바이너리라 「pem·key·p12」 셋만으로는 닿지 않는 것들
+            "ssh/id_rsa",
+            "ssh/id_ed25519",
+            "ssh/id_rsa.pub",
+            "android/release.jks",
+            "certs/app.keystore",
+            "certs/client.pfx",
+            "keys/signing.p8",
+            "putty/deploy.ppk",
+            "gpg/private.asc",
+            ".netrc",
+            ".npmrc",
+            ".git-credentials",
+            "gcp/serviceAccount.json",
     })
     @DisplayName("자격증명 파일은 배제한다")
     void 자격증명_파일을_배제한다_S4(String path) {

@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * 대상 저장소의 기여 규약을 수집·판정해 {@link RepositoryPolicy} 로 고정한다 — 이슈 #7.
@@ -122,6 +123,80 @@ public class AnalyzeRepositoryPolicyUseCase {
     }
 
     /**
+     * 🔴 <b>정책이 없을 때만 분석하고, 스캔 파이프라인이 쓸 판정을 돌려준다</b> — #14 FR-0.
+     *
+     * <h2>⚠️ 이것은 게이트가 아니다</h2>
+     *
+     * <p>게이트는 {@link #assertContributionAllowed} <b>하나뿐</b>이다. 이 메서드는
+     * 「수집을 시작할 가치가 있는가」를 <b>미리</b> 보는 것이고, 빠지거나 틀려도 게이트가
+     * 여전히 막는다. <b>이것만 부르고 넘어가면 S-5 가 뚫린다</b> — 이름이 비슷해 혼동하기
+     * 쉬운 자리라 적어 둔다.
+     *
+     * <h2>🔴 왜 「없을 때만」인가</h2>
+     *
+     * <p>{@link #analyze} 는 보류·금지면 비용 없이 즉시 반환하지만 <b>허용이면 재분석</b>한다
+     * ({@code blocksReanalysis()} 가 false). 스케줄러가 매 주기 부르면 규약이 바뀌지도
+     * 않았는데 저장소마다 GitHub 호출 + LLM 1회씩을 <b>영구히</b> 태운다.
+     *
+     * <p>⚠️ 대가는 「한 번 허용이면 영원히 허용」이다. 대상 저장소가 나중에 AI 기여를
+     * 금지해도 모른다. 갱신 주기(TTL)는 「규약이 얼마나 자주 바뀌는가」 데이터가 없어
+     * 지금 정하지 않는다 — PLAN-14 R-4.
+     *
+     * <h2>🔴 트랜잭션을 걸지 않는다</h2>
+     *
+     * <p>이 안에서 {@link #analyze} 가 GitHub·LLM 을 부른다. 감싸면 그 호출이 트랜잭션
+     * 안으로 들어간다 — {@code architecture.md} §2. 조회는 {@link #load} 가 짧게 연다.
+     *
+     * <p>⚠️ {@code AnalyzeIssuesUseCase.assertNoTransaction()} 은 <b>이 단계를 잡아주지
+     * 못한다.</b> 그 가드는 파이프라인 4단계에 있고, 그때는 여기서 열었던 트랜잭션이 이미
+     * 닫혀 통과한다. 그래서 같은 단언을 여기에도 둔다.
+     */
+    public ScanTarget analyzeIfAbsent(Long repositoryId) {
+        assertNoTransaction();
+        Snapshot snapshot = load(repositoryId);
+
+        RepositoryPolicy policy = snapshot.policy() != null
+                ? snapshot.policy()
+                : analyze(repositoryId).orElse(null);
+
+        return toScanTarget(repositoryId, snapshot.coordinates(), policy);
+    }
+
+    private static ScanTarget toScanTarget(Long repositoryId, RepositoryCoordinates coordinates,
+            RepositoryPolicy policy) {
+        if (policy == null) {
+            // 일시적 실패 — 그리고 보관된 저장소도 여기로 온다. 가를 수단이 없다
+            return ScanTarget.skip(repositoryId, coordinates,
+                    ScanTarget.SkipReason.POLICY_UNAVAILABLE);
+        }
+        if (policy.isAiContributionUndetermined()) {
+            return ScanTarget.skip(repositoryId, coordinates,
+                    ScanTarget.SkipReason.POLICY_UNDETERMINED);
+        }
+        if (policy.isAiContributionForbidden()) {
+            return ScanTarget.skip(repositoryId, coordinates,
+                    ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN);
+        }
+        return ScanTarget.allowed(repositoryId, coordinates);
+    }
+
+    /**
+     * 🔴 대외 호출이 트랜잭션 안에 들어가는 것을 막는다.
+     *
+     * <p>이 클래스는 javadoc 으로만 「트랜잭션 밖」을 지키고 있었다. 호출자가 감싸면
+     * GitHub 응답과 LLM 응답을 기다리는 내내 DB 커넥션이 잡히는데, <b>증상이 「느리다」뿐</b>이라
+     * 리뷰에서도 놓치기 쉽다. #14 가 자동 경로(스케줄러)를 만들면서 호출자가 늘어나므로
+     * 규약을 코드로 바꾼다.
+     */
+    private static void assertNoTransaction() {
+        if (TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw new IllegalStateException(
+                    "규약 분석을 트랜잭션 안에서 부를 수 없다 — GitHub·LLM 호출이 커넥션을 "
+                            + "점유한다. 호출자의 @Transactional 을 제거한다 (architecture.md 규율)");
+        }
+    }
+
+    /**
      * 🔴 <b>기여 가능한 저장소인지 단언한다</b> — FR-4 · S-5.
      *
      * <p>{@code boolean} 이 아니라 예외인 것이 설계다. 「RepositoryPolicy 없이 구현 단계로
@@ -149,7 +224,22 @@ public class AnalyzeRepositoryPolicyUseCase {
         }
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * ⚠️ <b>{@code @Transactional} 을 붙이지 않는다 — 붙여도 적용되지 않는다.</b>
+     *
+     * <p>{@code analyze}·{@code analyzeIfAbsent} 가 {@code this} 로 부르는 self-invocation
+     * 이라 프록시를 타지 않는다. 애노테이션을 달아 두면 <b>「트랜잭션 안에서 읽는다」는
+     * 알리바이</b>만 남고 실제로는 동작하지 않는다 — {@code ScanProperties} 가 경계한
+     * 「영원히 false 인 필드」와 같은 유형이다.
+     *
+     * <p>없어도 되는 이유 — 두 번의 독립적인 조회이고 각 Spring Data 메서드가 자기
+     * 트랜잭션을 연다. 🔴 <b>{@code repository.getPolicy()} 를 쓰지 않는 것이 핵심이다</b>
+     * (LAZY 라 트랜잭션 밖에서 건드리면 터진다). 정책은 {@code policies.findByRepositoryId}
+     * 로 따로 읽는다.
+     *
+     * <p>⚠️ 공개 메서드로 올리게 되면 그때 트랜잭션 경계를 다시 판단한다 —
+     * {@code RepositoryPolicyWriter} 가 같은 이유로 분리된 선례다.
+     */
     protected Snapshot load(Long repositoryId) {
         OssRepository repository = repositories.findById(repositoryId)
                 .orElseThrow(() -> new RepositoryNotFoundException(repositoryId));

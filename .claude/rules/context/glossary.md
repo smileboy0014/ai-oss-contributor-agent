@@ -26,6 +26,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | **Policy Analysis** | 대상 저장소의 기여 규약을 수집·판정해 `RepositoryPolicy` 로 고정. **후보보다 먼저**이고 저장소 단위다 |
 | **보류** (pending) | 규약을 **읽지 못해** 판정이 서지 않은 상태. `aiContributionAllowed = NULL`. 🔴 **「허용」이 아니다**(S-5) — 자동으로 풀리지 않고 사람이 해소한다(#24) |
 | **Scan** | 대상 저장소의 open 이슈를 수집해 저장 |
+| **스캔 파이프라인** | 저장소 하나에 대해 `Policy Analysis → Scan → Filter → Analysis` 를 잇는 실행(#14). 🔴 **`ANALYZED` 에서 멈춘다** — 선택·구현은 사람이 트리거한다 |
+| **진행 상태** (scan execution) | 파이프라인 1회의 국면 — `IDLE`·`QUEUED`·`RUNNING`·`SUCCEEDED`·`SKIPPED`·`FAILED`. ⚠️ **프로세스 메모리**다. 다중 인스턴스에서는 중복 방어가 깨진다 — #26 |
+| **건너뜀** (skipped) | 🔴 **실패가 아니다.** 규약이 막았거나(금지·보류) 읽지 못했거나 레이트리밋이다 |
 | **Filter** | 규칙 기반 1차 배제 — 요구사항 불명확 · 대규모 아키텍처 변경 · ~~종료됨~~. **대외 호출을 하지 않는다** (#9).<br>⚠️ 「종료됨」은 구현돼 있으나 **발화하지 않는다** — 수집이 `state=open` 고정이라 닫힌 이슈가 데이터에 없다 (#14).<br>「활성 PR 존재」는 여기가 아니라 **#11 입구 + #23** 다 — S-2 방어의 이전 |
 | **Analysis** | LLM 기반 기여 가능성 판정. 산출물은 category · difficulty · feasible · confidence 등 |
 | **Candidate** | 분석을 통과해 기여 대상이 된 이슈. 상태머신의 주체 |

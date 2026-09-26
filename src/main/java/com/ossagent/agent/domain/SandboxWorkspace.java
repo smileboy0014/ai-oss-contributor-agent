@@ -64,7 +64,11 @@ public record SandboxWorkspace(Path path) {
         }
 
         Path resolved = realPathOf(candidate);
-        Path resolvedRoot = realPathOf(root);
+        // 🔴 해석된 실경로에도 같은 모양 검사를 건다. requireValidRoot 는 디렉토리가 아직
+        //    없을 수 있어 toRealPath 를 못 하는데, 그 틈으로 심링크가 들어온다 —
+        //    `/opt/a/b -> /` 는 깊이 3 이라 기동 검사를 통과하고, 여기서 `/` 로 풀리면
+        //    「모든 경로가 루트 하위」가 다시 성립한다. 검사 자리가 하나면 그 틈이 남는다
+        Path resolvedRoot = requireSafeRootShape(realPathOf(root));
 
         if (!resolved.startsWith(resolvedRoot) || resolved.equals(resolvedRoot)) {
             // 루트 자체도 거부한다. 루트를 통째로 내주면 다른 후보의 워크스페이스가 함께 노출된다
@@ -100,9 +104,20 @@ public record SandboxWorkspace(Path path) {
         // 확정해 두면 그 흔들림이 사라진다 — 운영자에게 절대경로를 강요할 이유는 없다
         Path absolute = root.toAbsolutePath().normalize();
 
-        // 🔴 blank 를 막은 논리를 값에도 그대로 적용한다. `/` 나 홈을 루트로 주면
-        //    「모든 경로가 루트 하위」가 blank 일 때와 똑같이 성립한다 —
-        //    같은 무력화가 다른 값으로 들어오는 것을 막지 않으면 앞의 검사가 무의미하다
+        return requireSafeRootShape(absolute);
+    }
+
+    /**
+     * 🔴 루트의 <b>모양</b>을 본다 — blank 를 막은 논리를 값에도 그대로 적용한다.
+     *
+     * <p>{@code /} 나 홈을 루트로 주면 「모든 경로가 루트 하위」가 blank 일 때와 똑같이
+     * 성립한다. 같은 무력화가 다른 값으로 들어오는 것을 막지 않으면 앞의 검사가 무의미하다.
+     *
+     * <p>⚠ <b>두 곳에서 부른다</b> — 기동 시점(정규화된 경로)과 {@link #under}(해석된
+     * 실경로). 기동 시점에는 디렉토리가 아직 없을 수 있어 {@code toRealPath} 를 못 하는데,
+     * 한 곳에서만 검사하면 그 틈으로 심링크가 들어온다.
+     */
+    private static Path requireSafeRootShape(Path absolute) {
         if (absolute.getNameCount() < MIN_ROOT_DEPTH) {
             throw new SandboxPermanentException(
                     "sandbox.workspace-root 가 너무 얕다 — 시스템 디렉토리를 통째로 내주게 된다 (S-3)");

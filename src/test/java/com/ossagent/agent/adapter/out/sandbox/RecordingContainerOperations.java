@@ -30,6 +30,7 @@ class RecordingContainerOperations implements ContainerOperations {
     private RuntimeException failCreate;
     private RuntimeException failStart;
     private RuntimeException failLogs;
+    private RuntimeException failAwait;
     private RuntimeException failRemove;
 
     // ── 기록 ────────────────────────────────────────────────
@@ -83,6 +84,12 @@ class RecordingContainerOperations implements ContainerOperations {
         return this;
     }
 
+    /** 대기 중 데몬이 죽는다. 이 경로에서도 제거가 불려야 한다. */
+    RecordingContainerOperations thenAwaitThrows(RuntimeException e) {
+        this.failAwait = e;
+        return this;
+    }
+
     RecordingContainerOperations thenLogsThrows(RuntimeException e) {
         this.failLogs = e;
         return this;
@@ -111,6 +118,9 @@ class RecordingContainerOperations implements ContainerOperations {
     @Override
     public WaitOutcome await(String containerId, Duration timeout) {
         calls.add("await");
+        if (failAwait != null) {
+            throw failAwait;
+        }
         return waitOutcome;
     }
 

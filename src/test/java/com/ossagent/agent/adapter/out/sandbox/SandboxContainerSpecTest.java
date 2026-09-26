@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -190,6 +191,30 @@ class SandboxContainerSpecTest {
     }
 
     @Test
+    void 심링크로_얕은_루트를_우회할_수_없다_S3() throws IOException {
+        // 🔴 기동 검사는 디렉토리가 아직 없을 수 있어 toRealPath 를 못 한다.
+        //    그 틈으로 `/opt/a/b -> /` 같은 심링크가 들어오면 깊이 3 이라 통과하고,
+        //    실행 시점에 `/` 로 풀려 「모든 경로가 루트 하위」가 다시 성립한다.
+        //    검사 자리가 하나면 그 틈이 남는다
+        Path deepLink = root.resolve("a").resolve("b");
+        Files.createDirectories(deepLink.getParent());
+        try {
+            Files.createSymbolicLink(deepLink, Path.of("/"));
+        } catch (UnsupportedOperationException | IOException e) {
+            // 조용히 return 하면 「검증하지 않은 것」이 「통과」로 보인다
+            Assumptions.abort("심링크를 만들 수 없는 환경이라 검증하지 못했다");
+        }
+
+        assertThat(SandboxWorkspace.requireValidRoot(deepLink))
+                .as("기동 검사는 문자열 깊이만 보므로 여기서는 통과한다")
+                .isNotNull();
+
+        assertThatThrownBy(() -> SandboxWorkspace.under(root.resolve("etc"), deepLink))
+                .as("실행 시점에 실경로로 풀어 다시 검사한다")
+                .isInstanceOf(SandboxPermanentException.class);
+    }
+
+    @Test
     void 루트_검증은_파일시스템에_쓰지_않는다_S3() {
         Path notYet = root.resolve("a").resolve("b").resolve("nonexistent");
 
@@ -217,7 +242,8 @@ class SandboxContainerSpecTest {
         try {
             Files.createSymbolicLink(link, outside);
         } catch (UnsupportedOperationException | IOException e) {
-            return;   // 심링크를 만들 수 없는 환경이면 검증 대상이 없다
+            // 조용히 return 하면 「검증하지 않은 것」이 「통과」로 보인다
+            Assumptions.abort("심링크를 만들 수 없는 환경이라 검증하지 못했다");
         }
 
         assertThatThrownBy(() -> SandboxWorkspace.under(link, props.workspaceRoot()))

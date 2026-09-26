@@ -112,6 +112,18 @@ class DockerCodeSandboxTest {
     }
 
     @Test
+    void 대기_중_데몬이_죽어도_제거한다_S3() {
+        operations.thenAwaitThrows(new SandboxTransientException("데몬 응답 없음"));
+
+        assertThatThrownBy(() -> sandbox.run(execute()))
+                .isInstanceOf(SandboxTransientException.class);
+
+        assertThat(operations.calls())
+                .as("finally 가 받는다는 것을 코드를 읽어야만 알 수 있게 두지 않는다")
+                .containsExactly("create", "start", "await", "remove");
+    }
+
+    @Test
     void 컨테이너를_만들지_못했으면_제거를_시도하지_않는다_S3() {
         operations.thenCreateThrows(new SandboxTransientException("이미지가 없다"));
 
@@ -181,14 +193,17 @@ class DockerCodeSandboxTest {
 
     @Test
     void 결과를_찍어도_대상_저장소_출력이_나오지_않는다_S4() {
-        operations.thenLogs("token " + "ghp_" + "A".repeat(36), false);
+        // 토큰의 길이·문자셋이 유의미한 테스트가 아니다 — 출력이 toString 에 실리는지만 본다.
+        // 그런 자리에서 런타임 조립을 쓰는 것은 「토큰을 안 쓴다」가 아니라 「검사를 피한다」다
+        // (testing-philosophy.md 픽스처 규약). 가짜임이 눈에 보이는 고정 상수를 쓴다.
+        operations.thenLogs("token FAKE_NOT_A_REAL_TOKEN_FOR_TESTS_ONLY", false);
 
         SandboxResult result = sandbox.run(execute());
 
         assertThat(result.toString())
                 .as("빌드 출력에는 대상 저장소가 커밋해 둔 시크릿이 섞여 있을 수 있다 — "
                         + "로그로 나가면 회수할 수 없다")
-                .doesNotContain("ghp_", "token");
+                .doesNotContain("FAKE_NOT_A_REAL_TOKEN", "token");
     }
 
     // ─────────────────────────────────────────────────────────

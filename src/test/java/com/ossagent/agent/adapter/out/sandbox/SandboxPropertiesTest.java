@@ -3,6 +3,7 @@ package com.ossagent.agent.adapter.out.sandbox;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -106,10 +107,17 @@ class SandboxPropertiesTest {
                 .orElseThrow(() -> new AssertionError("sandbox 블록을 찾지 못했다"));
     }
 
+    /**
+     * ⚠ <b>모든 YAML 문서를 훑는다.</b> 첫 문서만 보면 {@code ---} 로 나뉜 뒤
+     * {@code sandbox} 블록이 두 번째로 옮겨갔을 때 위 회귀 가드가 <b>조용히 무력해진다</b>.
+     */
     @SuppressWarnings("unchecked")
     private static List<String> rawKeys() throws IOException {
-        PropertySource<?> source = propertySources().iterator().next();
-        return List.copyOf(((java.util.Map<String, Object>) source.getSource()).keySet());
+        List<String> keys = new ArrayList<>();
+        for (PropertySource<?> source : propertySources()) {
+            keys.addAll(((java.util.Map<String, Object>) source.getSource()).keySet());
+        }
+        return List.copyOf(keys);
     }
 
     private static MutablePropertySources propertySources() throws IOException {

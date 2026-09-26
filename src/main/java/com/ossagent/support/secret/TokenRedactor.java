@@ -117,6 +117,20 @@ public final class TokenRedactor {
     private static final int ENTRY_WINDOW_LINES = 5;
 
     /**
+     * 빈 줄·머리말이 진입 전에 지나갈 수 있는 <b>줄 수</b>.
+     *
+     * <p>🔴 <b>무제한으로 두면 진입 창이 사실상 사라진다.</b> 산문에 헤더가 언급된 뒤
+     * 빈 줄이 몇 개 오고, 한참 뒤에 40자 런이 하나라도 나오면 <b>그 사이가 전부 소실</b>된다.
+     * 이슈 본문에서 그 런을 만드는 것은 특별한 것이 아니다 — <b>파일 경로</b>
+     * ({@code /} 가 키 문자다) · SHA-256 해시 · 커밋 SHA · JWT 조각이 전부 해당한다.
+     * 그리고 그 값은 {@code IssueSnapshot} 을 통해 <b>DB 에 영속</b>된다.
+     *
+     * <p>현실의 최악이 armor 머리말 8개 + 빈 줄 = 9줄이라 20이면 넉넉하다.
+     * <b>정확한 값이 중요한 것이 아니라 무제한이 아닌 것이 중요하다.</b>
+     */
+    private static final int ENTRY_PASSTHROUGH_LINES = 20;
+
+    /**
      * 본문 줄에 붙을 수 있는 <b>장식의 기본 예산</b>. 헤더 줄이 더 깊이 들여쓰여 있으면
      * {@link #decorationBudget} 이 그만큼 늘린다.
      *
@@ -240,6 +254,7 @@ public final class TokenRedactor {
         int beforeWindow = headerLineEnd;   // 진입에 실패하면 여기까지만 가린다
         boolean entered = false;
         int probed = 0;
+        int passed = 0;
 
         while (cursor < text.length()) {
             int start = nextLineStart(text, cursor);
@@ -257,10 +272,18 @@ public final class TokenRedactor {
             } else if (startsKeyBody(line, budget)) {
                 entered = true;
             } else if (passesThroughToEntry(line)) {
-                // 🔴 빈 줄·머리말은 창 예산을 먹지 않는다. 개수가 형식에 의해 정해지고
+                // ⚠ 상한을 && 로 붙이면 안 된다 — 조건이 거짓이 되는 순간 다음 분기로
+                //   흘러내려 continuesKeyBody 가 같은 줄을 다시 통과시킨다(빈 줄은 그쪽도
+                //   받는다). 예산을 세운 의미가 사라진다. 여기서 끝낸다
+                if (++passed > ENTRY_PASSTHROUGH_LINES) {
+                    return beforeWindow;
+                }
+                // 🔴 빈 줄·머리말은 창 예산과 **따로** 센다. 개수가 형식에 의해 정해지고
                 //    파싱 위험과 무관하기 때문이다 — RFC 4880 은 Comment: 를 복수 허용하고
                 //    gpg --comment 를 여러 번 주면 그대로 늘어난다. 같은 예산을 쓰게 뒀더니
-                //    머리말 5개 + 빈 줄로 창이 소진돼 키가 통째로 샜다
+                //    머리말 5개 + 빈 줄로 창이 소진돼 키가 통째로 샜다.
+                //    ⚠ 그렇다고 무제한으로 두면 반대쪽이 열린다 — 산문 속 헤더 언급 뒤로
+                //    한참 가서 파일 경로 한 줄만 나와도 그 사이가 통째로 소실된다
             } else if (continuesKeyBody(line, budget) && ++probed <= ENTRY_WINDOW_LINES) {
                 // 짧은 본문 줄만 창 예산을 쓴다.
                 // 끝내 자격 줄을 못 만나면 beforeWindow 로 되돌아가 이 줄들을 남긴다

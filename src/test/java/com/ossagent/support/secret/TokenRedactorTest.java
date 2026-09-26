@@ -397,6 +397,30 @@ class TokenRedactorTest {
                 .doesNotContain(LONG_KEY_BODY);
     }
 
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("헤더_언급_뒤_한참_떨어진_긴_런")
+    @DisplayName("산문 속 헤더 언급이 한참 뒤의 긴 줄까지 삼키지 않는다")
+    void 통과_줄이_무제한이_아니다(String 형태, String 긴_줄) {
+        // 🔴 빈 줄·머리말이 창 예산을 안 쓰게 했더니 진입 창이 사실상 무한이 됐다.
+        //    그러면 헤더 언급 뒤로 한참 가서 40자 런이 하나만 나와도 그 사이가 소실된다.
+        //    이슈 본문에서 그 런을 만드는 건 특별한 게 아니다 — 파일 경로(/ 가 키 문자다)·
+        //    해시·커밋 SHA 가 전부 해당하고, 그 값은 DB 에 영속된다
+        String text = "이 헤더를 커밋하지 마세요: -----BEGIN RSA PRIVATE KEY-----\n"
+                + "\n".repeat(25) + 긴_줄;
+
+        assertThat(TokenRedactor.redact(text))
+                .as("%s — 한쪽을 무료로 만들면 반대쪽이 열린다", 형태)
+                .contains(긴_줄);
+    }
+
+    static Stream<Arguments> 헤더_언급_뒤_한참_떨어진_긴_런() {
+        return Stream.of(
+                Arguments.of("파일 경로",
+                        "src/main/java/com/ossagent/support/secret/TokenRedactor.java"),
+                Arguments.of("SHA-256 해시", "e".repeat(64)),
+                Arguments.of("커밋 SHA-40", "a".repeat(40)));
+    }
+
     @ParameterizedTest(name = "[{index}] armor 머리말 {0}개")
     @ValueSource(ints = {1, 3, 5, 8})
     @DisplayName("armor 머리말이 많아도 진입 창이 소진되지 않는다")

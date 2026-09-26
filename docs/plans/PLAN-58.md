@@ -144,9 +144,37 @@ k8s Secret · Helm values · GitHub Actions 가 전부 이 모양이고, **키�
 
 | # | 경로 | 내용 |
 |---|------|------|
-| 1 | `.claude/scripts/secret-scan.sh` | 🔴 `^-+` → `^[[:space:]]*-+` + 구분 근거 주석 |
-| 2 | `src/test/java/com/ossagent/support/secret/SecretPatternDriftTest.java` | 🔴 PEM 샘플을 **들여쓴 형태**로 — 양성 대조 |
-| 3 | `docs/plans/PLAN-58.md` | 이 문서 |
+| 1 | `.claude/scripts/secret-scan.sh` | 🔴 `^-+` → `^[[:space:]]*-+` + 구분 근거 주석 · 화이트리스트 |
+| 2 | `src/test/java/com/ossagent/support/secret/SecretPatternDriftTest.java` | 🔴 PEM 샘플을 **들여쓴 형태**로 (양성 대조) · POSIX→Java 번역 |
+| 3 | `build.gradle.kts` | 🔴 `.claude/scripts/*.sh` 를 test 태스크 **입력으로 선언** |
+| 4 | `.claude/rules/conventions/testing-philosophy.md` | 「돌기는 하는가」를 가드 요구사항에 추가 |
+| 5 | `docs/plans/PLAN-58.md` | 이 문서 |
+
+### 🔴 구현 중 계획을 넘어선 것 — 셋
+
+계획서에는 「스크립트 한 줄 + 테스트 샘플」만 적었다. 돌려 보니 셋이 더 나왔다.
+
+**① 드리프트 테스트가 돌지 않고 있었다.** `SecretPatternDriftTest` 는 `secret-scan.sh` 를
+런타임에 읽는데 **Gradle 이 그것을 입력으로 모른다.** 스크립트만 고치면 test 태스크가
+`UP-TO-DATE` 로 건너뛰어진다.
+
+실제로 당했다 — 앵커를 되돌리는 돌연변이를 넣고 테스트를 돌렸는데 **초록**이었다.
+`--rerun-tasks` 로 강제해서야 빨개졌다.
+
+> **가드가 있는데 돌지 않는 것은 없는 것과 같고, 「초록이었다」가 「검증했다」로 읽힌다는
+> 점에서 더 나쁘다.**
+
+`.claude/scripts/*.sh` 를 입력으로 선언했다. 이제 `--rerun-tasks` 없이 물린다(확인함).
+`testing-philosophy.md` 의 가드 요구사항에 **「돌기는 하는가」**를 0번으로 추가했다 —
+모수·물림·대표성 셋 모두 **태스크가 실행된다는 전제 위에** 서 있다.
+
+**② PEM 검사에만 화이트리스트가 없었다.** §2 참조. 선행 공백을 허용하자마자 이 계획서
+자신이 커밋되지 않았다.
+
+**③ 드리프트 테스트가 셸 ERE 를 Java 로 그대로 컴파일하고 있었다.** `[[:space:]]` 를
+Java 는 POSIX 클래스로 읽지 않고 **`:`·`s`·`p`·`a`·`c`·`e` 중 한 글자**로 읽는다.
+「두 엔진이 다르다」가 그 테스트의 전제인데 정작 번역이 없었다 — 이 수정이 POSIX 클래스를
+처음 쓰면서 드러났다. 번역을 넣고, **옮기지 못한 클래스가 남으면 터뜨린다.**
 
 ---
 

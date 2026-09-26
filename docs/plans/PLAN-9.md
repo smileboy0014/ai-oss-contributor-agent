@@ -2,7 +2,7 @@
 
 **이슈**: [#9](https://github.com/smileboy0014/ai-oss-contributor-agent/issues/9)
 **타입**: feature
-**작성일**: 2026-09-25 (rev.2 — 격리 검토 반영 · 중대 3건)
+**작성일**: 2026-09-25 (rev.3 — 구현 중 확정분 반영. rev.2 는 격리 검토의 중대 3건 반영)
 
 ---
 
@@ -27,20 +27,34 @@ issue/application
 계산해 놓고 버리는 값이 둘 있어 컬럼을 추가한다.
 
 ```sql
-ALTER TABLE issue ADD COLUMN filter_priority  SMALLINT NULL;
-ALTER TABLE issue ADD COLUMN filter_judged_at TIMESTAMP(6) WITH TIME ZONE NULL;
+ALTER TABLE issue ADD COLUMN comment_count    INTEGER;
+ALTER TABLE issue ADD COLUMN filter_priority  SMALLINT;
+ALTER TABLE issue ADD COLUMN filter_judged_at TIMESTAMP(6) WITH TIME ZONE;
+ALTER TABLE issue ALTER COLUMN filter_reason SET DATA TYPE VARCHAR(512);
 ```
 
 | 컬럼 | 왜 필요한가 |
 |---|---|
+| `comment_count` | **rev.3 에서 추가.** #8 이 「이슈 #9 를 위해」 수집해 놓고 영속하지 않았다 — 규칙 ③ 이 입력으로 쓸 수 없는 상태였다. 컬럼이 없으면 `HEAVY_DISCUSSION` 이 선언만 되고 발화하지 않는다 |
 | `filter_priority` | FR-4 의 산출물. `FilterVerdict` 는 **반환값**이라 트랜잭션이 끝나면 사라진다. #11 이 분석 순서를 정할 때 **SQL 정렬**로 써야 하는데 Java 함수로는 못 한다 |
-| `filter_judged_at` | **경합 자가치유** + `Clock` 의 용처. 아래 |
+| `filter_judged_at` | 「판정이 언제 섰나」. `updated_at`(행을 언제 건드렸나)과 뜻이 다르다 |
+| `filter_reason` 타입 | 값이 enum 이름으로 제약되어 **외부 텍스트가 아니게 됐다** — 아래 S-4 절 |
 
-🔴 **경합** — 필터가 본문 A 를 읽는 사이 스캔이 B 로 갱신하며 `filterResult = null` 로 되돌리면,
-필터가 A 기준 판정을 쓴다. 결과는 **B 내용에 A 판정이 붙은 행**이고 더 이상 null 이 아니라
-**다시는 재판정 대상이 되지 않는다.** 본문이 나중에 채워진 이슈가 영구 `REJECTED` 로 남는다.
+### ⚠️ rev.2 정정 — `filter_judged_at` 은 경합을 자가치유하지 못한다
 
-`updatedAt > filterJudgedAt` 이면 판정을 낡은 것으로 보고 재판정한다 — **자가치유**다.
+rev.2 는 `updatedAt > filterJudgedAt` 로 경합을 푼다고 적었다. **틀렸다.**
+
+경합은 이렇게 난다 — 필터가 본문 A 를 읽는 사이 스캔이 B 로 갱신하며 `filterResult` 를
+비우고, 그 뒤 필터가 A 기준 판정을 쓴다. 이때 `filterJudgedAt` 은 **벽시계라 스캔의
+`updatedAt` 보다 늦다.** 조건이 성립하지 않아 그 행은 「최신 판정」으로 보인다.
+
+내용 버전(`github_updated_at`)을 저장하면 풀리지만, **지금 그 경합은 존재하지 않는다** —
+스케줄러가 없어 동시 실행 경로 자체가 없고, `IssuePageWriter` 가 스캔-스캔 경합을 이미
+같은 자리(#14)에 남겨 뒀다. **실재하지 않는 경합을 위해 컬럼 의미를 비틀지 않는다.**
+
+> **결정** — 경합은 스캔과 필터를 **저장소별로 직렬화**해 막는다. 그 책임은 스케줄러를
+> 붙이는 **#14** 다. `filter_judged_at` 은 「규칙을 바꾼 뒤 낡은 판정을 골라낸다」는
+> 운영 용도로만 남긴다.
 
 ⚠️ 벤더 고유 문법 금지(Q-2). H2·PostgreSQL 공통 문법만 쓴다.
 ⚠️ V7 은 **선점 통지 완료** — #13·#28 세션 모두 마이그레이션 없음.
@@ -87,13 +101,17 @@ ALTER TABLE issue ADD COLUMN filter_judged_at TIMESTAMP(6) WITH TIME ZONE NULL;
 
 `filter_reason` 은 String 열이다. 구조로 막지 않으면 이슈 본문 발췌가 들어간다.
 
-**`RejectionReason` enum 의 `name()` 만 쓴다.** 자유 문자열을 받는 경로를 만들지 않는다 —
+**`FilterReason` enum 의 `name()` 만 쓴다.** (rev.3 개명 — `SHORT_BODY` 처럼 **배제가 아닌**
+사유가 있어 `RejectionReason` 은 거짓말이 된다.) 자유 문자열을 받는 경로를 만들지 않는다 —
 사유는 「왜 떨어졌나」의 **코드**이지 증거 인용이 아니다.
 
-그래서 `Issue.filterReason` 의 `@ExternalText(TARGET_REPOSITORY)` 는 **떼어낸다.**
-값이 더 이상 대상 저장소 텍스트가 아니라 **우리 어휘**이기 때문이다 — `RepositoryPolicy.pendingReason`
-과 같은 판단이다. 컬럼 타입(`TEXT`)은 그대로 둔다. 바꾸려면 기존 컬럼 변경 마이그레이션이
-하나 더 필요한데, 얻는 것이 문서적 일관성뿐이라 값을 제약하는 것으로 충분하다.
+그래서 `Issue.filterReason` 의 `@ExternalText(TARGET_REPOSITORY)` 를 **떼고 컬럼도
+`TEXT` → `VARCHAR(512)` 로 내렸다.** 값이 더 이상 대상 저장소 텍스트가 아니라 **우리 어휘**다 —
+`RepositoryPolicy.pendingReason`(V5)과 같은 판단이다.
+
+⚠️ rev.2 는 「컬럼 타입은 그대로 둔다」고 적었으나 **선택지가 없었다.** `ExternalTextMarkerTest`
+가 「`TEXT` 로 매핑된 `String` 필드는 예외 없이 `@ExternalText` 를 갖는다」를 빌드에서 강제한다.
+마커만 떼면 빌드가 깨진다 — 규칙이 실제로 작동한 것이다.
 
 S-4 는 프롬프트만의 문제가 아니다. **대상 저장소 텍스트가 우리 DB 를 거쳐 나중에
 LLM·PR 본문으로 흘러가는 경로**가 같은 문제다 — #7 의 `contribution_rules` 가 그랬다.
@@ -194,8 +212,12 @@ REJECTED 가 하나라도 있으면        → REJECTED
 **모든 규칙을 평가하고 매치된 사유를 전부 수집**한다. 첫 매치에서 끊으면(short-circuit)
 사유 분포가 **규칙 순서의 함수**가 되어, FR-2 가 노린 「분포를 보고 규칙을 고친다」가 불가능해진다.
 
-`filter_reason` 에는 대표 사유 1개를 쓴다. 선정 우선순위: `CLOSED` → `BREAKING_CHANGE` →
-`EMPTY_BODY` → (UNDECIDED 사유). **순서를 바꾸면 통계가 바뀐다**는 사실을 코드에 남긴다.
+`filter_reason` 에는 **걸린 사유를 전부** 콤마로 이어 저장한다 (rev.3 정정).
+
+⚠️ rev.2 는 「대표 사유 1개 + 선정 우선순위 문서화」로 갔는데, 그러면 **저장된 분포가
+여전히 편향된다** — 문서화된 편향도 편향이다. 사유 코드 6종을 전부 이어도 100자 남짓이라
+전량 저장의 비용이 없다. 순서는 `FilterReason` **선언 순서**로 정규화한다 — 같은 입력이
+같은 문자열로 저장돼야 집계가 된다.
 
 **저장 어휘는 4상태다** — `NULL`(미판정) · `PASSED` · `REJECTED` · `UNDECIDED`.
 
@@ -232,8 +254,8 @@ REJECTED 가 하나라도 있으면        → REJECTED
 
 | 파일 | 변경 |
 |---|---|
-| `issue/domain/Issue.java` | `applyFilter(FilterVerdict, Clock)` · `labelList()` · `hasLabel()` · 새 컬럼 2개 |
-| `issue/domain/IssueSnapshot.java` | **javadoc 정정** — `commentCount` 가 「#9 를 위한 것」이라 적혀 있는데 #9 는 규칙으로 쓰지 않는다. 「오탐이라 #11 의 LLM 판정 입력」으로 고친다. ⚠️ #28 이 compact 생성자를 건드리므로 **javadoc 만** 손댄다 |
+| `issue/domain/Issue.java` | `applyFilter(FilterVerdict, Instant)` · `labelList()` · `hasLabel()` · `filterReasons()` · 새 컬럼 4개.<br>⚠️ `Clock` 이 아니라 `Instant` 를 받는다 — 이 클래스의 다른 메서드(`updateFrom`)와 같은 형태이고, `Clock` 주입은 호출자인 application 의 몫이다 |
+| ~~`issue/domain/IssueSnapshot.java`~~ | **건드리지 않는다** (rev.3). `commentCount` 가 「#9 를 위한 것」이라는 서술이 맞게 됐다 — 컬럼을 추가해 규칙 ③ 의 입력으로 실제로 쓴다. #28 과의 충돌도 없다 |
 | `issue/adapter/out/persistence/IssueJpaRepository.java` | 미판정·낡은 판정 조회 |
 | `application.yml` | `issue.filter.*` |
 | `.claude/codemaps/domain.md` | 필터 규칙 절 + ⚠️ **전이표 1줄** — 「필터 **통과한** 이슈로 후보 생성」 → 「**배제되지 않은** 이슈로」. `UNDECIDED` 도 후보가 되므로 |
@@ -313,9 +335,10 @@ REJECTED 가 하나라도 있으면        → REJECTED
 
 - 🔴 **활성 PR 확인** — **#11 입구 + #22**. 「권고」가 아니라 **차단 게이트**여야 한다(S-2 이전 의무)
 - **닫힌 이슈 데이터 정확성** — #14
-- **LLM 필요분 인계 목록** — #11 이 이어받는다. Stage 6 에서 **#11 이슈에 코멘트로 남긴다**
+- **LLM 필요분 인계 목록** — #11 이 이어받는다. **#11 이슈에 코멘트로 남긴다**
   (계획서에만 적으면 사라진다): ① 코멘트 수가 많은 이슈의 실제 명확성 ② 짧은 본문의 명확성
   ③ 의미적 변경 규모(라벨 없는 경우)
+- **스캔-필터 동시 실행 직렬화** — #14. 위 「rev.2 정정」 참조
 - **후보 생성** — #11. 이 PR 은 `Issue` 에 판정만 적재한다
 - **필터 트리거** — #14. 이 PR 은 UseCase 까지
 - **규칙 버전 해시 기반 자동 재판정** — 설정이 실제로 자주 바뀌면

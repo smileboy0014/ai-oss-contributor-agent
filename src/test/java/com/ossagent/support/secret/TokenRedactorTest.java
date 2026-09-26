@@ -2,8 +2,12 @@ package com.ossagent.support.secret;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.stream.Stream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * S-4 — 토큰이 문자열을 타고 나가지 않는지.
@@ -250,6 +254,46 @@ class TokenRedactorTest {
         assertThat(TokenRedactor.redact(message)).isEqualTo(message);
     }
 
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("장식이_붙은_키_본문")
+    @DisplayName("장식이 붙어 있어도 키 본문을 가린다")
+    void 장식이_붙은_키_본문도_가린다_S4(String 형태, String text) {
+        // 🔴 키가 저장소에 나타나는 형태는 맨몸 PEM 파일이 아니다. 들여쓰기 한 칸에
+        //    본문이 새는데 겉보기에는 ***REDACTED*** 가 찍혀 있어 막혔다고 착각하게 된다 —
+        //    「가려진 것처럼 보이는데 키는 나가는」 것이 가장 나쁜 모양이다
+        assertThat(TokenRedactor.redact(text))
+                .as("%s — 헤더만 가려지고 본문이 나가면 스크럽한 의미가 없다", 형태)
+                .doesNotContain(FAKE_KEY_BODY);
+    }
+
+    static Stream<Arguments> 장식이_붙은_키_본문() {
+        String header = "-----BEGIN RSA PRIVATE KEY-----";
+        String footer = "-----END RSA PRIVATE KEY-----";
+        return Stream.of(
+                // k8s Secret · GitHub Actions · Ansible · application.yml — 실전 1순위
+                Arguments.of("YAML 2칸 들여쓰기",
+                        "key: |\n  " + header + "\n  " + FAKE_KEY_BODY + "\n  " + footer),
+                Arguments.of("YAML 4칸 들여쓰기",
+                        "key: |\n    " + header + "\n    " + FAKE_KEY_BODY + "\n    " + footer),
+                Arguments.of("탭 들여쓰기",
+                        "key: |\n\t" + header + "\n\t" + FAKE_KEY_BODY + "\n\t" + footer),
+                // diff 는 LLM 프롬프트의 본체다
+                Arguments.of("diff 문맥 줄",
+                        " " + header + "\n " + FAKE_KEY_BODY + "\n " + footer),
+                Arguments.of("diff 추가 줄",
+                        "+" + header + "\n+" + FAKE_KEY_BODY + "\n+" + footer),
+                Arguments.of("diff 삭제 줄",
+                        "-" + header + "\n-" + FAKE_KEY_BODY + "\n-" + footer),
+                Arguments.of("마크다운 인용",
+                        "> " + header + "\n> " + FAKE_KEY_BODY + "\n> " + footer),
+                Arguments.of("자바 문자열 연결",
+                        "\"" + header + "\\n\" +\n\"" + FAKE_KEY_BODY + "\\n\" +\n\"" + footer + "\""),
+                Arguments.of("본문 뒤 주석",
+                        header + "\n" + FAKE_KEY_BODY + "   # 운영 키\n" + footer),
+                Arguments.of("base64url 본문",
+                        header + "\n" + FAKE_KEY_BODY + "-_\n" + footer));
+    }
+
     @Test
     @DisplayName("END 없는 헤더가 많아도 입력 길이에 선형으로 돈다")
     void 스크럽이_입력_길이에_선형이다_S4() {
@@ -257,18 +301,41 @@ class TokenRedactorTest {
         //    재스캔해 O(n²) 였다 — 실측 131KB 에 76초. GitHub 이슈 본문 상한이 65,536자이고
         //    이 코드는 수집되는 모든 이슈가 지나는 자리다(IssueSnapshot).
         String unit = "-----BEGIN RSA PRIVATE KEY-----\n" + FAKE_KEY_BODY + "\n";
-        String small = unit.repeat(200);
-        String large = unit.repeat(1600);   // 8배
 
+        assertLinear("END 없는 헤더 반복", unit.repeat(200), unit.repeat(1600));
+    }
+
+    @Test
+    @DisplayName("대시만 길게 이어진 입력에서도 선형으로 돈다")
+    void 대시_런에서도_선형이다_S4() {
+        // 🔴 별개의 2차식 지점이었다. 헤더·푸터 정규식 선두의 -+ 가 대시 런에서
+        //    시작 위치마다 끝까지 먹고 되돌아온다 — 실측 대시 200,000개에 3분 18초.
+        //    마크다운 구분선 한 줄로 재현된다. 앞의 테스트는 대시가 5자뿐이라 이것을 못 잰다
+        assertLinear("순수 대시 런", "-".repeat(4_000), "-".repeat(32_000));
+    }
+
+    @Test
+    @DisplayName("본문 줄이 긴 대시 런이어도 선형으로 돈다")
+    void 본문이_대시_런이어도_선형이다_S4() {
+        // 🔴 또 다른 지점 — 푸터 정규식을 블록 안의 「줄마다」 돌린다. 그 줄이 긴 대시 런이면
+        //    줄 길이에 대해 다시 2차식이 된다. 헤더만 고치면 이 경로로 그대로 재현된다.
+        //    이 입력은 비용을 다 치르고 정작 아무것도 가리지 못했다 — 느리고 안 막혔다
+        String header = "-----BEGIN RSA PRIVATE KEY-----\n";
+
+        assertLinear("본문이 대시 런", header + "-".repeat(4_000), header + "-".repeat(32_000));
+    }
+
+    /** 길이 8배에 시간이 상한 배수를 넘으면 선형이 아니다 — 2차식이면 64배가 된다. */
+    private static void assertLinear(String 형태, String small, String large) {
         long smallNanos = timeRedact(small);
         long largeNanos = timeRedact(large);
 
         assertThat(largeNanos)
                 .as("""
-                        길이 8배에 시간이 8배를 크게 넘으면 선형이 아니다 — 2차식이면 64배가 된다.
+                        %s — 길이 8배에 시간이 8배를 크게 넘었다. 2차식이면 64배가 된다.
                         느슨한 상한(25배)을 쓰는 것은 JIT·GC 흔들림 때문이고,
                         2차식 폭발은 그 잡음보다 훨씬 크게 벌어진다.
-                        small=%d ns, large=%d ns""", smallNanos, largeNanos)
+                        small=%d ns, large=%d ns""", 형태, smallNanos, largeNanos)
                 .isLessThan(Math.max(smallNanos, 1_000_000L) * 25);
     }
 

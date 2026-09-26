@@ -146,7 +146,7 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | `Clock` 주입 | ✅ | `config/ClockConfig` |
 | **GitHub 읽기 클라이언트** | ✅ | `support/github` — 타임아웃·재시도 명시 · **403 을 권한/1차/2차 리밋으로 구분** · 레이트리밋 헤더 노출 · 자격증명 공급자 이음매. **쓰기 메서드 없음(S-1)** |
 | **GitHub 능력 인터페이스** | ✅ | `RepositorySource`(repository) · `IssueSource`(issue) + 어댑터 2 + 테스트 페이크 2 |
-| **시크릿 스크럽** | ✅ | `support/secret` — `TokenRedactor`(토큰 5종 · `Authorization` 값 · **PEM 블록 전체**) + `SecretFilePolicy`(경로 배제, **소비자는 #15**). 강제 지점은 `IssueSnapshot`·`AgentRun.fail`·`ScrubbedRules`·어댑터 생성자. 드리프트·등록표·프롬프트 경계를 테스트가 고정 (#28) |
+| **시크릿 스크럽** | ⚠️ 동작함 | `support/secret` — `TokenRedactor`(토큰 5종 · `Authorization` 값 · URL 자격증명 · **PEM 블록**) + `SecretFilePolicy`(경로 배제, **소비자는 #15**). 강제 지점은 `IssueSnapshot`·`AgentRun.fail`·`ScrubbedRules`·어댑터 생성자. 드리프트·등록표·프롬프트 경계를 테스트가 고정 (#28)<br>⚠️ **`✅` 로 올리지 않았다** — 패턴 스크럽은 원리적으로 「알려진 모양」만 잡는다. 형식 하나가 빠지면 그 키는 통째로 나가고, 실제로 PGP·들여쓰기 본문이 그렇게 샜다(#28 리뷰). **닫혔다고 적으면 다음 사람이 확인하지 않는다** |
 | **`RepositoryPolicy` 수집·판정** | ✅ | `AnalyzeRepositoryPolicyUseCase` — 「읽었는가」 3분류(READ·ABSENT·UNREADABLE) · 확장자 변종 8경로 · 일시적 실패는 **기록 없이 중단** · 보류·금지는 **엔티티가 재분석을 거부** · `assertContributionAllowed` 단언 (#7) |
 | `issue` 수집 UseCase | ❌ | 능력(`IssueSource`)은 있다. 커서·지연·멱등 저장이 없다 — #8 |
 | **LLM 능력·어댑터** | ✅ | `LanguageModel`(agent/domain) + `AnthropicLanguageModel` — 송신 전 스크럽 필수(S-4) · 타임아웃·전송 재시도 명시 · 절단·거부는 예외 · **노출 빈은 기록 데코레이터 하나뿐** (#10) |

@@ -97,7 +97,7 @@ GitHub App 설치 토큰은 **우리가 멤버가 아닌 upstream 에 PR 을 만
 | 클래스 | 하는 일 |
 |---|---|
 | `TokenRedactor` | **내용**에서 알려진 패턴을 가린다 — 토큰 5종 · `Authorization` 헤더 값 · **PEM 개인키 블록** |
-| `SecretFilePolicy` | **애초에 열지 않는다** — `.env*` · `*.pem` · `*.key` · `*.p12` · `credentials*` · `secrets/` |
+| `SecretFilePolicy` | **애초에 열지 않는다** — `.env*` · 키/키스토어 확장자 · `id_rsa` 류 · `.netrc` 류 · `credentials*` · `secrets/`. **정본은 코드다** (여기 목록은 요약이라 뒤처질 수 있다) |
 
 둘은 겹치는 방어가 아니라 **순서가 다른 방어**다. 키 파일에는 우리가 모르는 형식의
 자격증명이 얼마든지 들어 있어, **패턴 매칭만으로는 「가렸다」고 말할 수 없다.**
@@ -119,9 +119,18 @@ GitHub App 설치 토큰은 **우리가 멤버가 아닌 upstream 에 PR 을 만
 | `issue.body` · `issue.title` | `IssueSnapshot` compact 생성자 — 모든 본문이 통과하는 문 |
 | LLM 프롬프트 | 어댑터 생성자가 `scrubber == null` 을 거부 |
 
-**새 `@ExternalText` 필드는 위 둘 중 하나를 세우고 `ExternalTextScrubRegistryTest` 에 등록한다.**
-등록이 없으면 빌드가 깨진다. ⚠️ 그 테스트가 강제하는 것은 「스크럽했다」가 아니라
-**「스크럽을 어떻게 할지 누군가 정했다」**이다 — 데이터 흐름 판정은 리플렉션으로 불가능하다.
+**새 `@ExternalText` 필드는 `ExternalTextScrubRegistryTest` 에 등록한다.** 등록 값은 셋이다 —
+위 둘(`강제 지점`·`값 타입`) 또는 **`미구현`**. 쓰는 코드가 아직 없으면 `미구현` 에 **담당 이슈
+번호**를 적는다. 「지금 당장 강제 지점을 만들라」가 아니라 **「정하고 기록하라」**다.
+
+⚠️ 그 테스트가 강제하는 것은 「스크럽했다」가 아니라 **「스크럽을 어떻게 할지 누군가 정했다」**
+이다 — 데이터 흐름 판정은 리플렉션으로 불가능하다.
+
+🕳 **그리고 「등록이 없으면 빌드가 깨진다」는 조건 없이 참이 아니다.** 스캐너가
+`independent && concrete` 클래스만 후보로 보므로 **abstract 클래스·비정적 내부 클래스에
+선언된 필드와 상속받은 필드는 검사에서 빠진다.** 지금 엔티티가 전부 구체·최상위라 실효
+손실이 없을 뿐이고, **공통 상위 엔티티를 도입하는 순간 뚫린다.**
+장치를 조건 없이 적으면 그 순간부터 거짓 안전감이 된다.
 
 #### 🔴 커밋 차단과 런타임 스크럽은 어긋난다
 
@@ -208,7 +217,7 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
 | S-1 | push 대상이 Fork 인가 (어설션 있는가) | 부분 — [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) |
 | S-2 | PR 이 draft 고정인가 · 머지/ready 호출이 없는가 | 부분 — 위 훅 |
 | S-3 | 대상 저장소 실행이 샌드박스 경유인가 | 부분 — 위 훅 |
-| S-4 | 시크릿이 코드·로그·프롬프트에 없는가 | 부분 — [`secret-scan.sh`](../../scripts/secret-scan.sh) + `support/secret` 테스트 4종 (#28) |
+| S-4 | 시크릿이 코드·로그·프롬프트에 없는가 | 부분 — [`secret-scan.sh`](../../scripts/secret-scan.sh) · 소스 검사 2종(`SecretPatternDriftTest`·`PromptBoundaryTest`). ⚠️ 마스킹 동작 자체는 **런타임 테스트**가 본다 (#28) |
 | S-5 | `RepositoryPolicy` 를 읽고 따르는가 | ❌ 리뷰 전용 |
 | S-6 | 승인 지점·재시도 상한이 살아 있는가 | ❌ 리뷰 전용 |
 

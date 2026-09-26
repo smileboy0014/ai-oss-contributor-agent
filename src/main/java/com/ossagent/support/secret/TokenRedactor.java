@@ -62,16 +62,45 @@ public final class TokenRedactor {
      * 대시와 {@code BEGIN} 사이의 공백도 마찬가지다 — RFC4716/SSH2 는
      * {@code ---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----} 로 쓴다.
      * 소문자 헤더까지 포함해 {@code (?i)} 로 받는다.
+     *
+     * <p>⚠️ <b>대시 반복을 {@code -+} 로 두면 그것 자체가 2차식이다.</b> 대시만 길게 이어진
+     * 입력(마크다운 구분선)에서 시작 위치마다 끝까지 먹고 되돌아온다 — 실측으로 대시
+     * 200,000개에 <b>3분 18초</b>였다. 상한을 둬도 탐지력은 줄지 않는다. 스캔이 시작 위치를
+     * 옮겨 가므로 대시가 20개든 헤더 직전 10개가 잡히기 때문이다.
      */
     private static final Pattern PEM_HEADER =
-            Pattern.compile("(?i)-+ ?BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-+");
+            Pattern.compile("(?i)-{1,10} ?BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-{0,10}");
 
     /** 같은 형식의 종료 줄. */
     private static final Pattern PEM_FOOTER =
-            Pattern.compile("(?i)-+ ?END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-+");
+            Pattern.compile("(?i)-{1,10} ?END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)? ?-{0,10}");
 
-    /** 키 본문으로 볼 수 있는 줄 — base64 한 덩어리. 공백이 없다는 것이 산문과의 차이다. */
-    private static final Pattern PEM_BODY_LINE = Pattern.compile("[A-Za-z0-9+/=]+[ \\t]*");
+    /**
+     * 키 본문으로 볼 수 있는 줄 — base64 한 덩어리.
+     *
+     * <p>{@code -}·{@code _} 는 <b>base64url</b> 때문에 들어 있다. JWT·JWK 계열이 그 표기를 쓴다.
+     */
+    private static final Pattern PEM_BODY_LINE = Pattern.compile("[A-Za-z0-9+/=_-]+");
+
+    /**
+     * 🔴 <b>키 본문에 붙은 장식.</b> 이것을 벗기지 않으면 <b>헤더만 가려지고 본문이 나간다</b> —
+     * 「가려졌다」고 보이는데 키는 새는, 가장 나쁜 모양이다.
+     *
+     * <p>키가 저장소에 실제로 나타나는 형태는 맨몸 PEM 파일이 아니다.
+     *
+     * <table border="1">
+     *   <caption>장식이 붙는 자리</caption>
+     *   <tr><td>YAML 임베드</td><td>{@code   MIIE…} — k8s Secret · Actions · Ansible. <b>1순위</b></td></tr>
+     *   <tr><td>diff 문맥 줄</td><td>{@code  MIIE…} — <b>diff 가 LLM 프롬프트의 본체다</b></td></tr>
+     *   <tr><td>diff 추가·삭제 줄</td><td>{@code +MIIE…} · {@code -MIIE…}</td></tr>
+     *   <tr><td>마크다운 인용</td><td>{@code &gt; MIIE…}</td></tr>
+     *   <tr><td>Java 문자열 연결</td><td>{@code "MIIE…\n" +}</td></tr>
+     * </table>
+     */
+    private static final String LINE_DECORATION = " \t>+-|\"'\\";
+
+    /** 본문 줄 뒤에 붙은 주석. */
+    private static final Pattern TRAILING_COMMENT = Pattern.compile("\\s+(?:#|//).*$");
 
     /** {@code Proc-Type: 4,ENCRYPTED} · {@code DEK-Info: …} — 암호화된 PEM 의 머리말. */
     private static final Pattern PEM_BODY_HEADER_LINE =
@@ -171,9 +200,39 @@ public final class TokenRedactor {
      * 사이에 <b>빈 줄</b>을 둔다(RFC 1421). 막으면 정작 키 본문이 그대로 나간다.
      */
     private static boolean isKeyBodyLine(String line) {
-        return line.isBlank()
-                || PEM_BODY_LINE.matcher(line).matches()
-                || PEM_BODY_HEADER_LINE.matcher(line).matches();
+        String bare = stripDecoration(line);
+        return bare.isEmpty()
+                || PEM_BODY_LINE.matcher(bare).matches()
+                || PEM_BODY_HEADER_LINE.matcher(bare).matches();
+    }
+
+    /**
+     * 키 본문에 붙은 장식을 벗긴다 — {@link #LINE_DECORATION}.
+     *
+     * <p>🔴 <b>이것이 없으면 헤더만 가려지고 본문이 나간다.</b> 들여쓰기 한 칸에 키가 새는데
+     * 겉보기에는 {@code ***REDACTED***} 가 찍혀 있어 <b>막혔다고 착각하게 된다.</b>
+     *
+     * <p>벗겨서 얻는 것과 잃는 것 — 키 블록 <b>안에서만</b> 쓰이므로, 과하게 벗겨 산문 한 줄을
+     * 더 먹는 손해는 그 블록 주변에 한정된다. 반대로 벗기지 않으면 <b>키 전체</b>가 나간다.
+     */
+    private static String stripDecoration(String line) {
+        String bare = TRAILING_COMMENT.matcher(line).replaceFirst("");
+        int start = 0;
+        int end = bare.length();
+        while (true) {
+            while (start < end && LINE_DECORATION.indexOf(bare.charAt(start)) >= 0) {
+                start++;
+            }
+            while (end > start && LINE_DECORATION.indexOf(bare.charAt(end - 1)) >= 0) {
+                end--;
+            }
+            // 자바 문자열 리터럴의 줄바꿈 이스케이프 — "MIIE…\n" + 형태에서 남는 꼬리
+            if (end - start >= 2 && bare.charAt(end - 2) == '\\' && bare.charAt(end - 1) == 'n') {
+                end -= 2;
+                continue;
+            }
+            return bare.substring(start, end);
+        }
     }
 
     /** {@code from} 이후 첫 줄바꿈의 위치. 없으면 입력의 끝. */

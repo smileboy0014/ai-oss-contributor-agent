@@ -70,6 +70,36 @@ class ImplementationPlanTest {
     }
 
     @Test
+    void 상위_참조가_섞인_경로를_거부한다() {
+        // 🔴 CREATE 경로는 실재 대조를 통과할 수 없어 사실상 모델이 지어낸 문자열이다.
+        //    그 값을 받아 실제로 파일을 만드는 것이 #18 이다
+        assertThatThrownBy(() -> new PlannedFile("src/../../etc/passwd", ChangeKind.CREATE, "만든다"))
+                .isInstanceOf(PlanRejectedException.class);
+        assertThatThrownBy(() -> new PlannedFile("/etc/passwd", ChangeKind.CREATE, "만든다"))
+                .isInstanceOf(PlanRejectedException.class);
+        assertThatThrownBy(() -> new PlannedFile("a/B.java\nGET /admin", ChangeKind.MODIFY, "고친다"))
+                .isInstanceOf(PlanRejectedException.class);
+    }
+
+    @Test
+    void 이름_안의_점_두_개는_막지_않는다() {
+        assertThat(new PlannedFile("src/foo..bar/Baz.java", ChangeKind.MODIFY, "고친다").path())
+                .as("문자열 검사가 아니라 세그먼트 검사다 — 무고한 이름을 막지 않는다")
+                .isEqualTo("src/foo..bar/Baz.java");
+    }
+
+    @Test
+    void 경로도_스크럽을_거친다_S4() {
+        String token = "ghp_" + "Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8";
+
+        var planned = new PlannedFile("src/" + token + "/B.java", ChangeKind.CREATE, "만든다");
+
+        assertThat(planned.path())
+                .as("intent 만 스크럽하고 path 를 면제하면 비대칭이다 — 같은 응답에서 왔다")
+                .doesNotContain(token);
+    }
+
+    @Test
     void 신규와_수정을_가른다() {
         var plan = new ImplementationPlan(
                 List.of(file("a/B.java"), new PlannedFile("a/C.java", ChangeKind.CREATE, "만든다")),

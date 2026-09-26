@@ -22,6 +22,9 @@ public record PlannedFile(
     /** {@code intent} 의 길이 상한. 계획 하나에 파일이 여럿이라 각 항목이 짧아야 읽힌다 */
     private static final int MAX_INTENT_LENGTH = 1_000;
 
+    /** 경로 길이 상한. 이보다 긴 저장소 경로는 실재하지 않는다 */
+    private static final int MAX_PATH_LENGTH = 400;
+
     /**
      * 파일에 가할 변경의 종류.
      *
@@ -56,7 +59,10 @@ public record PlannedFile(
         if (path == null || path.isBlank()) {
             throw new PlanRejectedException("계획이 지목한 파일 경로가 비어 있습니다");
         }
-        path = path.trim().replace('\\', '/');
+        // 🔴 path 도 모델 자유 텍스트다 — intent 만 스크럽하고 여기를 면제하면 비대칭이다.
+        //    같은 응답에서 왔고, 같은 곳(로그 · 거부 사유 · 재생성 프롬프트)으로 나간다
+        path = TokenRedactor.redact(path.trim().replace('\\', '/'));
+        requireSafeShape(path);
         if (change == null) {
             throw new PlanRejectedException("변경 종류는 필수입니다 path=" + path);
         }
@@ -65,6 +71,44 @@ public record PlannedFile(
         intent = TokenRedactor.redact(intent == null ? "" : intent.trim());
         if (intent.length() > MAX_INTENT_LENGTH) {
             intent = intent.substring(0, MAX_INTENT_LENGTH);
+        }
+    }
+
+    /**
+     * 경로가 <b>우리가 다룰 수 있는 모양</b>인가.
+     *
+     * <h2>🔴 {@code CREATE} 경로는 실재 대조를 통과할 수 없다</h2>
+     * {@code MODIFY} 는 「컨텍스트가 보여준 목록에 있는가」로 걸러지지만,
+     * <b>{@code CREATE} 는 그 대조가 성립하지 않는다</b>(새 파일은 없는 것이 정상이다).
+     * 그래서 사실상 <b>모델이 쓴 임의 문자열</b>이 그대로 흘러간다.
+     *
+     * <p>그 값을 받아 <b>실제로 파일을 만드는 것이 #18</b> 이다. {@code ../} 가 섞여 있으면
+     * 샌드박스 워크스페이스 밖에 쓰게 된다. 여기서 모양을 막아 두면 그 경로 자체가 생기지 않는다.
+     *
+     * <p>⚠️ {@code repository} 의 {@code RepositoryPathPolicy} 와 같은 규칙이지만
+     * <b>import 하지 않는다.</b> 남의 애그리거트에 정적 결합을 만드는 것보다
+     * 짧은 규칙을 각자 갖는 편이 싸다 — 검사할 대상이 다르기도 하다(저쪽은 GitHub 이 준 경로,
+     * 이쪽은 <b>모델이 지어낸</b> 경로다).
+     */
+    private static void requireSafeShape(String path) {
+        if (path.length() > MAX_PATH_LENGTH) {
+            throw new PlanRejectedException("계획이 지목한 경로가 너무 깁니다 length=" + path.length());
+        }
+        if (path.startsWith("/") || path.contains("://")) {
+            throw new PlanRejectedException("계획이 지목한 경로가 저장소 상대 경로가 아닙니다");
+        }
+        for (int i = 0; i < path.length(); i++) {
+            char c = path.charAt(i);
+            if (c < 0x20 || c == 0x7F) {
+                // 줄바꿈은 로그·프롬프트 양쪽에서 문제를 만든다
+                throw new PlanRejectedException("계획이 지목한 경로에 제어문자가 있습니다");
+            }
+        }
+        // 🔴 문자열 검사가 아니라 세그먼트 검사다 — "foo..bar" 를 무고하게 막지 않는다
+        for (String segment : path.split("/", -1)) {
+            if (segment.isEmpty() || ".".equals(segment) || "..".equals(segment)) {
+                throw new PlanRejectedException("계획이 지목한 경로에 상위 참조·빈 구간이 있습니다");
+            }
         }
     }
 

@@ -1,8 +1,5 @@
 package com.ossagent.candidate.application;
 
-import com.ossagent.candidate.adapter.out.persistence.ContributionCandidateRepository;
-import com.ossagent.candidate.domain.CandidateNotFoundException;
-import com.ossagent.candidate.domain.ContributionCandidate;
 import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.ImplementationPlanner;
 import com.ossagent.candidate.domain.PlanRejectedException;
@@ -17,13 +14,11 @@ import com.ossagent.repository.application.BuildRepositoryContextUseCase;
 import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.RepositoryContext;
 import com.ossagent.repository.domain.SelectedFile;
-import java.time.Clock;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
@@ -61,28 +56,25 @@ public class PlanImplementationUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(PlanImplementationUseCase.class);
 
-    private final ContributionCandidateRepository candidates;
+    private final CandidatePlanningWriter writer;
     private final FindAnalyzableIssuesUseCase issues;
     private final BuildRepositoryContextUseCase repositoryContexts;
     private final AnalyzeRepositoryPolicyUseCase policies;
     private final ImplementationPlanner planner;
     private final ImplementationPlanProperties properties;
-    private final Clock clock;
 
-    public PlanImplementationUseCase(ContributionCandidateRepository candidates,
+    public PlanImplementationUseCase(CandidatePlanningWriter writer,
             FindAnalyzableIssuesUseCase issues,
             BuildRepositoryContextUseCase repositoryContexts,
             AnalyzeRepositoryPolicyUseCase policies,
             ImplementationPlanner planner,
-            ImplementationPlanProperties properties,
-            Clock clock) {
-        this.candidates = candidates;
+            ImplementationPlanProperties properties) {
+        this.writer = writer;
         this.issues = issues;
         this.repositoryContexts = repositoryContexts;
         this.policies = policies;
         this.planner = planner;
         this.properties = properties;
-        this.clock = clock;
     }
 
     /**
@@ -99,7 +91,7 @@ public class PlanImplementationUseCase {
         }
         assertNoTransaction();
 
-        Snapshot snapshot = load(candidateId);
+        CandidatePlanningWriter.PlanningSnapshot snapshot = writer.load(candidateId);
         AnalyzableIssue issue = issues.findOne(snapshot.issueId())
                 .orElseThrow(() -> new IllegalStateException(
                         "후보가 가리키는 이슈가 없다 candidateId=" + candidateId));
@@ -140,7 +132,9 @@ public class PlanImplementationUseCase {
 
         // 🔴 S-6 — 상한 소진은 FAILED 이고 그 자체가 사람에게 넘기는 신호다.
         //    여기서 전이하지 않으면 후보가 SELECTED 에 박혀 아무도 모른다
-        failCandidate(candidateId);
+        // 🔴 별도 빈을 거친다 — 같은 클래스의 @Transactional 은 프록시를 타지 않는다
+        writer.failPlanning(candidateId);
+        log.error("구현 계획 상한 소진 candidateId={} — FAILED 로 종료한다 (S-6)", candidateId);
         throw new PlanExhaustedException(candidateId, properties.maxAttempts(),
                 lastVerdict == null ? java.util.List.of() : lastVerdict.violations());
     }
@@ -158,31 +152,12 @@ public class PlanImplementationUseCase {
     }
 
     /**
-     * 🔴 <b>대외 호출이 끝난 뒤의 짧은 트랜잭션</b>이다 — 루프 안에서 열지 않는다.
-     */
-    @Transactional
-    protected void failCandidate(Long candidateId) {
-        ContributionCandidate candidate = candidates.findById(candidateId)
-                .orElseThrow(() -> new CandidateNotFoundException(candidateId));
-        candidate.failPlanning(clock);
-        log.error("구현 계획 상한 소진 candidateId={} — FAILED 로 종료한다 (S-6)", candidateId);
-    }
-
-    @Transactional(readOnly = true)
-    protected Snapshot load(Long candidateId) {
-        ContributionCandidate candidate = candidates.findById(candidateId)
-                .orElseThrow(() -> new CandidateNotFoundException(candidateId));
-        return new Snapshot(candidate.getIssueId(), candidate.getEstimatedFiles(),
-                candidate.getEstimatedLoc());
-    }
-
-    /**
      * 범위 눈금 둘 — D-6.
      *
      * <p>이슈별 추정치는 #11 이 적재한 것이다. 없으면 {@link ScopeLimits} 가 그 검사를
      * 건너뛴다 — 모르는 것을 최강 제약으로 번역하지 않는다.
      */
-    private ScopeLimits scopeLimitsOf(Snapshot snapshot) {
+    private ScopeLimits scopeLimitsOf(CandidatePlanningWriter.PlanningSnapshot snapshot) {
         return new ScopeLimits(properties.maxPlannedFiles(), properties.maxPlannedLoc(),
                 snapshot.estimatedFiles(), snapshot.estimatedLoc(),
                 properties.scopeToleranceValue());
@@ -204,9 +179,5 @@ public class PlanImplementationUseCase {
                     "계획 수립을 트랜잭션 안에서 부를 수 없다 — LLM·GitHub 호출이 커넥션을 점유한다. "
                             + "호출자의 @Transactional 을 제거한다 (architecture.md 규율)");
         }
-    }
-
-    /** 후보에서 읽어 올 것만. 엔티티를 트랜잭션 밖으로 들고 나가지 않는다 */
-    protected record Snapshot(Long issueId, Integer estimatedFiles, Integer estimatedLoc) {
     }
 }

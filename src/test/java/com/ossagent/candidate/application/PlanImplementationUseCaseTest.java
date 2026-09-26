@@ -53,6 +53,7 @@ class PlanImplementationUseCaseTest {
             Clock.fixed(Instant.parse("2026-09-26T10:00:00Z"), ZoneOffset.UTC);
 
     private ContributionCandidateRepository candidates;
+    private CandidatePlanningWriter writer;
     private FindAnalyzableIssuesUseCase issues;
     private BuildRepositoryContextUseCase contexts;
     private AnalyzeRepositoryPolicyUseCase policies;
@@ -63,8 +64,13 @@ class PlanImplementationUseCaseTest {
     void setUp() {
         candidate = selectedCandidate();
 
+        // 🔴 실제 Writer 를 쓴다 — mock 으로 대체하면 「전이가 저장되는가」를 못 본다.
+        //    repository 만 mock 이고, saveAndFlush 가 불렸는지로 영속을 단언한다
         candidates = mock(ContributionCandidateRepository.class);
         given(candidates.findById(CANDIDATE_ID)).willReturn(Optional.of(candidate));
+        given(candidates.saveAndFlush(org.mockito.ArgumentMatchers.any()))
+                .willAnswer(invocation -> invocation.getArgument(0));
+        writer = new CandidatePlanningWriter(candidates, CLOCK);
 
         issues = mock(FindAnalyzableIssuesUseCase.class);
         given(issues.findOne(ISSUE_ID)).willReturn(Optional.of(issue()));
@@ -83,8 +89,8 @@ class PlanImplementationUseCaseTest {
     }
 
     private PlanImplementationUseCase useCaseWith(ImplementationPlanProperties properties) {
-        return new PlanImplementationUseCase(candidates, issues, contexts, policies, planner,
-                properties, CLOCK);
+        return new PlanImplementationUseCase(writer, issues, contexts, policies, planner,
+                properties);
     }
 
     // ── 성공 ─────────────────────────────────────────────────────────────────
@@ -156,6 +162,10 @@ class PlanImplementationUseCaseTest {
         assertThat(candidate.getStatus())
                 .as("상한 소진이 FAILED 로 못 가면 후보가 SELECTED 에 박혀 사람이 볼 신호가 없다")
                 .isEqualTo(CandidateStatus.FAILED);
+
+        // 🔴 메모리 상태만 보면 트랜잭션이 안 걸려도 통과한다. 저장까지 단언한다 —
+        //    초안은 UseCase 안에 @Transactional 을 두어 self-invocation 으로 조용히 새고 있었다
+        org.mockito.Mockito.verify(candidates).saveAndFlush(candidate);
     }
 
     @Test

@@ -11,6 +11,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.convert.DurationUnit;
+import org.springframework.util.unit.DataSize;
 
 /**
  * 샌드박스 설정 — #17 · S-3.
@@ -31,9 +32,10 @@ import org.springframework.boot.convert.DurationUnit;
  * @param defaultImage    알 수 없는 Java 버전의 폴백 이미지
  * @param warmNetwork     워밍 전용 네트워크 이름. 🔴 <b>자유 문자열이 아니다</b> —
  *                        {@code host}·{@code container:…} 를 거부한다
- * @param cpuQuota        {@code cpuPeriod} 대비 CPU 할당량
- * @param cpuPeriod       CPU 스케줄링 주기(마이크로초)
- * @param memoryBytes     메모리 상한
+ * @param cpuLimit        CPU 코어 수. {@code SANDBOX_CPU_LIMIT} 가 코어 단위라 그대로 받는다 —
+ *                        Docker 의 quota/period 환산은 여기서 한다. 운영자가 quota 를
+ *                        계산하게 두지 않는다
+ * @param memoryLimit     메모리 상한. {@code DataSize} 라 {@code 4GB} 처럼 단위를 적는다
  * @param pidsLimit       프로세스 수 상한 — fork 폭탄 방어
  * @param timeout         실행 1회의 상한. {@code agent.execution.*} 와 <b>다른 축</b>이다
  * @param warmTimeout     워밍의 상한. 실행보다 짧게
@@ -48,9 +50,8 @@ public record SandboxProperties(
         Path workspaceRoot,
         String defaultImage,
         String warmNetwork,
-        Long cpuQuota,
-        Long cpuPeriod,
-        Long memoryBytes,
+        Double cpuLimit,
+        DataSize memoryLimit,
         Long pidsLimit,
         @DurationUnit(ChronoUnit.SECONDS) Duration timeout,
         @DurationUnit(ChronoUnit.SECONDS) Duration warmTimeout,
@@ -60,9 +61,16 @@ public record SandboxProperties(
 
     private static final String DEFAULT_IMAGE = "eclipse-temurin:21-jdk";
     private static final String DEFAULT_WARM_NETWORK = "oss-agent-warm";
-    private static final long DEFAULT_CPU_QUOTA = 200_000L;    // cpuPeriod 대비 2코어
-    private static final long DEFAULT_CPU_PERIOD = 100_000L;   // Docker 기본
-    private static final long DEFAULT_MEMORY_BYTES = 4L * 1024 * 1024 * 1024;
+    private static final double DEFAULT_CPU_LIMIT = 2.0;
+    private static final DataSize DEFAULT_MEMORY = DataSize.ofGigabytes(4);
+
+    /**
+     * CPU 스케줄링 주기(마이크로초) — Docker 기본값.
+     *
+     * <p>설정으로 열지 않는다. 운영자가 조정할 것은 <b>코어 수</b>이지 주기가 아니고,
+     * 주기를 노출하면 quota 와 함께 틀리게 맞출 여지만 생긴다.
+     */
+    private static final long CPU_PERIOD = 100_000L;
     private static final long DEFAULT_PIDS_LIMIT = 512L;
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(30);
     private static final Duration DEFAULT_WARM_TIMEOUT = Duration.ofMinutes(20);
@@ -85,10 +93,12 @@ public record SandboxProperties(
     public SandboxProperties {
         defaultImage = blankTo(defaultImage, DEFAULT_IMAGE);
         warmNetwork = requireSafeNetwork(blankTo(warmNetwork, DEFAULT_WARM_NETWORK));
-        cpuQuota = nullTo(cpuQuota, DEFAULT_CPU_QUOTA);
-        cpuPeriod = nullTo(cpuPeriod, DEFAULT_CPU_PERIOD);
-        memoryBytes = nullTo(memoryBytes, DEFAULT_MEMORY_BYTES);
+        cpuLimit = nullTo(cpuLimit, DEFAULT_CPU_LIMIT);
+        memoryLimit = nullTo(memoryLimit, DEFAULT_MEMORY);
         pidsLimit = nullTo(pidsLimit, DEFAULT_PIDS_LIMIT);
+        if (cpuLimit <= 0) {
+            throw new SandboxPermanentException("CPU 코어 수는 양수여야 한다: " + cpuLimit);
+        }
         timeout = nullTo(timeout, DEFAULT_TIMEOUT);
         warmTimeout = nullTo(warmTimeout, DEFAULT_WARM_TIMEOUT);
         logTimeout = nullTo(logTimeout, DEFAULT_LOG_TIMEOUT);
@@ -104,12 +114,18 @@ public record SandboxProperties(
 
     /** 실행 단계 상한. 값이 비면 {@link SandboxLimits} 가 거부한다. */
     public SandboxLimits executeLimits() {
-        return new SandboxLimits(cpuQuota, cpuPeriod, memoryBytes, pidsLimit, timeout);
+        return limitsWith(timeout);
     }
 
     /** 워밍·씨딩 상한. 실행보다 짧다. */
     public SandboxLimits warmLimits() {
-        return new SandboxLimits(cpuQuota, cpuPeriod, memoryBytes, pidsLimit, warmTimeout);
+        return limitsWith(warmTimeout);
+    }
+
+    private SandboxLimits limitsWith(Duration effectiveTimeout) {
+        return new SandboxLimits(
+                Math.round(cpuLimit * CPU_PERIOD), CPU_PERIOD,
+                memoryLimit.toBytes(), pidsLimit, effectiveTimeout);
     }
 
     /**

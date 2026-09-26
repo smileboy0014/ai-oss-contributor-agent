@@ -84,18 +84,25 @@ public record SandboxWorkspace(Path path) {
      */
     public static Path requireValidRoot(Path root) {
         if (root == null || root.toString().isBlank()) {
+            // 🔴 비어 있으면 「모든 경로가 루트 하위」가 된다 — 제한이 있는 척하면서 없는 상태다.
+            //    구체적인 기본 루트는 위반이 아니지만, 루트가 없는 것은 위반이다
             throw new SandboxPermanentException(
-                    "sandbox.workspace-root 는 필수다 — 없으면 경로 제한이 무력해진다 (S-3)");
+                    "sandbox.workspace-root 가 비었다 — 경로 제한이 무력해진다 (S-3)");
         }
-        if (!root.isAbsolute()) {
-            // 상대경로는 작업 디렉토리에 따라 가리키는 곳이 달라진다
+        // 상대경로는 작업 디렉토리에 따라 가리키는 곳이 달라진다. 기동 시점에 절대경로로
+        // 확정해 두면 그 흔들림이 사라진다 — 운영자에게 절대경로를 강요할 이유는 없다
+        Path absolute = root.toAbsolutePath().normalize();
+        try {
+            // 없으면 만든다. 「루트가 없어서 기동 실패」는 운영자에게 아무것도 알려주지 않고,
+            // 무엇보다 이 디렉토리는 우리가 소유하는 작업 공간이다
+            Files.createDirectories(absolute);
+        } catch (IOException e) {
             throw new SandboxPermanentException(
-                    "sandbox.workspace-root 는 절대경로여야 한다 (S-3): " + root);
+                    "sandbox.workspace-root 를 만들 수 없다 (S-3)");
         }
-        Path resolved = realPathOf(root);
+        Path resolved = realPathOf(absolute);
         if (!Files.isDirectory(resolved)) {
-            throw new SandboxPermanentException(
-                    "sandbox.workspace-root 가 디렉토리가 아니다 (S-3): " + root);
+            throw new SandboxPermanentException("sandbox.workspace-root 가 디렉토리가 아니다 (S-3)");
         }
         return resolved;
     }

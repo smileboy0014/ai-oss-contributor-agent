@@ -420,6 +420,6 @@ class SandboxContainerSpecTest {
 
     private static SandboxProperties properties(Path root, String warmNetwork) {
         return new SandboxProperties(root, null, warmNetwork,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null);
     }
 }

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * S-4 — 토큰이 문자열을 타고 나가지 않는지.
@@ -32,10 +33,18 @@ class TokenRedactorTest {
      */
     private static final String FAKE_KEY_BODY = "NOTAREALKEYFORTESTSONLY";
 
+    /**
+     * 실제 PEM·PGP 본문 줄 길이(64~70자)에 맞춘 것.
+     *
+     * <p>⚠️ 진입 문턱이 {@code MIN_KEY_BODY_LENGTH} 자라, <b>짧은 샘플로는 문턱 자체를
+     * 검증할 수 없다.</b> 「샘플이 먼저 대표여야 한다」 — testing-philosophy.md.
+     */
+    private static final String LONG_KEY_BODY = FAKE_KEY_BODY.repeat(3);
+
     private static final String FAKE_PEM_BLOCK = String.join("\n",
             "-----BEGIN RSA PRIVATE KEY-----",
-            FAKE_KEY_BODY,
-            FAKE_KEY_BODY,
+            LONG_KEY_BODY,
+            LONG_KEY_BODY,
             "-----END RSA PRIVATE KEY-----");
 
     @Test
@@ -104,7 +113,7 @@ class TokenRedactorTest {
 
         assertThat(redacted)
                 .as("헤더만 가리고 키 본문을 흘려보내면 스크럽한 의미가 없다")
-                .doesNotContain(FAKE_KEY_BODY)
+                .doesNotContain(LONG_KEY_BODY)
                 .doesNotContain("BEGIN RSA PRIVATE KEY")
                 .contains(TokenRedactor.MASK);
         assertThat(redacted)
@@ -143,11 +152,11 @@ class TokenRedactorTest {
         // 🔴 이 PR 이전에는 런타임·커밋 차단 양쪽이 이것을 놓쳤다.
         //    PRIVATE KEY 직후에 대시를 요구했는데 PGP 는 사이에 「 BLOCK」이 낀다
         String text = "키 첨부합니다\n-----BEGIN PGP PRIVATE KEY BLOCK-----\n"
-                + FAKE_KEY_BODY + "\n-----END PGP PRIVATE KEY BLOCK-----\n확인 부탁드려요";
+                + LONG_KEY_BODY + "\n-----END PGP PRIVATE KEY BLOCK-----\n확인 부탁드려요";
 
         assertThat(TokenRedactor.redact(text))
                 .as("가장 잘 빠져나가는 형식이다 — 형식 하나가 빠지면 그 키는 통째로 나간다")
-                .doesNotContain(FAKE_KEY_BODY)
+                .doesNotContain(LONG_KEY_BODY)
                 .contains(TokenRedactor.MASK)
                 .startsWith("키 첨부합니다")
                 .endsWith("확인 부탁드려요");
@@ -156,15 +165,15 @@ class TokenRedactorTest {
     @Test
     @DisplayName("SSH2·소문자 헤더 형식도 가린다")
     void 다른_표기_형식도_가린다_S4() {
-        String ssh2 = "---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\n" + FAKE_KEY_BODY;
-        String lowercase = "-----begin rsa private key-----\n" + FAKE_KEY_BODY;
+        String ssh2 = "---- BEGIN SSH2 ENCRYPTED PRIVATE KEY ----\n" + LONG_KEY_BODY;
+        String lowercase = "-----begin rsa private key-----\n" + LONG_KEY_BODY;
 
         assertThat(TokenRedactor.redact(ssh2))
                 .as("RFC4716 은 대시와 BEGIN 사이에 공백을 둔다")
-                .doesNotContain(FAKE_KEY_BODY);
+                .doesNotContain(LONG_KEY_BODY);
         assertThat(TokenRedactor.redact(lowercase))
                 .as("대소문자로 스크럽을 피할 수 있으면 안 된다")
-                .doesNotContain(FAKE_KEY_BODY);
+                .doesNotContain(LONG_KEY_BODY);
     }
 
     @Test
@@ -177,12 +186,12 @@ class TokenRedactorTest {
                 "Proc-Type: 4,ENCRYPTED",
                 "DEK-Info: AES-128-CBC,0123456789ABCDEF",
                 "",
-                FAKE_KEY_BODY,
+                LONG_KEY_BODY,
                 "-----END RSA PRIVATE KEY-----");
 
         assertThat(TokenRedactor.redact(encrypted))
                 .as("머리말·빈 줄에서 멈추면 그 아래 키 본문이 통째로 나간다")
-                .doesNotContain(FAKE_KEY_BODY)
+                .doesNotContain(LONG_KEY_BODY)
                 .doesNotContain("DEK-Info");
     }
 
@@ -213,25 +222,25 @@ class TokenRedactorTest {
     @DisplayName("END 가 없는 진짜 키 본문은 끝까지 가린다")
     void END_가_없는_진짜_키는_본문을_가린다_S4() {
         String truncated = "앞부분 설명\n-----BEGIN EC PRIVATE KEY-----\n"
-                + FAKE_KEY_BODY + "\n" + FAKE_KEY_BODY;
+                + LONG_KEY_BODY + "\n" + LONG_KEY_BODY;
 
         assertThat(TokenRedactor.redact(truncated))
                 .as("잘린 파일이라는 이유로 키 본문이 나가면 안 된다")
-                .doesNotContain(FAKE_KEY_BODY)
+                .doesNotContain(LONG_KEY_BODY)
                 .startsWith("앞부분 설명");
     }
 
     @Test
     @DisplayName("연속된 블록을 모두 가린다")
     void 연속된_블록을_모두_가린다_S4() {
-        String two = "-----BEGIN RSA PRIVATE KEY-----\n" + FAKE_KEY_BODY
+        String two = "-----BEGIN RSA PRIVATE KEY-----\n" + LONG_KEY_BODY
                 + "\n-----END RSA PRIVATE KEY-----\n사이 설명\n"
-                + "-----BEGIN EC PRIVATE KEY-----\n" + FAKE_KEY_BODY
+                + "-----BEGIN EC PRIVATE KEY-----\n" + LONG_KEY_BODY
                 + "\n-----END EC PRIVATE KEY-----";
 
         assertThat(TokenRedactor.redact(two))
                 .as("비탐욕 매칭에서 두 번째 블록이 새는 일이 흔하다")
-                .doesNotContain(FAKE_KEY_BODY)
+                .doesNotContain(LONG_KEY_BODY)
                 .contains("사이 설명");
     }
 
@@ -263,7 +272,7 @@ class TokenRedactorTest {
         //    「가려진 것처럼 보이는데 키는 나가는」 것이 가장 나쁜 모양이다
         assertThat(TokenRedactor.redact(text))
                 .as("%s — 헤더만 가려지고 본문이 나가면 스크럽한 의미가 없다", 형태)
-                .doesNotContain(FAKE_KEY_BODY);
+                .doesNotContain(LONG_KEY_BODY);
     }
 
     static Stream<Arguments> 장식이_붙은_키_본문() {
@@ -272,26 +281,26 @@ class TokenRedactorTest {
         return Stream.of(
                 // k8s Secret · GitHub Actions · Ansible · application.yml — 실전 1순위
                 Arguments.of("YAML 2칸 들여쓰기",
-                        "key: |\n  " + header + "\n  " + FAKE_KEY_BODY + "\n  " + footer),
+                        "key: |\n  " + header + "\n  " + LONG_KEY_BODY + "\n  " + footer),
                 Arguments.of("YAML 4칸 들여쓰기",
-                        "key: |\n    " + header + "\n    " + FAKE_KEY_BODY + "\n    " + footer),
+                        "key: |\n    " + header + "\n    " + LONG_KEY_BODY + "\n    " + footer),
                 Arguments.of("탭 들여쓰기",
-                        "key: |\n\t" + header + "\n\t" + FAKE_KEY_BODY + "\n\t" + footer),
+                        "key: |\n\t" + header + "\n\t" + LONG_KEY_BODY + "\n\t" + footer),
                 // diff 는 LLM 프롬프트의 본체다
                 Arguments.of("diff 문맥 줄",
-                        " " + header + "\n " + FAKE_KEY_BODY + "\n " + footer),
+                        " " + header + "\n " + LONG_KEY_BODY + "\n " + footer),
                 Arguments.of("diff 추가 줄",
-                        "+" + header + "\n+" + FAKE_KEY_BODY + "\n+" + footer),
+                        "+" + header + "\n+" + LONG_KEY_BODY + "\n+" + footer),
                 Arguments.of("diff 삭제 줄",
-                        "-" + header + "\n-" + FAKE_KEY_BODY + "\n-" + footer),
+                        "-" + header + "\n-" + LONG_KEY_BODY + "\n-" + footer),
                 Arguments.of("마크다운 인용",
-                        "> " + header + "\n> " + FAKE_KEY_BODY + "\n> " + footer),
+                        "> " + header + "\n> " + LONG_KEY_BODY + "\n> " + footer),
                 Arguments.of("자바 문자열 연결",
-                        "\"" + header + "\\n\" +\n\"" + FAKE_KEY_BODY + "\\n\" +\n\"" + footer + "\""),
+                        "\"" + header + "\\n\" +\n\"" + LONG_KEY_BODY + "\\n\" +\n\"" + footer + "\""),
                 Arguments.of("본문 뒤 주석",
-                        header + "\n" + FAKE_KEY_BODY + "   # 운영 키\n" + footer),
+                        header + "\n" + LONG_KEY_BODY + "   # 운영 키\n" + footer),
                 Arguments.of("base64url 본문",
-                        header + "\n" + FAKE_KEY_BODY + "-_\n" + footer));
+                        header + "\n" + LONG_KEY_BODY + "-_\n" + footer));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")
@@ -327,7 +336,7 @@ class TokenRedactorTest {
         // 🔴 장식을 「벗길 문자 목록」으로 두면 목록에 없는 형태마다 구멍이 새로 난다.
         //    세 번 연속 그렇게 깨졌다. 이제는 여집합 + 장식 길이 예산으로 본다 —
         //    장식의 모양을 몰라도 양으로 판정한다
-        String body = FAKE_KEY_BODY + FAKE_KEY_BODY;   // 실제 본문 길이에 가깝게
+        String body = LONG_KEY_BODY;
         String text = prefix + "-----BEGIN RSA PRIVATE KEY-----" + suffix + "\n"
                 + prefix + body + suffix + "\n"
                 + prefix + "-----END RSA PRIVATE KEY-----" + suffix;
@@ -348,6 +357,58 @@ class TokenRedactorTest {
                 Arguments.of("줄이음 역슬래시", "", " \\"));
     }
 
+    @ParameterizedTest(name = "[{index}] {0}")
+    @MethodSource("진입_문턱을_비껴가는_키")
+    @DisplayName("첫 줄이 자격에 못 미쳐도 블록 전체가 새지 않는다")
+    void 진입_문턱이_블록을_통째로_흘리지_않는다_S4(String 형태, String text) {
+        // 🔴 진입 판정을 「바로 다음 한 줄」에만 걸었더니, 그 줄이 자격에 못 미치는 순간
+        //    블록 전체가 샜다. 한 줄 판정이 틀리면 키가 통째로 나가는 고레버리지 실패다.
+        //    gpg 2.1+ 는 Version: 을 생략해 헤더 다음이 빈 줄이다 — 지금 GPG export 의 표준 모양
+        assertThat(TokenRedactor.redact(text))
+                .as("%s — 첫 줄 하나로 블록 전체의 운명이 갈리면 안 된다", 형태)
+                .doesNotContain(LONG_KEY_BODY);
+    }
+
+    static Stream<Arguments> 진입_문턱을_비껴가는_키() {
+        String pgp = "-----BEGIN PGP PRIVATE KEY BLOCK-----";
+        String pem = "-----BEGIN RSA PRIVATE KEY-----";
+        return Stream.of(
+                Arguments.of("PGP Version 머리말", pgp + "\nVersion: GnuPG v2\n\n" + LONG_KEY_BODY),
+                Arguments.of("헤더 직후 빈 줄 (gpg 2.1+)", pgp + "\n\n" + LONG_KEY_BODY),
+                Arguments.of("PEM 헤더 직후 빈 줄", pem + "\n\n" + LONG_KEY_BODY),
+                Arguments.of("첫 줄이 12자", pem + "\nMIIEowIBAAKC\n" + LONG_KEY_BODY),
+                Arguments.of("첫 줄이 19자", pem + "\nMIIEowIBAAKCAQEAsec\n" + LONG_KEY_BODY),
+                Arguments.of("RFC4880 Hash 머리말", pgp + "\nHash: SHA256\n\n" + LONG_KEY_BODY));
+    }
+
+    @ParameterizedTest(name = "[{index}] {0}칸 들여쓰기")
+    @ValueSource(ints = {4, 8, 9, 10, 12, 16})
+    @DisplayName("깊은 들여쓰기에서도 키 본문을 가린다")
+    void 깊은_들여쓰기에서도_가린다_S4(int 들여쓰기) {
+        // 🔴 장식 예산을 상수 8 로 두었더니 9칸부터 샜다. k8s Secret·Helm·Actions 는
+        //    8~12칸이 일상이고 그 파일의 diff 는 접두어가 붙어 1이 더 늘어난다.
+        //    이제 예산을 헤더 줄에서 유도한다 — 본문은 헤더와 같은 장식을 달고 있다
+        String pad = " ".repeat(들여쓰기);
+        String text = "tls.key: |\n" + pad + "-----BEGIN RSA PRIVATE KEY-----\n"
+                + pad + LONG_KEY_BODY + "\n" + pad + "-----END RSA PRIVATE KEY-----";
+
+        assertThat(TokenRedactor.redact(text))
+                .as("%d칸 — 매직넘버가 아니라 헤더가 달고 있는 만큼을 따라가야 한다", 들여쓰기)
+                .doesNotContain(LONG_KEY_BODY);
+    }
+
+    @Test
+    @DisplayName("YAML diff 처럼 장식이 겹쳐도 가린다")
+    void 겹친_장식에서도_가린다_S4() {
+        String pad = "+        ";   // diff 추가 줄 + 8칸 = 9자
+        String text = pad + "-----BEGIN RSA PRIVATE KEY-----\n"
+                + pad + LONG_KEY_BODY + "\n" + pad + "-----END RSA PRIVATE KEY-----";
+
+        assertThat(TokenRedactor.redact(text))
+                .as("k8s Secret 을 고치는 diff 가 정확히 이 모양이다")
+                .doesNotContain(LONG_KEY_BODY);
+    }
+
     @Test
     @DisplayName("공백만 긴 줄에서도 선형으로 돈다")
     void 공백_런에서도_선형이다_S4() {
@@ -365,7 +426,7 @@ class TokenRedactorTest {
         // 🔴 회귀 방지. 원래 BEGIN…[\s\S]*?…END 는 END 없는 BEGIN 마다 입력 끝까지
         //    재스캔해 O(n²) 였다 — 실측 131KB 에 76초. GitHub 이슈 본문 상한이 65,536자이고
         //    이 코드는 수집되는 모든 이슈가 지나는 자리다(IssueSnapshot).
-        String unit = "-----BEGIN RSA PRIVATE KEY-----\n" + FAKE_KEY_BODY + "\n";
+        String unit = "-----BEGIN RSA PRIVATE KEY-----\n" + LONG_KEY_BODY + "\n";
 
         assertLinear("END 없는 헤더 반복", unit.repeat(200), unit.repeat(1600));
     }

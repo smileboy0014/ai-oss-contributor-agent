@@ -99,15 +99,28 @@ class SecretPatternDriftTest {
      * <p>실제 PEM 본문처럼 base64 문자만 쓴다 — 스캐너가 「키 본문으로 볼 수 있는 줄」을
      * base64 모양으로 판정하기 때문이다.
      */
-    private static final String FAKE_KEY_BODY = "NOTAREALKEYFORTESTSONLY";
+    private static final String FAKE_KEY_BODY = "NOTAREALKEYFORTESTSONLY".repeat(3);
 
     /**
-     * 🔴 <b>PGP 형식을 대표 샘플로 둔다.</b> {@code PRIVATE KEY} 뒤에 {@code  BLOCK} 이
-     * 끼는 형식이고, 이 PR 이전에는 <b>양쪽 모두</b> 이것을 놓치고 있었다.
-     * 가장 잘 빠져나가는 모양을 대표로 세워야 대응표가 알리바이가 되지 않는다.
+     * 🔴 <b>가장 잘 빠져나가는 모양을 대표로 둔다.</b> 이 샘플 하나에 실제로 샜던 것 셋이
+     * 모여 있다.
+     *
+     * <ul>
+     *   <li><b>PGP</b> — {@code PRIVATE KEY} 뒤에 {@code  BLOCK} 이 낀다.
+     *       이 PR 이전에는 <b>런타임·커밋 차단 양쪽</b>이 놓쳤다</li>
+     *   <li><b>{@code Version:} 머리말</b> — 머리말 목록을 좁히다 빠뜨렸더니
+     *       PGP armor 가 통째로 빠져나갔다 (RFC 4880)</li>
+     *   <li><b>머리말 뒤의 빈 줄</b> — gpg 2.1+ 의 표준 출력 모양이고,
+     *       진입 판정이 여기서 끊겨 키 전체가 샜다</li>
+     * </ul>
+     *
+     * <p>⚠️ 처음에는 맨몸 PGP 블록만 두었는데, 그것으로는 뒤의 둘을 <b>잡을 수 없었다.</b>
+     * 「샘플이 먼저 대표여야 한다」 — {@code testing-philosophy.md}.
      */
     private static final String SAMPLE_PEM = String.join("\n",
             "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+            "Version: GnuPG v2",
+            "",
             FAKE_KEY_BODY,
             "-----END PGP PRIVATE KEY BLOCK-----");
 

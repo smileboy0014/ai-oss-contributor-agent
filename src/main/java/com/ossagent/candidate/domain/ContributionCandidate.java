@@ -257,8 +257,24 @@ public class ContributionCandidate {
      * <p>{@code SELECTED} 는 종단이 아니므로 「종단에서 나가는 전이 금지」에 걸리지 않는다.
      * {@code REJECTED} 는 종단이라 다시 고르려면 재분석이 필요하다 — <b>의도다.</b>
      * 번복이 가벼우면 승인이 가벼워진다.
+     *
+     * <p>🔴 <b>출발 상태를 여기서 직접 본다 — 전이표에 맡기지 않는다.</b>
+     * {@code ANALYZED → REJECTED} 도 전이표에는 있어서(
+     * {@link #rejectAsInfeasible(Clock)} 의 길이다) 맡겨 두면 이 메서드가
+     * <b>그것과 같은 것</b>이 된다. 그러면 「사람이 물렸다」와 「시스템이 불가 판정했다」가
+     * 구분되지 않고, 둘이 같아진 순간 다음 사람이 <b>메서드 하나로 합친다.</b>
+     * 그 시점에 Q-5 의 「<b>자동 취소 경로를 만들지 않는다</b>」를 붙들고 있는 것이
+     * 아무것도 남지 않는다.
+     *
+     * <p>{@code startImplementing} 이 {@code selectedAt} 을 한 번 더 보는 것과 같은 이유다 —
+     * 전이표가 대신 막고 있다는 사실에 기대지 않는다.
      */
     public StatusTransition cancelSelection(Clock clock) {
+        if (this.status != CandidateStatus.SELECTED) {
+            throw new CandidateTransitionException(
+                    "고르지 않은 후보는 선택을 취소할 수 없습니다 candidateId=" + id
+                            + " status=" + this.status + " (Q-5 확정 ②는 SELECTED 에서만 열린다)");
+        }
         return transitionTo(CandidateStatus.REJECTED, clock);
     }
 

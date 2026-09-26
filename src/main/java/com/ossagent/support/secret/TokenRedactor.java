@@ -227,6 +227,13 @@ public final class TokenRedactor {
      *
      * <p>🕳 지울 수 있는지 <b>측정해 봤다.</b> 상수로 되돌리면 그 케이스가 회귀한다.
      * {@code +2} 는 본문 줄에만 붙는 꼬리({@code ,} · {@code ;})의 몫이다.
+     *
+     * <p>📌 <b>더 단순한 길이 있다</b> — {@link #shapeOf} 의 장식 계산을 「전체 길이 − 런」이
+     * 아니라 <b>「런 밖의 비공백 문자 수」</b>로 바꾸면 이 메서드를 <b>삭제</b>할 수 있다.
+     * #28 의 6차 리뷰에서 전체 프로브로 <b>회귀 0건</b>이 확인됐다.
+     * 여기서 적용하지 않은 이유는 그때 남은 blocker 를 닫는 것이 우선이었고,
+     * <b>리뷰가 6라운드 돌아간 보안 핵심부에 급하지 않은 변경을 끼워 넣지 않기로</b> 했기
+     * 때문이다 — 이 PR 에서 반복해 배운 것이 그것이다. 다음 정리 때 본다.
      */
     private static int decorationBudget(String text, int headerStart) {
         int lineStart = headerStart;

@@ -1,5 +1,6 @@
 package com.ossagent.candidate.domain;
 
+import com.ossagent.repository.domain.PolicyClearance;
 import com.ossagent.support.ExternalText;
 import com.ossagent.support.secret.TokenRedactor;
 import jakarta.persistence.Column;
@@ -264,14 +265,30 @@ public class ContributionCandidate {
     /**
      * {@code SELECTED → IMPLEMENTING} — 첫 바퀴. {@code attempt} 가 1 이 된다.
      *
-     * <p>🔴 <b>호출자는 S-5 를 확인할 의무를 진다.</b> 이 메서드는 대상 저장소의
-     * {@code RepositoryPolicy} 를 보지 않는다 — 그 데이터는 {@code repository} 애그리거트에
-     * 있고 여기서 읽으면 규율 ④ 위반이다. 그러나 <b>「{@code RepositoryPolicy} 없이 구현
-     * 단계로 넘어가지 않는다」(S-5)를 지키는 문이 바로 이 메서드다.</b>
-     * 호출자(UseCase)가 정책 확인과 AI 기여 허용 판정({@code aiContributionAllowed != null}
-     * 이고 {@code TRUE})을 <b>먼저</b> 해야 한다 — 배선은 #24.
+     * <p>🔴 <b>「{@code RepositoryPolicy} 없이 구현 단계로 넘어가지 않는다」(S-5)를 지키는
+     * 문이 이 메서드다.</b> 이 메서드는 대상 저장소의 정책을 <b>보지 않는다</b> — 그 데이터는
+     * {@code repository} 애그리거트에 있고 여기서 읽으면 규율 ④ 위반이다.
+     *
+     * <p>#12 까지는 그 의무가 <b>javadoc 한 줄</b>이었다. 이제
+     * {@link PolicyClearance} 를 인자로 요구하므로 <b>확인 없이 호출하는 것이 컴파일되지
+     * 않는다</b> — 통행증은 {@code RepositoryPolicy.clearance()} 만 발급하고,
+     * 그쪽은 {@code aiContributionAllowed} 가 <b>{@code TRUE} 일 때만</b> 내준다
+     * (보류 {@code NULL} 은 통과가 아니다 — Q-8).
+     *
+     * <p>⚠️ <b>타입만으로는 부족하다.</b> {@code startImplementing(null, …)} 은 정상
+     * 컴파일된다 — 런타임 가드가 없으면 게이트가 아니다.
+     *
+     * <p>⚠️ <b>통행증이 이 후보의 것인지 여기서 검증하지 못한다.</b> 후보는 {@code issueId}
+     * 만 들고 있어 자기 {@code repositoryId} 를 모른다. 다만
+     * {@code AnalyzeRepositoryPolicyUseCase.clearanceFor(repositoryId)} 가 유일한 발급
+     * 경로이고 받은 통행증의 id 는 <b>항상 조회한 그 id</b> 라, 호출자가 후보의 저장소로
+     * 조회하기만 하면 어긋날 수 없다. 배선은 #18.
      */
-    public StatusTransition startImplementing(int maxAttempts, Clock clock) {
+    public StatusTransition startImplementing(PolicyClearance clearance, int maxAttempts, Clock clock) {
+        if (clearance == null) {
+            throw new IllegalArgumentException(
+                    "정책 통행증 없이 구현 단계로 넘어갈 수 없다 — RepositoryPolicy 를 먼저 확인한다 (S-5)");
+        }
         guardAttemptBudget(maxAttempts);
         guardHumanSelection();
         StatusTransition transition = transitionTo(CandidateStatus.IMPLEMENTING, clock);

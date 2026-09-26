@@ -50,6 +50,20 @@ public class FakeRepositorySource implements RepositorySource {
     }
 
     /**
+     * ⚠️ 형제 대역들과 달리 이 메서드가 없었다 — 그런데 {@link #fetchedPaths} 는
+     * <b>누적된다.</b> 대역은 싱글턴이고 컨텍스트가 테스트 클래스 사이에 캐시되므로,
+     * 초기화하지 않으면 <b>앞 테스트의 흔적을 본다</b>({@code testing-philosophy.md}).
+     * 호출 기록을 단언하는 테스트는 {@code @BeforeEach} 에서 부른다.
+     */
+    public FakeRepositorySource reset() {
+        metadata.clear();
+        files.clear();
+        fetchedPaths.clear();
+        failure = null;
+        return this;
+    }
+
+    /**
      * ⚠️ 미등록 저장소에서 던지는 {@link IllegalStateException} 은 <b>「저장소가 없다」가 아니라
      * 「테스트 셋업이 빠졌다」</b>는 뜻이다. 실제 구현은 그 경우 다른 예외를 던진다.
      *

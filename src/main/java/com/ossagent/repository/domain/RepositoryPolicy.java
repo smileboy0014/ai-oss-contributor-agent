@@ -188,8 +188,15 @@ public class RepositoryPolicy {
             // 조이는 방향(allowed == false)은 아래로 통과한다
             throw new PolicyResolutionRejectedException("이미 허용된 정책이다 — 해소할 것이 없다");
         }
+        // 🔴 검증을 전부 끝낸 뒤에 쓴다. 한 줄이라도 먼저 대입하면 거부된 해소가
+        //    「절반만 적용된 엔티티」를 남긴다 — 여기서는 사유 없는 요청이
+        //    aiContributionAllowed=true · resolvedAt=null 을 만들었고, 그것은
+        //    「사람이 풀지 않았는데 허용」, 즉 기계 판정으로 위장한 허용이다.
+        //    호출자가 예외를 잡고 같은 트랜잭션을 계속하면 dirty checking 이 그대로 flush 한다
+        String resolved = truncate(TokenRedactor.redact(requireNote(note)));
+
         this.aiContributionAllowed = allowed;
-        this.resolutionNote = truncate(TokenRedactor.redact(requireNote(note)));
+        this.resolutionNote = resolved;
         this.resolvedAt = clock.instant();
         this.updatedAt = clock.instant();
     }

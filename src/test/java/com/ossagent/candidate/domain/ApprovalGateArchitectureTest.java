@@ -67,11 +67,20 @@ class ApprovalGateArchitectureTest {
      * 그 규칙은 <b>Gradle 의 출력 경로 관례</b>에 기대므로 의도를 한 번 더 못 박는다.
      *
      * <p>🔴 <b>그 「한 번 더」가 공짜가 아니다.</b> 문자열로 경로를 거르는 람다를 더한 것은
-     * <b>매칭 실패점을 하나 늘린 것</b>이기도 하다. 그 람다가 넓게 물어
-     * {@code com.ossagent.repository.**} 가 통째로 빠져도 규칙 ①·①b·③ 은
-     * <b>검사 대상이 사라져 공허하게 초록</b>이 된다 — 그런데 ①을 허용목록으로 쓴 이유가
-     * 바로 {@code repository.application} 의 자동 실행자를 덮으려던 것이다.
-     * 그래서 아래 {@code 판정_대상이_임포트에_실재한다_모수} 가 필요하다 —
+     * <b>매칭 실패점을 하나 늘린 것</b>이기도 하다.
+     *
+     * <p><b>실측</b> — 그 람다가 넓게 물어 {@code com/ossagent/repository/application} 이
+     * 빠지면, 모수 단언이 없을 때 <b>다섯 규칙이 전부 초록</b>이었다. 하필 ①을
+     * 허용목록으로 뒤집은 이유가 <b>바로 그 패키지의 자동 실행자</b>
+     * ({@code ScanExecutor}·{@code LaunchScanUseCase})를 덮으려던 것이다 —
+     * 가드가 자기가 덮으려던 대상을 통째로 놓치면서 초록이 된다.
+     *
+     * <p>⚠️ {@code repository} 를 <b>통째로</b> 떨어뜨리는 더 넓은 경우는 모수 단언이
+     * 없어도 잡혔다. 다만 그것은 규율 ④ 역방향 규칙의 {@code that()} 이 비면서
+     * <b>ArchUnit 자체의 {@code failOnEmptyShould}</b> 가 발화한 것이지 우리 설계가 아니다 —
+     * 그 규칙에 누군가 {@code allowEmptyShould(true)} 를 붙이면 사라지는 <b>우연한 보호</b>다.
+     *
+     * <p>그래서 아래 {@code 판정_대상이_임포트에_실재한다_모수} 가 필요하다 —
      * {@code testing-philosophy.md} 요구 1(모수)·4(입력 도달).
      */
     private static final JavaClasses PRODUCTION = new ClassFileImporter()

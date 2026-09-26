@@ -191,7 +191,8 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      (파이프 종료 코드는 마지막 명령이 덮어쓴다).
      🔴 로그는 **세션 스크래치패드**에 쓴다 (경로는 세션 시스템 프롬프트에 있다) — 아래 ③:
 
-     LOG="$SCRATCH/work-build.log"      # ← $SCRATCH 는 세션 스크래치패드 경로로 치환한다
+     LOG=<세션 시스템 프롬프트의 「Scratchpad directory」 절대경로>/work-build.log
+     #  ↑ 환경변수가 아니다. 그 경로를 문자 그대로 써 넣는다
      ./gradlew build > "$LOG" 2>&1; echo "exit=$?"
      grep -c '^BUILD SUCCESSFUL' "$LOG"
      grep -E '^> Task :test( |$)' "$LOG"          # ← 접미사째 찍힌다. 없으면 「줄 없음」
@@ -218,6 +219,17 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
      ⚠ **여기서 「CI 로 받겠다」는 성립하지 않는다** — CI 는 PR 이 생긴 뒤(Phase 5)에야 돈다.
      Phase 2 의 ℹ️ 를 CI 로 미루면 **게이트 없이 Phase 3~4 를 지나간다**
 
+     🔴 **이 표는 열거다 — 요구 4 를 여기에도 적용한다**
+     (`testing-philosophy.md` 「열거로 정의한 가드는 **열거에 없는 형태를 적는다**」).
+
+     | 열거에 없는 것 | 왜 지금 안 나오나 | 나오게 되는 조건 |
+     |---|---|---|
+     | `FROM-CACHE` | **빌드 캐시가 꺼져 있다** — `gradle.properties` 없음 · `buildCache {}` 없음 · CI 에 `--build-cache` 없음 | 누군가 `org.gradle.caching=true` 를 켜면 `:test` 가 캐시에서 온다. **그러면 「돌았다」가 아니다** |
+     | `NO-SOURCE` | 테스트 소스가 항상 있다 | 〃 |
+     | **다른 이름의 테스트 태스크** | `build.gradle.kts` 에 `Test` 태스크가 **하나뿐**이다(`withType<Test>().configureEach` 만) | `integrationTest` 같은 걸 등록하면 위 grep 이 **그것을 안 본다** |
+
+     ⚠️ 셋 중 하나라도 생기면 **이 표와 grep 을 함께 다시 본다.** 안 보면 조용히 통과한다
+
      ⚠ **요약 줄(`N actionable tasks: M executed`)은 보조다.** `executed 0` 이면
      아무것도 안 돈 것이 확실하지만, **`M executed` 는 `:test` 를 이름으로 지목하지 않는다** —
      `compileTestJava` 만 돌아도 같은 숫자다. **요약 줄은 「0건」을, 태스크 줄은 「그 태스크가」를** 잡는다
@@ -229,7 +241,10 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
   ③ ⚠ **로그를 `build/` 에 쓰지 않는다.** `clean` 이 지우는데, 위 ℹ️ 에서 빠져나오는 방법이
      **바로 `clean build`** 다 — 규칙이 자기 탈출로와 부딪힌다.
      `/tmp/build.log` 같은 공용 경로도 안 된다(동시 작업이 서로 덮어쓴다).
-     **세션 스크래치패드는 세션별로 갈리므로 둘 다 피한다**
+     **세션 스크래치패드는 세션 UUID 로 갈리므로 둘 다 피한다**
+
+     🔵 **대가 하나** — 로그가 worktree 밖이라 `/handoff` 회수 대상이 아니고
+     **세션이 끝나면 사라진다.** 남겨야 할 실패 로그는 PR 본문·코멘트로 옮긴다
 
   - 커밋: /commit (scope = repository·issue·candidate·agent·pr·support·build·infra·docs·claude ·
     한 커밋에 여러 도메인 금지 · 커밋 시 git 훅 2개가 돈다 — secret-scan ·

@@ -196,6 +196,18 @@ class IssueFilterTest {
     }
 
     @Test
+    void 우선순위가_SMALLINT_상한을_넘으면_거부한다() {
+        Issue issue = issue(longBody(), List.of(), 0);
+        FilterVerdict tooHigh =
+                new FilterVerdict(FilterOutcome.PASSED, List.of(), Short.MAX_VALUE + 1);
+
+        assertThatThrownBy(() -> issue.applyFilter(tooHigh, NOW))
+                .as("컬럼이 SMALLINT 다. 좁히는 캐스팅은 조용히 음수로 뒤집혀 "
+                        + "「가장 높은 우선순위」가 맨 뒤로 정렬된다")
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void 배제된_이슈도_우선순위를_계산한다() {
         Issue issue = issue(null, List.of("good first issue"), 0);
 

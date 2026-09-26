@@ -192,6 +192,12 @@ public class Issue {
         if (verdict == null) {
             throw new IllegalArgumentException("판정은 필수다");
         }
+        if (verdict.priority() > Short.MAX_VALUE) {
+            // 🔴 컬럼이 SMALLINT 다. 좁히는 캐스팅은 조용히 음수로 뒤집힌다 —
+            //    점수가 커지면 「가장 높은 우선순위」가 맨 뒤로 정렬되는 식으로 틀린다
+            throw new IllegalArgumentException(
+                    "우선순위 점수가 SMALLINT 상한을 넘었다: " + verdict.priority());
+        }
         this.filterResult = verdict.outcome().name();
         this.filterReason = verdict.reasonCodes();
         this.filterPriority = (short) verdict.priority();

@@ -213,6 +213,13 @@ public class AnalyzeRepositoryPolicyUseCase {
     public void assertContributionAllowed(Long repositoryId) {
         // 🔴 판정 로직을 두 벌 두지 않는다. 둘이 각자 진화하면 한쪽에만 새 규칙이
         //    들어가고, S-5 게이트가 부르는 문에 따라 다르게 판정하게 된다 (#24)
+        //
+        // ⚠️ self-invocation 이라 clearanceFor 의 @Transactional 은 적용되지 않는다.
+        //    지금은 무해하다 — 이 메서드가 같은 설정(readOnly=true · REQUIRED)으로 이미
+        //    트랜잭션을 열었고, 안쪽은 그것을 그대로 쓴다.
+        //    🔴 clearanceFor 의 전파·readOnly 를 바꾸는 사람은 이 경로에 그것이 먹지 않는다는
+        //    것을 알아야 한다. 증상은 예외가 아니라 「설정이 조용히 무시된다」라 눈에 안 띈다 —
+        //    #11·#16 이 같은 함정에서 「저장이 사라진다」를 겪었다. 바꿔야 하면 별도 빈으로 뺀다
         clearanceFor(repositoryId);
     }
 

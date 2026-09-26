@@ -169,9 +169,9 @@ class SecretScanScriptTest {
 
     private static ScanResult scan(Path repo, String target, Function<String, String> mutate)
             throws Exception {
-        run(repo, "git", "init", "-q");
-        run(repo, "git", "config", "user.email", "test@example.com");
-        run(repo, "git", "config", "user.name", "test");
+        setUp(repo, "git", "init", "-q");
+        setUp(repo, "git", "config", "user.email", "test@example.com");
+        setUp(repo, "git", "config", "user.name", "test");
 
         Path scripts = repo.resolve(".claude/scripts");
         Files.createDirectories(scripts);
@@ -179,8 +179,24 @@ class SecretScanScriptTest {
         Files.writeString(copied, mutate.apply(Files.readString(SCRIPT, StandardCharsets.UTF_8)),
                 StandardCharsets.UTF_8);
 
-        run(repo, "git", "add", target);
+        setUp(repo, "git", "add", target);
         return run(repo, "bash", copied.toString());
+    }
+
+    /**
+     * 준비 명령. <b>실패하면 즉시 터뜨린다</b> — 그냥 넘기면 검사가 공허하게 통과한다.
+     *
+     * <p>이 스크립트는 git 저장소 밖이면 <b>출력 없이 {@code exit 0}</b> 이다. 그래서
+     * 준비가 깨지면 「차단되지 않음」을 기대하는 검사가 <b>검사가 돌지 않아서</b> 초록이
+     * 된다 — {@code testing-philosophy.md} 의 「0건 검사로 통과하지 않게 한다」가 가리키는
+     * 바로 그 모양이고, {@link #스크립트를_실제로_실행했다()} 는 <b>자기 호출만</b> 지킨다.
+     */
+    private static void setUp(Path workingDir, String... command) throws Exception {
+        ScanResult result = run(workingDir, command);
+        if (result.exitCode() != 0) {
+            throw new IllegalStateException("테스트 준비가 실패했습니다: " + String.join(" ", command)
+                    + " (exit=" + result.exitCode() + ")\n" + result.output());
+        }
     }
 
     /**
@@ -188,24 +204,48 @@ class SecretScanScriptTest {
      * S-3 이 금지하는 것은 <b>대상 저장소 코드</b>를 샌드박스 밖에서 돌리는 것이고,
      * 여기서 돌리는 것은 <b>우리 저장소의 하네스 스크립트</b>라 그 대상이 아니다 —
      * {@code testing-philosophy.md} 가 그렇게 정해 뒀다.
+     *
+     * <h2>출력을 파일로 받는 이유</h2>
+     * 스트림을 먼저 다 읽고 나서 {@code waitFor(timeout)} 을 부르면 <b>타임아웃이 무효</b>다 —
+     * stdout 을 닫지 않고 멈춘 프로세스에서 {@code readAllBytes} 가 영원히 블록되어
+     * {@code waitFor} 에 도달하지 못한다. 순서를 뒤집으면 이번엔 파이프 버퍼가 차서 교착이다.
+     * 파일로 빼면 <b>둘 다 생기지 않는다.</b>
      */
     private static ScanResult run(Path workingDir, String... command) throws Exception {
-        // safety-ok: 우리 저장소의 .claude/scripts 를 돌린다. 대상 저장소 코드가 아니므로 S-3 대상이 아니다
-        ProcessBuilder builder = new ProcessBuilder(List.of(command))
-                .directory(workingDir.toFile())
-                .redirectErrorStream(true);
-        // git 이 상위 저장소 설정을 끌어오지 않게 한다 — 임시 저장소가 격리되어야 한다
-        Map<String, String> env = builder.environment();
-        env.put("GIT_CONFIG_NOSYSTEM", "1");
-        env.put("HOME", workingDir.toString());
+        Path log = Files.createTempFile("secret-scan-out", ".log");
+        try {
+            // 🕳 사유는 한 줄이어야 한다 — 훅은 위반 라인의 「바로 윗줄」만 본다. 이어짐 줄은 못 본다
+            // safety-ok: 임시 디렉토리에서 git 플러밍과 우리 저장소의 .claude/scripts 만 돌린다. 대상 저장소 코드가 아니라 S-3 대상이 아니다
+            ProcessBuilder builder = new ProcessBuilder(List.of(command))
+                    .directory(workingDir.toFile())
+                    .redirectErrorStream(true)
+                    .redirectOutput(log.toFile());
+            isolateGitConfig(builder.environment(), workingDir);
 
-        Process process = builder.start();
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        if (!process.waitFor(60, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            throw new IllegalStateException("스크립트가 끝나지 않았습니다: " + String.join(" ", command));
+            Process process = builder.start();
+            if (!process.waitFor(60, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IllegalStateException("스크립트가 끝나지 않았습니다: " + String.join(" ", command));
+            }
+            return new ScanResult(process.exitValue(), Files.readString(log, StandardCharsets.UTF_8));
+        } finally {
+            Files.deleteIfExists(log);
         }
-        return new ScanResult(process.exitValue(), output);
+    }
+
+    /**
+     * 임시 저장소가 <b>바깥 설정을 하나도 보지 않게</b> 한다.
+     *
+     * <p>🔴 {@code HOME} 만 옮기는 것으로는 부족하다. {@code XDG_CONFIG_HOME} 이 설정돼 있으면
+     * git 은 그쪽의 {@code git/config} 를 <b>계속 읽는다</b> — 실측으로 확인했다. 그 파일에
+     * {@code core.hooksPath} 가 들어 있으면 <b>이 테스트가 개발자의 훅을 실행</b>하게 된다.
+     * {@code GIT_CONFIG_GLOBAL} 로 전역 설정 자체를 {@code /dev/null} 에 고정해 닫는다.
+     */
+    private static void isolateGitConfig(Map<String, String> env, Path workingDir) {
+        env.put("GIT_CONFIG_NOSYSTEM", "1");
+        env.put("GIT_CONFIG_GLOBAL", "/dev/null");
+        env.put("HOME", workingDir.toString());
+        env.remove("XDG_CONFIG_HOME");
     }
 
     private static void writeWithBom(Path file, String content) throws IOException {

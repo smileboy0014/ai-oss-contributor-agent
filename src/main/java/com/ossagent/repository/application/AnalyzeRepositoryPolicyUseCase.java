@@ -224,7 +224,22 @@ public class AnalyzeRepositoryPolicyUseCase {
         }
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * ⚠️ <b>{@code @Transactional} 을 붙이지 않는다 — 붙여도 적용되지 않는다.</b>
+     *
+     * <p>{@code analyze}·{@code analyzeIfAbsent} 가 {@code this} 로 부르는 self-invocation
+     * 이라 프록시를 타지 않는다. 애노테이션을 달아 두면 <b>「트랜잭션 안에서 읽는다」는
+     * 알리바이</b>만 남고 실제로는 동작하지 않는다 — {@code ScanProperties} 가 경계한
+     * 「영원히 false 인 필드」와 같은 유형이다.
+     *
+     * <p>없어도 되는 이유 — 두 번의 독립적인 조회이고 각 Spring Data 메서드가 자기
+     * 트랜잭션을 연다. 🔴 <b>{@code repository.getPolicy()} 를 쓰지 않는 것이 핵심이다</b>
+     * (LAZY 라 트랜잭션 밖에서 건드리면 터진다). 정책은 {@code policies.findByRepositoryId}
+     * 로 따로 읽는다.
+     *
+     * <p>⚠️ 공개 메서드로 올리게 되면 그때 트랜잭션 경계를 다시 판단한다 —
+     * {@code RepositoryPolicyWriter} 가 같은 이유로 분리된 선례다.
+     */
     protected Snapshot load(Long repositoryId) {
         OssRepository repository = repositories.findById(repositoryId)
                 .orElseThrow(() -> new RepositoryNotFoundException(repositoryId));

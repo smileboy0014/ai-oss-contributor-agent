@@ -2,6 +2,7 @@ package com.ossagent.support.web;
 
 import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.repository.domain.RepositoryAlreadyRegisteredException;
+import com.ossagent.repository.domain.RepositoryNotScannableException;
 import com.ossagent.repository.domain.ScanAlreadyRunningException;
 import com.ossagent.repository.domain.RepositoryNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -37,6 +38,15 @@ public class ApiExceptionHandler {
      * 둘 다 「지금은 안 된다」이지만 대응이 다르다 — 전자는 기다리면 되고,
      * 후자는 동시 실행 한도(NFR-2)에 부딪힌 것이다.
      */
+    /** {@code enabled = false} 인 저장소 — 「지금은 안 된다」가 아니라 「보고 있지 않다」다. */
+    @ExceptionHandler(RepositoryNotScannableException.class)
+    public ProblemDetail handleNotScannable(RepositoryNotScannableException e) {
+        ProblemDetail problem =
+                ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+        problem.setProperty("reason", "REPOSITORY_DISABLED");
+        return problem;
+    }
+
     @ExceptionHandler(ScanAlreadyRunningException.class)
     public ProblemDetail handleScanAlreadyRunning(ScanAlreadyRunningException e) {
         ProblemDetail problem =

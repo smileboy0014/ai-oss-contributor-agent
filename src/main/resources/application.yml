@@ -86,6 +86,23 @@ agent:
   execution:
     max-retries: 3
     timeout-seconds: 1800
+  # 이슈 분석(#11) — PRD §11. LLM 호출 1건 = 후보 1건이다
+  analysis:
+    # 한 번에 집어 오는 분석 대상 이슈 수 (PASSED · UNDECIDED)
+    batch-size: 50
+    # 한 실행의 상한 — 최대 1,000건. 이슈 수천 건에 무한 루프를 만들지 않는다
+    max-batches-per-run: 20
+    # 관찰값 7개 + 요약이면 충분하다. agent.llm 의 16000 은 이 용도에 과하다
+    max-output-tokens: 1500
+    # 이슈 본문 절단. 「저장소 전체를 프롬프트에 넣지 않는다」(PRD §12)와 같은 정신이다.
+    # ⚠ 절단했다는 사실을 프롬프트에 함께 적는다 — 말하지 않으면 모델이 전문을 봤다고
+    #   전제하고 confidence 를 높게 준다
+    max-body-chars: 20000
+    # 🔴 미만이면 REJECTED — 그리고 REJECTED 는 종단이다.
+    #   나중에 값을 낮춰도 이미 걸러진 후보는 돌아오지 않는다(재분석 경로 없음).
+    #   조이는 것은 언제든 되지만 푸는 것은 소급되지 않으므로 느슨하게 잡았다.
+    #   실측 0건에서 정한 추정값이라 설정으로 빼 뒀다 — PLAN-11 A-1
+    min-confidence: 0.50
   llm:
     # 기준 URL 은 환경변수로 빼지 않는다 — github.base-url 과 같은 이유다.
     # ⚠ SDK 의 fromEnv() 를 쓰지 않는 이유가 여기 있다. 그쪽은 ANTHROPIC_BASE_URL 과

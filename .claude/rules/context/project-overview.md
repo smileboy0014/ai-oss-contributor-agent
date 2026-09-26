@@ -69,7 +69,7 @@ MVP 라 **인스턴스 하나**로 간다. 안에서 도메인을 갈라 나중�
 
 - 이슈 수집(GitHub API 호출) · LLM 호출 · 샌드박스 실행 · PR 생성 — **구현 0**
 - `POST /api/repositories/{id}/scan` 은 **요청 사실만 기록**하고 실제 스캔을 하지 않는다
-- `GET /api/candidates` · `GET /api/candidates/{id}` 는 **동작한다**(필터·페이지네이션·상세). 다만 **후보를 만드는 #11 이 없어 결과가 비어 있다**
+- `GET /api/candidates` · `GET /api/candidates/{id}` 는 **동작한다**(필터·페이지네이션·상세). 후보 적재 경로(#11)도 들어와 **`ANALYZED` 후보가 실제로 쌓인다** — 다만 이슈를 넣는 스캔 트리거(#14)가 아직 없어 수동 호출로만 돈다
 - ERD **7테이블 전부 존재**(Flyway `V1`·`V2`) · 엔티티 7개 매핑 완료 — 다만 **읽고 쓰는 코드가 없다**
 - Redis 는 `docker-compose` 에만 있고 애플리케이션이 쓰지 않는다
 

@@ -1,6 +1,7 @@
 package com.ossagent.candidate.domain;
 
 import com.ossagent.support.ExternalText;
+import com.ossagent.support.secret.TokenRedactor;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -72,6 +73,8 @@ public class ContributionCandidate {
     @Column(name = "issue_id", nullable = false)
     private Long issueId;
 
+    /** LLM 이 준 분류. 적재 측 스크럽은 {@link IssueAnalysis} 가 한다. */
+    @ExternalText(ExternalText.Source.LLM_RESPONSE)
     private String category;
 
     private String difficulty;
@@ -172,9 +175,48 @@ public class ContributionCandidate {
         return transitionTo(CandidateStatus.ANALYZING, clock);
     }
 
-    /** {@code ANALYZING → ANALYZED} */
-    public StatusTransition completeAnalysis(Clock clock) {
-        return transitionTo(CandidateStatus.ANALYZED, clock);
+    /**
+     * {@code ANALYZING → ANALYZED} — <b>분석 결과를 함께 받는다</b>.
+     *
+     * <h2>왜 결과 적재와 전이를 한 메서드로 묶나</h2>
+     *
+     * <p>필드 setter 를 따로 열면 <b>「{@code ANALYZED} 인데 {@code confidence} 가 {@code null}」</b>
+     * 같은 상태가 만들어진다. Q-7 이 {@code @Setter} 를 금지한 이유가 그대로 되살아난다 —
+     * 상태와 그 상태를 정당화하는 데이터는 <b>함께 서야 한다</b>.
+     *
+     * <p><b>{@code analysis} 의 스크럽 정본은 {@link IssueAnalysis} 다</b> (S-4).
+     * 아래 {@code redact} 는 <b>현재 불변식 하에서 no-op</b> 이다 — {@code IssueAnalysis} 가
+     * record 라 생성 경로가 canonical 생성자 하나뿐이고, 역직렬화(JEP 384)·Jackson·리플렉션이
+     * 전부 그 생성자를 타므로 <b>미스크럽 값이 여기 도달할 수 없다.</b>
+     *
+     * <p>그럼에도 남긴 이유는 하나뿐이다 — <b>그 불변식이 깨질 때의 보험</b>. 비용이 0이고
+     * ({@code redact} 는 토큰이 없으면 입력을 그대로 돌려준다) {@code IssueAnalysis} 에
+     * 완화된 생성 경로가 생기는 날 이것이 마지막 방어가 된다.
+     *
+     * <p>⚠️ <b>이것을 테스트로 증명하려 들지 않는다.</b> 도달 불가능한 코드를 검증하는 테스트는
+     * 반드시 「실패할 수 없는 테스트」가 되고, 그것은 커버리지를 거짓으로 부풀린다 —
+     * S-4 가 「100% · 예외 없음」 대상이라 거짓 초록의 해가 특히 크다.
+     * {@link AgentRun#fail} 은 <b>원시 {@code String} 을 받으므로</b> 사정이 다르다.
+     *
+     * @throws IllegalArgumentException 결과가 {@code null}
+     */
+    public StatusTransition completeAnalysis(IssueAnalysis analysis, Clock clock) {
+        if (analysis == null) {
+            throw new IllegalArgumentException(
+                    "분석 결과 없이 ANALYZED 가 될 수 없습니다 candidateId=" + id);
+        }
+        StatusTransition transition = transitionTo(CandidateStatus.ANALYZED, clock);
+        this.category = analysis.category();
+        this.difficulty = analysis.difficulty().name();
+        this.estimatedFiles = analysis.estimatedFiles();
+        this.estimatedLoc = analysis.estimatedLoc();
+        this.implementationFeasible = analysis.implementationFeasible();
+        this.breakingChange = analysis.breakingChange();
+        this.confidence = analysis.confidence();
+        // 🔴 마지막 그물. IssueAnalysis 가 1차로 걸렀으나 그 경로를 타지 않고 들어오는
+        //    값(리플렉션 · 역직렬화 · 미래의 다른 생성 경로)이 있을 수 있다
+        this.analysis = TokenRedactor.redact(analysis.summary());
+        return transition;
     }
 
     /**

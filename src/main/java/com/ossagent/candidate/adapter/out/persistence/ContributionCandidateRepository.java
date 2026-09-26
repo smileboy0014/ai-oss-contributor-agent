@@ -4,6 +4,8 @@ import com.ossagent.candidate.application.CandidateSummaryView;
 import com.ossagent.candidate.domain.CandidateStatus;
 import com.ossagent.candidate.domain.ContributionCandidate;
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.Set;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -56,4 +58,17 @@ public interface ContributionCandidateRepository extends JpaRepository<Contribut
             @Param("difficulty") String difficulty,
             @Param("minConfidence") BigDecimal minConfidence,
             Pageable pageable);
+
+    /**
+     * 후보가 <b>이미 있는</b> 이슈 식별자를 골라낸다 — #11 의 낙관적 선별.
+     *
+     * <p>이슈 한 건씩 {@code existsByIssueId} 를 치면 배치 크기만큼 쿼리가 나간다.
+     * 한 번에 묻는다.
+     *
+     * <p>⚠️ <b>이것은 멱등 방어가 아니라 최적화다.</b> 두 워커가 동시에 통과할 수 있다 —
+     * 멱등의 정본은 {@code UNIQUE(issue_id)} 제약이고, 이 쿼리는 <b>LLM 호출을 아끼는</b> 용도다.
+     * 이 구분이 흐려지면 「확인했으니 안전하다」로 읽혀 제약 위반 처리를 빠뜨리게 된다.
+     */
+    @Query("SELECT c.issueId FROM ContributionCandidate c WHERE c.issueId IN :issueIds")
+    Set<Long> findExistingIssueIds(@Param("issueIds") Collection<Long> issueIds);
 }

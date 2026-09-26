@@ -38,7 +38,7 @@ class ContributionCandidateTest {
     private static ContributionCandidate analyzed() {
         ContributionCandidate candidate = discovered();
         candidate.startAnalysis(clock());
-        candidate.completeAnalysis(clock());
+        candidate.completeAnalysis(IssueAnalysisFixtures.feasible(), clock());
         return candidate;
     }
 
@@ -124,7 +124,7 @@ class ContributionCandidateTest {
         candidate.startAnalysis(clock());
         assertThat(candidate.isNotSelectedByHuman()).isTrue();
 
-        candidate.completeAnalysis(clock());
+        candidate.completeAnalysis(IssueAnalysisFixtures.feasible(), clock());
         assertThat(candidate.isNotSelectedByHuman())
                 .as("스케줄러가 흘려보낸 후보가 「사람이 골랐다」로 기록되면 승인 지점이 무너진다")
                 .isTrue();
@@ -371,5 +371,91 @@ class ContributionCandidateTest {
         assertThatThrownBy(() -> candidate.startAnalysis(null))
                 .as("updatedAt 을 채울 수 없는 전이를 허용하면 NOT NULL 컬럼이 깨진다")
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // ─────────────────── 분석 결과 적재 — #11 ───────────────────
+
+    /** 소스에 토큰 패턴 리터럴을 두지 않는다 — {@code secret-scan.sh} 가 커밋을 막는다. */
+    private static final String FAKE_TOKEN = "ghp_" + "a".repeat(36);
+
+    @Test
+    @DisplayName("completeAnalysis 가 상태와 분석 필드를 함께 채운다")
+    void 분석_결과가_상태와_함께_적재된다() {
+        ContributionCandidate candidate = discovered();
+        candidate.startAnalysis(clock());
+
+        candidate.completeAnalysis(IssueAnalysisFixtures.feasible(), clock());
+
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.ANALYZED);
+        assertThat(candidate.getCategory()).isEqualTo("enhancement");
+        assertThat(candidate.getDifficulty()).isEqualTo("MEDIUM");
+        assertThat(candidate.getEstimatedFiles()).isEqualTo(4);
+        assertThat(candidate.getEstimatedLoc()).isEqualTo(120);
+        assertThat(candidate.getImplementationFeasible()).isTrue();
+        assertThat(candidate.getBreakingChange()).isFalse();
+        assertThat(candidate.getConfidence()).isEqualByComparingTo("0.87");
+        assertThat(candidate.getAnalysis()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("🔴 분석 결과 없이 ANALYZED 가 될 수 없다")
+    void 결과_없이_ANALYZED_가_되지_않는다() {
+        ContributionCandidate candidate = discovered();
+        candidate.startAnalysis(clock());
+
+        assertThatThrownBy(() -> candidate.completeAnalysis(null, clock()))
+                .as("상태와 그것을 정당화하는 데이터는 함께 서야 한다 — setter 를 열지 않은 이유")
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(candidate.getStatus())
+                .as("거부됐으면 상태도 그대로여야 한다")
+                .isEqualTo(CandidateStatus.ANALYZING);
+    }
+
+    @Test
+    @DisplayName("적재된 analysis 에 토큰이 없다 — 스크럽 정본은 IssueAnalysis 다 S4")
+    void 적재된_analysis_에_토큰이_없다_S4() {
+        ContributionCandidate candidate = discovered();
+        candidate.startAnalysis(clock());
+
+        candidate.completeAnalysis(
+                IssueAnalysisFixtures.withSummary("토큰 " + FAKE_TOKEN + " 로 재현"), clock());
+
+        assertThat(candidate.getAnalysis())
+                .as("적재 측 방어가 없으면 #13 조회 API 가 토큰을 HTTP 로 내보낸다")
+                .doesNotContain(FAKE_TOKEN);
+    }
+
+    // ⚠ completeAnalysis 안의 redact 를 「마지막 그물」로 검증하는 테스트는 두지 않는다.
+    //   IssueAnalysis 가 record 라 생성 경로가 canonical 생성자뿐이고 역직렬화·리플렉션도
+    //   그것을 타므로, 미스크럽 값을 만들어 넣을 방법이 아예 없다 —
+    //   그런 테스트는 반드시 「실패할 수 없는 테스트」가 되어 커버리지를 거짓으로 부풀린다.
+    //   실제로 그 redact 를 지우고 돌려 봤을 때 전부 초록이었다. 위 테스트는 IssueAnalysis 의
+    //   스크럽을 지우면 빨개진다 — 그것이 진짜 방어다.
+
+    @Test
+    @DisplayName("분석 결과를 적재해도 attempt 는 0 이다 — ANALYZE 는 카운터 밖 Q-6")
+    void 분석은_attempt_를_태우지_않는다() {
+        ContributionCandidate candidate = discovered();
+        candidate.startAnalysis(clock());
+        candidate.completeAnalysis(IssueAnalysisFixtures.feasible(), clock());
+
+        assertThat(candidate.getAttempt())
+                .as("ANALYZE·PLAN 은 CODE→VERIFY→REVIEW 루프 밖이다")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("ANALYZING 이 아니면 결과를 적재할 수 없다")
+    void 잘못된_상태에서는_적재되지_않는다() {
+        ContributionCandidate candidate = discovered();
+
+        assertThatThrownBy(() ->
+                candidate.completeAnalysis(IssueAnalysisFixtures.feasible(), clock()))
+                .isInstanceOf(CandidateTransitionException.class);
+
+        assertThat(candidate.getAnalysis())
+                .as("전이가 거부됐으면 필드도 오염되지 않아야 한다")
+                .isNull();
     }
 }

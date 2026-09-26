@@ -62,7 +62,7 @@ CPU 가 바쁠수록 핸들러가 자주 이긴다.
 
 | 항목 | 내용 |
 |---|---|
-| 용도 | 이슈 분석 · 구현 계획 · 코드 생성 · diff 리뷰 (PRD §6.1 의 4개 지점) |
+| 용도 | 이슈 분석 · 구현 계획 · 코드 생성 · diff 리뷰 (PRD §6.1 의 4개 지점) — **`ANALYZE` 는 실제로 배선됐다**(#11), 나머지 셋은 미구현 |
 | 인증 | `ANTHROPIC_API_KEY` |
 | 모델 | `ANTHROPIC_MODEL` — 기본 `claude-sonnet-5` |
 | 클라이언트 | **공식 `com.anthropic:anthropic-java` SDK** — #10 확정 (2026-09-25) |

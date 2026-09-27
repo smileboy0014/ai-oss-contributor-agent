@@ -34,7 +34,7 @@ class LaunchScanUseCaseTest {
 
     private static final Long REPO = 1L;
 
-    private final ScanExecutionRegistry registry = new InMemoryScanExecutionRegistry(
+    private final ScanExecutionRegistry registry = new FakeScanExecutionRegistry(
             Clock.fixed(Instant.parse("2026-09-26T10:00:00Z"), ZoneOffset.UTC));
     private final ScanExecutor executor = mock(ScanExecutor.class);
     private final OssRepositoryRepository repositories = mock(OssRepositoryRepository.class);

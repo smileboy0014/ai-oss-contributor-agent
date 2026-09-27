@@ -4,7 +4,11 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.MapsId;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.Instant;
 import lombok.Getter;
@@ -37,8 +41,20 @@ import lombok.NoArgsConstructor;
  * {@code AgentRun}·{@code GeneratedChange} 가 멤버가 아닌 이유(무한정 자란다)가
  * 여기엔 없다. PK 가 곧 {@code oss_repository} 로의 FK 다.
  *
- * <p>⚠️ 루트로의 {@code @ManyToOne} 을 걸지 않는다. 쓰기 경로가 조건부 UPDATE 라
- * 연관을 걸어도 쓰이지 않고, 걸면 상태를 한 줄 읽을 때마다 루트가 따라온다.
+ * <h2>🔴 루트와의 연관은 <b>생성을 구조로 묶기 위해</b> 있다</h2>
+ *
+ * <p>초안은 연관 없이 {@code RegisterRepositoryUseCase} 가 등록 트랜잭션에서 행을
+ * 만들기로 했다. <b>그것은 호출자가 기억해야 하는 구조다.</b> 실제로 이 저장소의
+ * 테스트 세 곳이 {@code repositories.save(new OssRepository(...))} 로 루트만 만들고
+ * 있었다 — 운영 경로가 하나라서 안 드러났을 뿐이다.
+ *
+ * <p>그래서 루트 생성자가 이 행을 함께 만든다({@code cascade = PERSIST}).
+ * <b>행이 없는 저장소를 만들 수 있는 경로가 사라진다</b> — 조건부 UPDATE 가 행의 존재를
+ * 전제하므로 이것이 그 전제의 근거다.
+ *
+ * <p>⚠️ <b>대가는 읽기 한 번이다.</b> {@code mappedBy} 역방향이라 루트를 읽을 때
+ * Hibernate 가 이 행을 확인하는 질의를 하나 더 낸다 — {@code RepositoryPolicy} 가 이미
+ * 같은 비용을 치르고 있고, 같은 이유(애그리거트 멤버)로 받아들인다.
  */
 @Entity
 @Table(name = "scan_execution")
@@ -46,10 +62,22 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = lombok.AccessLevel.PROTECTED)
 public class ScanExecution {
 
-    /** 🔴 저장소당 1행. 생성 전략이 없다 — 값은 저장소 식별자다 */
+    /** 🔴 저장소당 1행. 생성 전략이 없다 — 값은 {@link #repository} 의 식별자다 */
     @Id
     @Column(name = "repository_id")
     private Long repositoryId;
+
+    /**
+     * PK 를 루트와 공유한다 — {@code @MapsId} 가 루트의 생성된 식별자를 여기 채운다.
+     *
+     * <p>⚠️ <b>탐색용이 아니다.</b> getter 를 두지 않는다 — 이 행을 읽는 코드가 루트를
+     * 끌고 오면 「상태 한 줄」이 아니게 된다. 연관이 있는 이유는 위 javadoc 의
+     * <b>생성 묶기</b> 하나뿐이다.
+     */
+    @MapsId
+    @OneToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "repository_id")
+    private OssRepository repository;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -115,13 +143,18 @@ public class ScanExecution {
      */
     private boolean hasResult;
 
-    /** 등록 시점에 만든다 — 🔴 행이 <b>항상 존재</b>해야 조건부 UPDATE 가 성립한다. */
-    public static ScanExecution idleFor(Long repositoryId) {
-        if (repositoryId == null) {
-            throw new IllegalArgumentException("저장소 식별자는 필수다");
+    /**
+     * 🔴 <b>루트 생성자만 부른다.</b> 행이 <b>항상 존재</b>해야 조건부 UPDATE 가 성립한다.
+     *
+     * <p>{@code package-private} 다 — 밖에서 따로 만들 수 있으면 「루트 없이 실행 행만
+     * 있는」 상태가 생기고, 그것은 FK 위반으로 <b>저장할 때</b>야 드러난다.
+     */
+    static ScanExecution idleFor(OssRepository repository) {
+        if (repository == null) {
+            throw new IllegalArgumentException("저장소는 필수다");
         }
         ScanExecution execution = new ScanExecution();
-        execution.repositoryId = repositoryId;
+        execution.repository = repository;
         execution.phase = ScanPhase.IDLE;
         return execution;
     }

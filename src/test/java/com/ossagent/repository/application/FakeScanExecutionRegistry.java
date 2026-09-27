@@ -7,40 +7,42 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import org.springframework.stereotype.Component;
 
 /**
- * 프로세스 메모리 구현 — Q-3 이 미분리라 단일 프로세스가 전제다.
+ * {@link ScanExecutionRegistry} 대역 — Q-9 「능력 대역」 층.
  *
- * <p>⚠️ <b>알려진 한계 둘.</b> 재기동하면 상태가 사라지고, <b>인스턴스가 늘면 FR-4 가
- * 깨진다</b>(각 인스턴스가 자기 맵만 본다 → 같은 저장소를 동시에 스캔한다).
- * 후자가 진짜 문제이고 주인은 #26 이다 — {@link ScanExecutionRegistry} javadoc.
+ * <p>🔴 <b>원래 운영 구현이던 {@code InMemoryScanExecutionRegistry} 가 여기로 내려왔다</b>
+ * (#26). 운영에는 DB 구현 하나만 남긴다 — 둘을 남기면 <b>어느 것이 뜨는지 배포 설정
+ * 한 줄이 정하게</b> 되고, 그것은 S-2 의 「draft 플래그를 두면 언젠가 켜진다」·
+ * S-3 의 「네트워크는 설정 키가 아니다」와 같은 문제다.
  *
- * <p>영속 흔적이 아주 없지는 않다 — {@code oss_repository.last_scanned_at} 이 남는다.
- * ⚠️ 다만 그것은 <b>요청 시각</b>이라 실패해도 전진한다. 재기동 후에는 성공한 스캔과
- * 실패한 스캔이 DB 상 구분되지 않는다.
+ * <p>⚠️ <b>이 대역으로 FR-3(중복 방어)을 검증하지 않는다.</b> 여기 원자성은
+ * {@code ConcurrentHashMap.compute} 가 주는 것이고, 운영이 막아야 하는 것은
+ * <b>프로세스 경계를 넘는</b> 경쟁이다. 그것은 실 DB 가 아니면 검증되지 않는다 —
+ * {@code DatabaseScanExecutionRegistryTest}(Testcontainers)가 본다.
+ *
+ * <p>여기서 보는 것은 <b>소비자의 흐름</b>이다 — 자리를 잡고 되돌리는가,
+ * 어떤 경로로 끝나든 마감되는가.
  */
-@Component
-public class InMemoryScanExecutionRegistry implements ScanExecutionRegistry {
+public class FakeScanExecutionRegistry implements ScanExecutionRegistry {
 
     private final Map<Long, ScanExecutionState> states = new ConcurrentHashMap<>();
     private final Clock clock;
 
-    public InMemoryScanExecutionRegistry(Clock clock) {
+    public FakeScanExecutionRegistry(Clock clock) {
         this.clock = clock;
     }
 
     /**
      * 🔴 <b>검사와 기록이 원자적이어야 한다.</b> {@code containsKey} 후 {@code put} 으로
-     * 짜면 두 요청이 그 사이를 통과해 <b>둘 다 스캔을 시작한다.</b>
-     * {@code compute} 가 키 단위로 원자성을 준다.
+     * 짜면 두 요청이 그 사이를 통과해 <b>둘 다 스캔을 시작한다.</b> 대역이라도 그 성질을
+     * 흉내내야 소비자 테스트가 의미를 갖는다.
      */
     @Override
     public boolean tryStart(Long repositoryId) {
         Instant now = Instant.now(clock);
         // ⚠ 「내가 잡았는가」를 반환값 비교로 알아내지 않는다. Clock 이 고정된 테스트에서는
-        //   두 호출의 startedAt 이 같아 「이미 진행 중」을 「내가 잡았다」로 오판한다.
-        //   람다 안에서 직접 표시한다
+        //   두 호출의 startedAt 이 같아 「이미 진행 중」을 「내가 잡았다」로 오판한다
         boolean[] acquired = {false};
         states.compute(repositoryId, (id, current) -> {
             if (current != null && current.isActive()) {
@@ -55,7 +57,6 @@ public class InMemoryScanExecutionRegistry implements ScanExecutionRegistry {
 
     @Override
     public void release(Long repositoryId) {
-        // 🔴 자리를 되돌린다. 남겨 두면 그 저장소가 영구히 409 다
         states.remove(repositoryId);
     }
 

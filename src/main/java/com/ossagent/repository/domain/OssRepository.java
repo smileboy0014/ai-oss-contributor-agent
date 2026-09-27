@@ -1,5 +1,6 @@
 package com.ossagent.repository.domain;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -82,6 +83,33 @@ public class OssRepository {
     @OneToOne(mappedBy = "repository", fetch = FetchType.LAZY)
     private RepositoryPolicy policy;
 
+    /**
+     * 스캔 실행 상태 — 🔴 <b>저장소와 함께 태어난다</b> (#26).
+     *
+     * <p>자리 잡기가 <b>조건부 UPDATE 한 방</b>이라 행이 항상 존재해야 한다. 그것을
+     * 등록 UseCase 가 기억해서 만들게 두면 언젠가 빠지고, 빠진 저장소는
+     * <b>「스캔이 안 된다」</b>로만 드러난다. 그래서 생성자에 묶었다.
+     *
+     * <p>🔴 <b>getter 를 두지 않는다.</b> 이 연관은 {@code cascade = PERSIST} 를 위해서만
+     * 있다 — 상태를 읽는 것은 {@code ScanExecutionJpaRepository} 의 일이고, 루트를 거쳐
+     * 읽으면 애그리거트가 한 덩어리로 끌려온다.
+     *
+     * <h2>🔴 {@code REMOVE} 를 거는 것이 {@link #policy} 와 다른 점이다</h2>
+     *
+     * <p>초안은 {@code PERSIST} 만 걸고 「{@code policy} 와 같은 이유로 {@code REMOVE} 를
+     * 걸지 않는다」고 적었다. <b>그 문장은 틀렸고, 테스트가 잡았다</b> — FK 때문에
+     * 저장소를 <b>지울 수 없게</b> 된다({@code repositories.deleteAll()} 이 막힌다).
+     *
+     * <p>둘은 성격이 다르다. {@code policy} 는 <b>판정의 기록</b>이라 저장소가 사라져도
+     * 「무엇을 왜 배제했는가」가 남아야 한다. 이 행은 <b>실행 상태</b>이고 저장소 없이는
+     * 뜻이 없다 — 남겨 둘 이유가 없는데 FK 가 삭제를 막기만 한다.
+     *
+     * <p>⚠️ SQL 로 직접 지우는 경로에는 이 cascade 가 닿지 않는다. V10 이 {@code ON DELETE}
+     * 를 걸지 않았으므로 그쪽에서는 여전히 FK 가 막는다 — 의도다.
+     */
+    @OneToOne(mappedBy = "repository", cascade = {CascadeType.PERSIST, CascadeType.REMOVE}, fetch = FetchType.LAZY)
+    private ScanExecution scanExecution;
+
     protected OssRepository() {
     }
 
@@ -89,6 +117,8 @@ public class OssRepository {
         this.owner = owner;
         this.name = name;
         this.url = url;
+        // 🔴 실행 행을 여기서 만든다 — 「행이 없는 저장소」를 만들 수 있는 경로를 없앤다
+        this.scanExecution = ScanExecution.idleFor(this);
     }
 
     public Long getId() {

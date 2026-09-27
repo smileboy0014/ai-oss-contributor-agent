@@ -112,7 +112,21 @@ class ExternalTextScrubRegistryTest {
             Map.entry("GeneratedChange.testResult", new Decision(Mechanism.PENDING,
                     "#18 — 빌드·테스트 출력. 환경변수를 찍는 빌드 스크립트가 흔하다")),
             Map.entry("GeneratedChange.reviewResult", new Decision(Mechanism.PENDING,
-                    "#19 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다")),
+                    "#20 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다."
+                            + " #20 이 DiffReview 값 타입을 세워 그 값은 이미 스크럽되지만,"
+                            + " GeneratedChange 에 생성 팩토리가 없어 이 컬럼에 앉는 경로가"
+                            + " 아직 없다 — 대입 경로가 생기는 #18 이후에 VALUE_TYPE 으로 올린다")),
+
+            // ── #20 AI diff 리뷰 — LLM 응답이 새 유출구다 ────────────────
+            // 송신(프롬프트)은 PromptScrubber 가 이미 막는다. 그런데 리뷰가 diff 를
+            // 인용하면 대상 저장소의 시크릿이 우리 DB 로 복제되고, 거기서 #13 조회 API 와
+            // PR 본문(#23)까지 간다. 수신 쪽 방어가 이 두 행이다.
+            Map.entry("DiffReview.summary", new Decision(Mechanism.VALUE_TYPE,
+                    "DiffReview compact 생성자가 redact 한다. String 을 그대로 받는 생성"
+                            + " 경로가 없다 — IssueAnalysis 와 같은 수법이다 (#20)")),
+            Map.entry("DiffReview.findings", new Decision(Mechanism.VALUE_TYPE,
+                    "같은 생성자가 항목마다 redact 한다. 리스트라 한 항목만 새도"
+                            + " 같은 유출이라 요약과 같은 조건이다 (#20)")),
 
             // ── 아래 5행은 #11·#17 이 이 표와 병렬로 머지되며 빠졌다 ──────────
             // 세 PR 이 서로의 CI 를 보지 못했다. 이 표가 있었기에 main 이 빨개져서

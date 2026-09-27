@@ -161,6 +161,18 @@ public class PipelineMetrics {
     }
 
     /**
+     * 새 후보가 적재됐음을 알렸다 — 이슈 #26.
+     *
+     * <p>🔴 <b>태그가 없다.</b> 「어느 저장소의 어느 후보인가」는 {@code FORBIDDEN_TAG_KEYS}
+     * 가 막는 식별자들이고, 그것은 로그가 답한다. 여기가 답하는 것은 「몇 건인가」뿐이다.
+     */
+    public void candidateNotified() {
+        record(() -> Counter.builder(MetricNames.CANDIDATE_NOTIFIED)
+                .register(registry)
+                .increment());
+    }
+
+    /**
      * 후보 상태 게이지를 등록한다 — 값은 호출자가 들고 있는 {@link AtomicLong} 을 읽는다.
      *
      * <p>🔴 <b>이 메서드가 있는 이유는 「태그를 만드는 유일한 지점」을 사실로 유지하기

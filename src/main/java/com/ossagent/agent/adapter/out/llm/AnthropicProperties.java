@@ -25,7 +25,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param model           모델 ID. 기본값은 {@code external-deps.md} 가 정했다
  * @param maxOutputTokens 출력 상한. 여기서 잘리면 <b>성공이 아니라 TRUNCATED</b> 다
  * @param timeout         호출 타임아웃
- * @param maxRetries      <b>전송 계층</b> 재시도 상한. {@code agent.execution.max-retries} 와 다른 축이다
+ * @param maxRetries      <b>전송 계층</b> 재시도 상한. {@code agent.execution.max-attempts} 와 다른 축이다
  * @param retryBackoff    재시도 간 기본 대기. 시도마다 배수로 늘어난다
  * @param pricing         모델별 단가표 — 키는 모델 ID. <b>비어 있으면 비용 미터를 만들지 않는다</b>(#71)
  */

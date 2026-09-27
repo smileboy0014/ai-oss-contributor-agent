@@ -327,7 +327,21 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
   - 리뷰 결과는 PR 코멘트로 남기고 (본문 = 상태 선언, 코멘트 = 지적·처리 기록 · 존댓말·표 1개),
     inline findings 는 답글 후 완결 건만 resolve
   - 멈춤 기준: 수정 push 후 새 findings 가 전부 사소하면 종료 / 중대 결함 지속 시 선택 게이트 + draft 유지
-  - 완료 후 빌드 green 재확인 → draft 해제
+  - 완료 후 빌드 green 재확인 → 🔴 **최신 main 재빌드**(아래) → draft 해제
+
+  🔴 **draft 를 풀기 전에 최신 `main` 을 머지해 다시 빌드한다** (2026-09-27 · #61 · Q-10):
+
+       git fetch origin main && git merge origin/main
+       # 그다음 Phase 2 의 빌드 판정을 **그대로** 다시 한다 (exit · BUILD SUCCESSFUL · `> Task :test` 접미사)
+
+  브랜치가 분기한 뒤 `main` 에 들어온 것을 **그 브랜치는 볼 수 없다.** 2026-09-26 에 PR 셋이
+  연달아 머지되며 `main` 이 적색이 됐고 **어느 PR 의 결함도 아니었다**. branch protection 으로
+  강제하지 않기로 한 대신(마찰 대비 이득이 같다 — Q-10) **절차를 여기 둔다.**
+
+  ⚠ **이것이 잡지 못하는 것** — 재빌드가 **초록인데도** 합쳐진 결과가 깨질 수 있다.
+  능력을 선언하는 PR 과 소비하는 PR 이 갈리면 **이음매는 양쪽 테스트 어디에도 없다**
+  (2026-09-27 실측). 그래서 **머지 뒤 남의 PR 과 맞닿는 자리는 눈으로 본다** —
+  [`testing-philosophy.md`](../../rules/conventions/testing-philosophy.md) 「이음매는 양쪽 어디에도 없다」
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 [리뷰 코멘트 대응] (머지 전 재진입) — /pr-review {PR} --comments 위임

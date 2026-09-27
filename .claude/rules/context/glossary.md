@@ -29,7 +29,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | **통행증** (`PolicyClearance`) | 「규약을 읽었고 AI 기여가 허용이었다」는 **값**. `RepositoryPolicy.clearance()` 만 발급하고 `startImplementing` 이 **인자로 요구**한다 — S-5 의 의무가 javadoc 에서 컴파일러로 옮겨간 자리(#24) |
 | **Scan** | 대상 저장소의 open 이슈를 수집해 저장 |
 | **스캔 파이프라인** | 저장소 하나에 대해 `Policy Analysis → Scan → Filter → Analysis` 를 잇는 실행(#14). 🔴 **`ANALYZED` 에서 멈춘다** — 선택·구현은 사람이 트리거한다 |
-| **진행 상태** (scan execution) | 파이프라인 1회의 국면 — `IDLE`·`QUEUED`·`RUNNING`·`SUCCEEDED`·`SKIPPED`·`FAILED`. ⚠️ **프로세스 메모리**다. 다중 인스턴스에서는 중복 방어가 깨진다 — #26 |
+| **진행 상태** (scan execution) | 파이프라인 1회의 국면 — `IDLE`·`QUEUED`·`RUNNING`·`SUCCEEDED`·`SKIPPED`·`FAILED`(`ScanPhase`). ✅ **DB 에 있다**(`scan_execution` · V10 · #26) — 프로세스 메모리이던 시절의 「다중 인스턴스에서 중복 방어가 깨진다」는 해소됐다 |
+| **리스** (lease) | 스캔 자리를 붙들 수 있는 시한(`lease_expires_at` · `scan.lease-duration`). 🔴 **활성 판정이 국면과 함께 본다** — 없으면 `kill -9` 된 인스턴스의 `RUNNING` 행이 남아 그 저장소가 **영구히 409** 가 된다. 메모리 구현에 있던 「재기동이 상태를 지운다」는 안전장치를 대신하는 자리다.<br>⚠️ 뺏김의 최악은 **중복 스캔 1회**이고 수집이 멱등이라 되돌릴 수 있다 — 가르는 것은 보수성이 아니라 **실패의 방향** |
+| **저장소별 주기** | `oss_repository.scan_interval_minutes`. 🔴 **NULL 이면 전역 기본값**(`scan.default-interval`).<br>⚠️ `scan.schedule.fixed-delay` 와 **다른 축**이다 — 저쪽은 「얼마나 자주 **훑는가**」이고 이쪽은 「한 저장소를 얼마나 자주 **도는가**」다. 훑는 주기가 더 촘촘해야 한다 |
 | **건너뜀** (skipped) | 🔴 **실패가 아니다.** 규약이 막았거나(금지·보류) 읽지 못했거나 레이트리밋이다 |
 | **Filter** | 규칙 기반 1차 배제 — 요구사항 불명확 · 대규모 아키텍처 변경 · ~~종료됨~~. **대외 호출을 하지 않는다** (#9).<br>⚠️ 「종료됨」은 구현돼 있으나 **발화하지 않는다** — 수집이 `state=open` 고정이라 닫힌 이슈가 데이터에 없다 (#14).<br>「활성 PR 존재」는 여기가 아니라 **#11 입구 + #23** 다 — S-2 방어의 이전 |
 | **Analysis** | LLM 기반 기여 가능성 판정. 산출물은 category · difficulty · feasible · confidence 등 |
@@ -74,6 +76,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 `DraftPrPublisher` 이고 그 앞에 세 번째 승인 게이트가 있다 |
 | `DraftPrPublisher` | `GitHubDraftPrPublisher` | upstream 에 **Draft PR** 을 연다 — **S-2 의 실행체**(#23). 🔴 이 제품이 대상 저장소에 남기는 **유일한 글**이다. `markReadyForReview`·`requestReviewers`·`merge` 는 **없는 것이 방어**다.<br>⚠️ 상태 전이도 영속화도 하지 않는다 — 능력을 합치면 게이트가 부산물이 된다 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
+| `CandidateNotifier` | `LoggingCandidateNotifier` | 새 후보가 `ANALYZED` 로 쌓였음을 알린다(#26). 🔴 **관찰이지 행위가 아니다** — 승인 게이트를 부르지 않는다(S-6).<br>🔴 **지금 나가는 곳은 로그와 메트릭뿐이다** — Slack·Webhook 이 아니다. 「알림 경로가 있다」로만 적으면 다음 사람이 외부 전송이 있다고 믿는다 |
+| `CandidateNotification` | — | 알림 **값**. 🔴 **이슈 제목·본문이 들어올 자리가 타입에 없다**(S-4) — 「나중에 필요하면」으로 자리를 비워 두지 않았다. 식별자와 숫자뿐이다 |
+| `ScanExecutionRegistry` | `DatabaseScanExecutionRegistry` | 스캔 진행 상태 + **중복 방어**. 🔴 자리 잡기는 **조건부 UPDATE 한 방**이다 — `SELECT` 후 `UPDATE` 로 짜면 두 인스턴스가 그 사이를 통과한다.<br>⚠️ ShedLock 을 쓰지 않는 이유는 잠그는 단위가 `@Scheduled` 메서드라는 것과, **`POST /scan` 이 스케줄러를 경유하지 않아 닿지 않는다**는 것이다 |
 | `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
 | `PolicyClearance` | — | 구현 단계 **통행증** 값 타입. 〃 — 규율 ④의 값 타입 예외다. 🔴 `adapter/in` 경계를 넘지 않는다(외부가 주입하면 게이트가 껍데기가 된다) |
@@ -86,7 +91,11 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `RepositoryContext` | — | 저장소 분석의 산출물 — **고른 파일 + 왜 골랐나**. `repository` 가 소유하고 #16 이 받는다. 🔴 **영속화하지 않는다** |
 | `SelectedFile` | — | 컨텍스트에 실린 파일 1건. compact 생성자가 **스크럽을 강제**한다 (S-4) |
 | `IssueAnalysis` | — | 분석 결과 **값**. 생성자가 스키마와 **스크럽을 함께 강제**한다 (`ScrubbedRules` 와 같은 수법) |
-| `DiffReviewer` | `LlmDiffReviewer` | 생성된 diff 리뷰. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — 임계는 #21 |
+| `DiffReviewer` | `LlmDiffReviewer` | 생성된 diff 리뷰. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — 임계는 `RetryPolicy` 가 갖는다(#21) |
+| `RetryPolicy` | — | 한 바퀴의 결과를 `RetryDecision` 으로 옮기는 **순수 판정**(#21). 🔴 **재시도가 화이트리스트다** — 「무엇이 재시도 불가인가」가 아니라 **「무엇이 재시도 가능인가」**를 센다. 거부목록이면 새 실패 종류가 조용히 재시도로 떨어져 비용이 3배가 된다 |
+| `RetryDecision` | — | 바퀴가 끝난 뒤 무엇을 할 것인가 — `Proceed`·`Retry`·`Stop` **셋뿐**(sealed). `Stop` 이 **어느 단계에서 멈췄는지를 값으로** 든다 — 사유 문자열에서 되짚으면 문구를 바꾸는 순간 어긋난다 |
+| `CodingFeedback` | — | 직전 바퀴가 **왜 실패했는가** — 다음 바퀴 프롬프트에 되먹이는 값(#21). 🔴 **「Error Analyzer」는 LLM 호출이 아니다** — 호출로 만들면 곱셈 예산이 9회 → 18회가 된다. 담는 것은 **이미 스크럽이 강제된 값**(`StageResult.summary`·`DiffReview.findings`)뿐이다 |
+| `FailureFingerprint` | — | 「같은 실패가 반복되는가」의 판정 값(#21). **해시만 보관**한다(S-4).<br>🕳 **발화하지 않을 수 있다** — 빌드 출력에 타임스탬프·경로가 섞이면 같은 오류라도 지문이 갈린다. 실측 전에는 정규화하지 않는다(거부목록이 된다). 물지 못해도 **상한 3바퀴가 뒤를 받친다** |
 | `DiffReview` | — | 리뷰 결과 **값**. 🔴 **S-4 의 수신 쪽 방어**다 — 리뷰가 diff 를 인용하면 시크릿이 우리 DB 로 복제되므로 생성자가 스크럽을 강제한다 |
 | `ForkRef` | — | **쓰기가 허용된** 저장소 좌표. 생성 시 owner 를 단언한다. ⚠️ **방어가 아니라 「일찍 드러내는 것」**이다 — 유일한 방어는 `GitHubWriteClient` 의 쓰기 직전 어설션이고, 둘 중 지워야 한다면 이쪽이다 (#22) |
 | `SyncedFork` | — | 「upstream 과 맞춰 보았고 결과가 이것이다」는 **통행증**. `PublishRequest` 가 인자로 요구해 **동기화를 보지 않고 publish 하는 것을 표현 불가능**하게 한다 — `PolicyClearance` 와 같은 수법.<br>⚠️ 강제하는 것은 **호출**이지 판단이 아니다 (#22) |

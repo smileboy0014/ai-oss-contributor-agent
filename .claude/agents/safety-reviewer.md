@@ -94,7 +94,7 @@ grep -rn "log\.\|prompt\|System.getenv\|@Value" src/main/java --include=*.java
 ### S-6. 사람 승인 지점
 
 - `SELECTED` 전이를 **자동으로** 일으키는 경로가 있는가 (스케줄러·이벤트 핸들러에서)
-- 재시도 상한(`agent.execution.max-retries`)이 코드에서 무한·우회 가능한가
+- 재시도 상한(`agent.execution.max-attempts`)이 코드에서 무한·우회 가능한가
 - 종단 상태(`PR_CREATED`·`REJECTED`·`FAILED`)에서 나가는 전이가 추가됐는가
 - 파이프라인이 스캔부터 PR까지 **사람 개입 없이 흐르는 경로**가 생겼는가
 

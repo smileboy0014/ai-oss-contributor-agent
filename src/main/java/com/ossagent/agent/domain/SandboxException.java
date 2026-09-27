@@ -15,7 +15,7 @@ package com.ossagent.agent.domain;
  * 두 갈래로 <b>타입에서</b> 갈린다. 호출자가 메시지를 해석해야 한다면 언젠가 틀린다.
  *
  * <p>⚠ 여기서 말하는 재시도는 <b>전송 축</b>(데몬에 다시 말을 건다)이다.
- * 파이프라인 재시도({@code agent.execution.max-retries} · Q-6)는 #21 의 몫이고,
+ * 파이프라인 재시도({@code agent.execution.max-attempts} · Q-6)는 #21 의 몫이고,
  * <b>빌드가 실패한 것은 예외가 아니라 {@link SandboxResult} 의 종료코드</b>다 —
  * 그것이 이 제품의 게이트이지 오류가 아니기 때문이다.
  */

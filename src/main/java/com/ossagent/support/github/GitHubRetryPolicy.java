@@ -5,7 +5,7 @@ import java.time.Duration;
 /**
  * 전송 계층 재시도 판정 — 순수 함수. 부작용도 대기도 여기서 하지 않는다.
  *
- * <p>🔴 <b>이 상한은 {@code agent.execution.max-retries} 와 다른 축이다.</b>
+ * <p>🔴 <b>이 상한은 {@code agent.execution.max-attempts} 와 다른 축이다.</b>
  * 후자는 PRD §17 의 「구현→테스트」 루프 카운터이고 {@code AgentRun.attempt} 에 기록된다.
  * HTTP 5xx 한 번으로 그 카운터를 태우면 후보가 코드 문제 없이 {@code FAILED} 로 떨어진다.
  * 그래서 별도 키 {@code github.max-retries} 를 쓴다 — 재시도 단위의 정의는 미결(Q-6)이다.

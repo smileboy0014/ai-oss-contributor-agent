@@ -124,6 +124,13 @@ tasks.withType<Test>().configureEach {
             .withPropertyName("harnessScripts")
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // 🔴 CI 워크플로우도 같은 이유로 선언한다 (#61). CiWorkflowTest 가 이 파일을 **텍스트로**
+    //   읽으므로, 선언하지 않으면 워크플로우만 고친 커밋에서 UP-TO-DATE 로 건너뛴다 —
+    //   요구 0(「돌기는 하는가」).
+    inputs.files(fileTree("$rootDir/.github/workflows") { include("**/*.yml", "**/*.yaml") })
+            .withPropertyName("ciWorkflows")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // 🔴 #23 이 위 「남는 구멍」을 한 자리에서 닫는다.
     //   ForkPublishArchitectureTest.쓰기_엔드포인트가_화이트리스트_안이다_S2 가 이 디렉터리의
     //   소스를 **텍스트로** 읽는다. 그 가드가 보는 것은 subPath **문자열 리터럴**이라

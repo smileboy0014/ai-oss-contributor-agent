@@ -100,7 +100,7 @@ github:
   connect-timeout: 5s
   read-timeout: 10s
   # 전송 계층 재시도 상한 — 5xx·타임아웃에만 적용된다.
-  # ⚠ agent.execution.max-retries 와 다른 축이다. 그쪽은 「구현→테스트」 루프 카운터이고
+  # ⚠ agent.execution.max-attempts 와 다른 축이다. 그쪽은 「구현→테스트」 루프 카운터이고
   #   AgentRun.attempt 에 기록된다. HTTP 5xx 한 번으로 그 카운터를 태우면
   #   후보가 코드 문제 없이 FAILED 로 떨어진다 — 재시도 단위의 정의는 미결(Q-6)
   max-retries: 2
@@ -204,8 +204,27 @@ scan:
     #      멈추는 것은 이 플래그와 무관하게 성립한다
     enabled: false
     # 이전 실행이 끝난 뒤부터 센다. fixedRate 면 스캔이 주기보다 길 때 실행이 겹쳐 쌓인다
-    fixed-delay: 1h
+    #
+    # 🔴 이것은 「얼마나 자주 **훑는가**」이지 「얼마나 자주 **도는가**」가 아니다 (#26).
+    #    저장소를 실제로 도는 주기는 아래 default-interval(또는 저장소별 주기)이 정하고,
+    #    여기서는 그 시각이 됐는지 확인만 한다. 그래서 **더 촘촘해야 한다** —
+    #    같은 값이면 「주기가 됐는데 아무도 안 훑어서」 실질 주기가 두 배가 된다.
+    #    ⚠ 훑는 것 자체는 대외 호출이 아니다(DB 조회 1회). 촘촘하게 둬도 레이트리밋을
+    #      태우지 않는다 — 오히려 주기 필터가 GitHub 호출을 **줄인다**(NFR-1)
+    fixed-delay: 10m
     initial-delay: 5m
+  # 저장소별 주기(oss_repository.scan_interval_minutes)가 없을 때 쓰는 기본 주기 — FR-1
+  default-interval: 1h
+  # 🔴 스캔 자리를 붙들 수 있는 시간. 지나면 다른 인스턴스가 뺏어 간다 — FR-4
+  #
+  #   없으면: 인스턴스가 kill -9 될 때 RUNNING 행이 남아 그 저장소가 **영구히 409** 가
+  #           된다. 재기동해도 안 풀린다 — 메모리 구현에 있던 「재기동이 상태를 지운다」는
+  #           안전장치가 DB 로 옮기면서 사라졌고, 이 값이 그 자리를 대신한다
+  #   짧으면: 도는 스캔을 남이 뺏는다. 최악이 중복 스캔 1회이고 이슈 수집이 멱등이라
+  #           되돌릴 수 있다 — 그래서 이쪽으로 기울였다
+  #
+  # ⚠ 스캔 1회 상한보다 넉넉해야 한다. 그 가정이 틀리면 **이 값 하나만** 올린다
+  lease-duration: 2h
   # 차면 409 로 거절한다. 무한 큐는 「쌓이는 줄 모르는」 상태를 만들고,
   # 그때 쌓이는 것은 몇 시간 뒤에 실행될 스캔이다
   queue-capacity: 10
@@ -214,7 +233,7 @@ scan:
 
 agent:
   execution:
-    max-retries: 3
+    max-attempts: 3
     timeout-seconds: 1800
   # 이슈 분석(#11) — PRD §11. LLM 호출 1건 = 후보 1건이다
   analysis:
@@ -237,7 +256,7 @@ agent:
   plan:
     # 🔴 3번째 재시도 축이다. 다른 둘과 섞지 않는다 —
     #    agent.llm.max-retries       전송 실패(429·5xx·타임아웃)
-    #    agent.execution.max-retries CODE→VERIFY→REVIEW 루프 한 바퀴
+    #    agent.execution.max-attempts CODE→VERIFY→REVIEW 루프 한 바퀴
     #    여기                         「모델이 없는 파일을 지목했다」는 의미 실패
     #    ⚠ 곱셈 예산: 2 × (1 + agent.llm.max-retries 2) = LLM 호출 최대 6회
     max-attempts: 2
@@ -296,7 +315,7 @@ agent:
     #   바인딩되지 않아 값을 낮춰도 아무 일도 일어나지 않는다 — github.read-timeout 과 같은 형식
     timeout: 120s
     # 전송 계층 재시도 상한 — github.max-retries 와 같은 축이다.
-    # ⚠ agent.execution.max-retries(3) 와는 다른 축이다. Q-6 확정:
+    # ⚠ agent.execution.max-attempts(3) 와는 다른 축이다. Q-6 확정:
     #   그쪽은 CODE→VERIFY→REVIEW 한 바퀴를 세고 AgentRun.attempt 에 기록된다.
     #   곱셈 예산 3 × (1 + 2) = 후보 1건당 대외 호출 최대 9회
     max-retries: 2

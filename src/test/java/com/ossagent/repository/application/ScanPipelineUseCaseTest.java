@@ -1,8 +1,5 @@
 package com.ossagent.repository.application;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 import com.ossagent.candidate.adapter.out.persistence.ContributionCandidateRepository;
 import com.ossagent.candidate.domain.CandidateStatus;
 import com.ossagent.candidate.domain.FakeIssueAnalyst;
@@ -19,6 +16,8 @@ import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryMetadata;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RuleReading;
+import com.ossagent.repository.domain.ScanSkipReason;
+import com.ossagent.repository.domain.ScanStage;
 import com.ossagent.repository.domain.ScrubbedRules;
 import com.ossagent.support.testing.AgentIntegrationTest;
 import java.time.Clock;
@@ -34,6 +33,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 파이프라인 전체 — <b>S-5·S-6 이 이 클래스의 절반</b>이다.
@@ -141,7 +142,7 @@ class ScanPipelineUseCaseTest {
         ScanPipelineResult result = pipeline.run(repositoryId);
 
         assertThat(result.skipReason())
-                .isEqualTo(ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN);
+                .isEqualTo(ScanSkipReason.CONTRIBUTION_FORBIDDEN);
         assertThat(issueSource.callCount())
                 .as("반영할 수 없는 판정에 레이트리밋을 쓰지 않는다 — #7 이 세운 원칙")
                 .isZero();
@@ -157,7 +158,7 @@ class ScanPipelineUseCaseTest {
         ScanPipelineResult result = pipeline.run(repositoryId);
 
         assertThat(result.skipReason())
-                .isEqualTo(ScanTarget.SkipReason.POLICY_UNDETERMINED);
+                .isEqualTo(ScanSkipReason.POLICY_UNDETERMINED);
         assertThat(issueSource.callCount()).isZero();
     }
 
@@ -255,7 +256,7 @@ class ScanPipelineUseCaseTest {
 
         assertThatThrownBy(() -> pipeline.run(repositoryId))
                 .isInstanceOfSatisfying(ScanStageFailedException.class, e -> {
-                    assertThat(e.stage()).isEqualTo(ScanExecutionState.Stage.SCAN);
+                    assertThat(e.stage()).isEqualTo(ScanStage.SCAN);
                     assertThat(e.failureType())
                             .as("진행 조회로 나가는 값이다 — 클래스 이름만")
                             .isEqualTo("IllegalStateException");

@@ -157,9 +157,11 @@ class ForkPublishArchitectureTest {
     private static final java.util.regex.Pattern SUB_PATH_LITERAL = java.util.regex.Pattern.compile(
             "(?:writeClient|client)\\.(?:post|patch|delete)\\([^,;]+,\\s*\"([^\"]*)\"");
 
-    /** 🔴 파일 하나가 아니라 <b>디렉터리 전체</b>다 — 아래 javadoc 참조. */
-    private static final java.nio.file.Path WRITE_ADAPTER_DIR = java.nio.file.Path.of(
-            "src/main/java/com/ossagent/pullrequest/adapter/out/github");
+    /**
+     * 🔴 파일 하나도, 디렉터리 하나도 아니라 <b>운영 소스 전체</b>다 — 아래 javadoc 참조.
+     */
+    private static final java.nio.file.Path PRODUCTION_SOURCE_ROOT =
+            java.nio.file.Path.of("src/main/java/com/ossagent");
 
     /**
      * 🔴 <b>#23 검토가 찾은 구멍 — 가드의 입력 공간이 파일 하나였다</b>
@@ -172,8 +174,32 @@ class ForkPublishArchitectureTest {
      * 그것이 S-2 의 「대상 저장소에 글을 남기는 모든 경로」를 지키는 <b>유일한</b> 장치였다.
      *
      * <p>「위반이 0건이라 초록」이 아니라 <b>「검사 대상이 아니라서 초록」</b>이었고,
-     * 둘은 구분되지 않는다. 그래서 스캔 범위를 <b>디렉터리 전체</b>로 넓혔다 — 앞으로
-     * 생기는 어댑터도 기본이 검사 대상이다.
+     * 둘은 구분되지 않는다.
+     *
+     * <h2>🔴 디렉터리로도 부족했다 — 안전 리뷰가 한 겹 더 짚었다</h2>
+     *
+     * <p>처음 고칠 때는 {@code pullrequest/adapter/out/github} <b>디렉터리</b>로 넓혔다.
+     * 그런데 {@link GitHubWriteClient} 도 {@code ForkRef} 도 <b>public</b> 이라,
+     * 다른 패키지(예: {@code issue/adapter/out/github})의 새 어댑터가
+     * {@code writeClient.post(fork, "issues/12/comments", …)} 를 쓰면 <b>여전히 안 잡힌다.</b>
+     *
+     * <p>⚠️ {@link #쓰기_표면은_한_곳이다_S1} 도 그것을 잡지 못한다 — 그쪽 판정축은
+     * {@code RestClient}/{@code HttpMethod} <b>직접</b> 사용이고,
+     * {@code GitHubWriteClient} 는 {@code ExternalAdapters.NETWORK_CLIENTS} 에 없다.
+     * 즉 「한 패키지 안」이라는 전제가 <b>어디에도 강제돼 있지 않았다.</b>
+     *
+     * <p>그래서 스캔을 <b>운영 소스 전체</b>로 넓혔다. 여집합이다 — 어느 패키지에
+     * 무슨 이름으로 어댑터가 생기든 기본이 검사 대상이다.
+     *
+     * <p>🔵 <b>비용은 작다.</b> 텍스트 읽기 수백 건이고 정규식은 줄 단위가 아니라 파일
+     * 단위 한 번이다. 실측으로 수백 ms 다.
+     *
+     * <p>⚠️ <b>{@code build.gradle.kts} 의 입력 선언은 넓히지 않는다</b>(요구 0).
+     * 「가드가 돌기는 하는가」를 위해 쓰기 어댑터 디렉터리만 선언해 뒀는데, 그것으로
+     * 충분한 이유는 <b>새 {@code writeClient.post(...)} 호출은 반드시 바이트코드를 바꾸기</b>
+     * 때문이다 — 그러면 {@code compileJava} 가 돌고 {@code :test} 도 함께 돈다.
+     * 놓치는 것은 「주석·공백만 바뀐 경우」뿐이고 그것으로는 새 호출이 생기지 않는다.
+     * 게다가 CI 는 fresh checkout 이라 이 문제 자체가 없다.
      *
      * <p>⚠️ <b>{@code forks}·{@code pulls} 는 이 화이트리스트의 죽은 줄이다.</b>
      * 둘 다 {@code GitHubWriteClient} <b>내부 상수</b>라 호출부 리터럴로 나타나지 않는다.
@@ -186,15 +212,21 @@ class ForkPublishArchitectureTest {
     @DisplayName("쓰기가 닿는 엔드포인트가 화이트리스트를 벗어나지 않는다")
     void 쓰기_엔드포인트가_화이트리스트_안이다_S2() throws Exception {
         List<java.nio.file.Path> sources;
-        try (var files = java.nio.file.Files.list(WRITE_ADAPTER_DIR)) {
+        try (var files = java.nio.file.Files.walk(PRODUCTION_SOURCE_ROOT)) {
             sources = files.filter(path -> path.toString().endsWith(".java")).sorted().toList();
         }
 
         // 🔴 모수 ① — 스캔 경로가 틀리면 파일 0개를 훑고 초록이 된다.
-        //    2 이상인 이유: 이 디렉터리에는 최소한 쓰기 클라이언트와 어댑터 둘이 있다
+        //    ⚠ 「0 이 아니다」로는 약하다. 운영 소스 전체를 훑는다고 주장하므로 그 규모를
+        //      단언한다 — 경로가 하위 디렉터리 하나로 좁아져도 드러나야 한다
         assertThat(sources)
-                .as("쓰기 어댑터 디렉터리에서 java 파일을 찾지 못했다 — 경로가 틀렸다")
-                .hasSizeGreaterThan(1);
+                .as("운영 소스에서 java 파일을 충분히 찾지 못했다 — 스캔 경로가 좁아졌다")
+                .hasSizeGreaterThan(100);
+        assertThat(sources)
+                .as("쓰기 클라이언트와 두 어댑터가 스캔에 실재해야 한다")
+                .anyMatch(path -> path.endsWith("GitHubWriteClient.java"))
+                .anyMatch(path -> path.endsWith("GitHubForkPublisher.java"))
+                .anyMatch(path -> path.endsWith("GitHubDraftPrPublisher.java"));
 
         Set<String> used = new TreeSet<>();
         for (java.nio.file.Path source : sources) {

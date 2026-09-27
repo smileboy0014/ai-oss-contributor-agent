@@ -116,12 +116,23 @@ fi
 #    물림을 증명하지 못하는 가드는 달지 않는다(testing-philosophy 요구 2).
 #    대신 **증상을 사후에 알아본다** — 이쪽은 문자열 판정이라 결정적이다.
 #
+#    🔴 **판별자가 이 훅의 실제 출력에 닿는지 실측했다** — 요구 4(입력 도달).
+#    처음엔 「실패한 테스트 이름 줄이 없는가」(`^[A-Za-z].*> .* FAILED`)로 썼는데,
+#    이 훅은 `-q` 로 돌리고 그러면 `testLogging { events("failed") }` 의 LIFECYCLE
+#    출력이 죽어 **그 줄이 아예 찍히지 않는다.** 즉 조건이 **항상 참**이라 판별이
+#    「XML 오류가 있으면 무조건 판정 없음」으로 축약되고, 동시 실행과 진짜 실패가
+#    겹치면 **진짜 실패를 삼킨다.**
+#    실측(이 저장소 · 실패 1건 주입 · `test --no-daemon -q`):
+#      `^[A-Za-z].*> .* FAILED`            → 0건   ← 발화 불가
+#      `^[0-9]+ tests? completed, N failed` → 1건   ← 「863 tests completed, 1 failed」
+#    그래서 **`-q` 에서도 반드시 찍히는 요약 줄**로 바꿨다.
+#
 #    🔴 이것을 「실패」로 세지 않는다. 3회 카운터를 태우면 멀쩡한 코드가
 #    「3회 연속 실패」가 되고, 그 적색이 다음 사람의 진단을 오염시킨다.
 if echo "$out" | grep -q "Could not write XML test results" \
-   && ! echo "$out" | grep -qE "^[A-Za-z].*> .* FAILED"; then
+   && ! echo "$out" | grep -qE "^[0-9]+ tests? completed, [0-9]+ failed"; then
   echo "ℹ️  테스트 판정 없음 — 다른 Gradle 과 동시에 돌아 결과 파일이 겹쳤습니다."
-  echo "   실패한 테스트 이름이 하나도 없으므로 코드 문제가 아닙니다. 「통과」도 아닙니다."
+  echo "   실패 집계 줄이 없어 **테스트가 판정될 만큼 돌지 못했습니다.** 「통과」가 아닙니다."
   echo "   포그라운드 단독으로 다시 돌립니다:  rm -rf build && ./gradlew build --rerun-tasks"
   exit 0
 fi

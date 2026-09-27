@@ -9,13 +9,39 @@
 
 | 항목 | 답 |
 |---|---|
-| 소유 도메인 | **`agent`** — 실행과 비용의 도메인이다. `agent/application` 을 **신설**한다(지금 `adapter`·`domain` 뿐) |
-| 레이어 | 파이프라인 조율 = `application`. 판정 규칙 = `domain` 값 타입 |
-| 능력 인터페이스 | **새로 만들지 않는다** — `CodeSandbox`(#17)를 그대로 쓴다 |
+| 소유 도메인 | **`candidate`** — rev.2 정정. 아래 §0.1 |
+| 레이어 | 능력 = `candidate/domain`. 구현 = `candidate/adapter/out/sandbox`. 판정 규칙 = `candidate/domain` 값 타입 |
+| 능력 인터페이스 | **`ChangeVerifier`** — #18 이 선언하고 이 PR 이 구현한다. 그 아래에 `CodeSandbox`(#17)를 쓴다 |
 | 🔴 대외 호출 위치 | 샌드박스 실행은 **최대 30분**이다. **트랜잭션 밖**에서 돌리고 결과 영속화만 짧은 트랜잭션 |
 | 상태 전이 | **만들지 않는다** — `TESTING` 전이는 #18·#21 의 몫이다. 여기서 흘려보내지 않는다 |
 | 멱등성 | 같은 후보를 두 번 검증해도 `AgentRun` 이 append-only 로 두 행이 될 뿐 부작용 없음 |
 | `Clock` | 주입. 단계별 소요를 기록한다 |
+
+### 0.1 🔴 rev.2 — 소유 도메인을 `agent` 에서 `candidate` 로 정정한다
+
+rev.1 은 파이프라인을 `agent/application` 에 두려 했다. **#16 선례를 보고 틀린 것을 알았다.**
+
+```
+agent/domain/LanguageModel          ← 1층 능력 (여러 도메인이 공유)
+  └ candidate/domain/ImplementationPlanner              ← 2층 능력
+      └ candidate/adapter/out/llm/LlmImplementationPlanner   ← 구현
+```
+
+`agent/domain/CodeSandbox` 도 같은 **1층**이다. glossary 가 그렇게 적어 뒀다 —
+「`LanguageModel` … **4개 지점이 공유하는 1층 능력** — 그 위에 `IssueAnalyst` 등 2층이 얹힌다」.
+`IssueAnalyst`(#11)·`ImplementationPlanner`(#16) 둘 다 **`candidate/domain` 에 선언하고
+`candidate/adapter/out/{기술}` 에 구현**했다.
+
+그러니 검증도 같은 모양이다.
+
+```
+candidate/domain/ChangeVerifier                          ← 2층 능력 (#18 이 선언)
+  └ candidate/adapter/out/sandbox/SandboxChangeVerifier  ← 구현 (이 PR)
+      └ agent/domain/CodeSandbox (#17)
+```
+
+⚠️ **`agent` 에 두면 `GeneratedChange`·`ContributionCandidate` 를 import 하게 된다** —
+둘 다 남의 애그리거트다(규율 ④). 위 배치는 그 문제가 애초에 생기지 않는다.
 
 ---
 
@@ -63,20 +89,26 @@ record SandboxResult(int exitCode, String output, boolean truncated,
 ## 2. 구조
 
 ```
-agent/application/
-  VerifyChangeUseCase          파이프라인 조율 · 트랜잭션 경계 밖에서 샌드박스 호출
-  VerificationRecorder         결과 영속화 (짧은 트랜잭션) — @Transactional 은 여기만
+candidate/domain/            ← 값·규칙. 기술을 모른다
+  ChangeVerifier             능력 인터페이스 — 🔴 #18 이 선언한다 (이 PR 은 구현만)
+  VerificationRequest        값 — candidateId · workspacePath · ContributionConstraints · plannedPaths
+  VerificationReport         값 — 단계별 StageResult + 전체 판정
+  StageResult                값 — stage · outcome · exitCode · duration · 🔴 스크럽된 요약
+  VerificationStage          enum — COMPILE · UNIT_TEST · INTEGRATION_TEST · FORMAT · DIFF
+  StageOutcome               enum — PASSED · FAILED · UNDETERMINED · SKIPPED
+  DiffInspection             diff 검사 규칙 (계획 범위 밖 · 디버그 잔재 · 대용량 바이너리)
 
-agent/domain/
-  VerificationStage            enum — COMPILE · UNIT_TEST · INTEGRATION_TEST · FORMAT · DIFF
-  StageOutcome                 enum — PASSED · FAILED · UNDETERMINED · SKIPPED
-  StageResult                  값 — stage · outcome · exitCode · duration · 스크럽된 요약
-  VerificationReport           값 — 단계별 StageResult 목록 + 전체 판정
-  VerificationCommands         Gradle argv 조립 (BuildTool 별)
-  DiffInspection               diff 검사 규칙 (계획 범위 밖 · 디버그 잔재 · 대용량 바이너리)
+candidate/adapter/out/sandbox/
+  SandboxChangeVerifier      구현 — CodeSandbox 를 단계별로 부른다
+  VerificationCommands       Gradle argv 조립 (BuildTool 별)
 ```
 
-⚠️ **`agent/application` 은 지금 없다.** 신설이므로 `codemaps/architecture.md` 갱신 대상이다.
+⚠️ **`candidate/adapter/out/sandbox` 는 지금 없다.** 신설이므로
+`codemaps/architecture.md` 갱신 대상이다.
+
+⚠️ **`ChangeVerifier` 선언은 #18 소유**다 — 그쪽이 `IMPLEMENTING → TESTING` 을 잇는
+호출자이고, **구현이 없을 때 `FAILED` 로 떨어지는 fail-closed 기본값**도 #18 이 둔다.
+이 PR 은 그 자리에 실제 구현을 꽂는다. **어느 쪽이 먼저 머지돼도 `main` 이 일관된다.**
 
 ### 2.1 단계별 결과 기록 — 「어디서 떨어졌는지」
 

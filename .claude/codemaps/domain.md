@@ -1,6 +1,6 @@
 # 도메인 코드맵
 
-> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §9 Issue Discovery · §10 Candidate State Machine · §11 Issue Analysis · §15 Verification Pipeline · §17 Retry Strategy (v1.1 Draft).
+> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §9 Issue Discovery · §10 Candidate State Machine · §11 Issue Analysis · §15 Verification Pipeline · §17 Retry Strategy (v1.2 Draft).
 > 비즈니스 규칙과 상태머신. **구현 전에 이 맵을 확인하고 일치시킬 것.**
 > ⚠️ **상태머신은 구현됐다**(#12) — 전이 규칙·불변식 ①②⑧·재시도 상한이 `candidate/domain` 에 있다.
 > **필터·검증 파이프라인은 여전히 미구현**이고, 전이를 부르는 UseCase·엔드포인트도 아직 없다(#13 · #24).
@@ -77,7 +77,7 @@
 | From | To | 트리거 | 주체 |
 |---|---|---|---|
 | — | `DISCOVERED` | **배제되지 않은** 이슈로 후보 생성 | 스캐너 |
-| `DISCOVERED` | `ANALYZING` | 분석 배치가 집어 든다 — `AnalyzeIssuesUseCase`(#11). ⚠️ PRD §23 의 `POST /candidates/{id}/analyze` 는 **아직 없다**; 지금은 저장소 단위 배치뿐이고 트리거는 #14 | 시스템 |
+| `DISCOVERED` | `ANALYZING` | 분석 배치가 집어 든다 — `AnalyzeIssuesUseCase`(#11). ⚠️ **`POST /candidates/{id}/analyze` 는 만들지 않는다** — PRD v1.2 가 §23 에서 지웠다(#30). 분석은 스캔 파이프라인의 한 단계이지 사람이 거는 호출이 아니다. 지금도 저장소 단위 배치뿐이고 트리거는 #14 | 시스템 |
 | `ANALYZING` | `ANALYZED` | LLM 분석 산출물 저장 | 시스템 |
 | `ANALYZING` | `FAILED` ● | **분석 실패 — 즉시 종단** (Q-6: `ANALYZE`·`PLAN` 은 재시도 없음) | 시스템 |
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` · `breaking_change=true` · **`confidence < agent.analysis.min-confidence`**(#11) | 시스템 |
@@ -104,8 +104,8 @@ S-6 이 요구하는 승인 지점이다. **스케줄러·워커가 이 선을 �
 | 착수 | `POST /candidates/{id}/implement` | ⬜ #18 | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
 | **PR 생성** | `POST /candidates/{id}/pull-request` | ⬜ #23 | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
 
-⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스는 `implement` 한 번으로
-Draft PR 까지 그렸는데, 그대로 구현하면 위 세 번째 게이트가 사라진다 — PRD 결함이다(#30).
+⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스가 `implement` 한 번으로
+Draft PR 까지 그려 두었던 것이 결함이었고, **PRD v1.2 에서 게이트 셋으로 정정됐다**(#30).
 
 선택 취소(`SELECTED → REJECTED`)도 **사람 행위로만** 일어난다. 자동 취소 경로를 만들지 않는다.
 구현된 엔드포인트는 `POST /candidates/{id}/reject` 다 — 🔴 `DELETE` 가 아니다.
@@ -418,3 +418,4 @@ oss-agent/issue-{issueNumber}-{short-description}
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 §9~§17 기준 · 불변식 10개 신설 |
+| 2026-09-27 | smileboy0014 | PRD v1.2 반영 — `POST /candidates/{id}/analyze` 는 **만들지 않는다**로 확정(§23 에서 삭제) · §24 참조 갱신 (#30) |

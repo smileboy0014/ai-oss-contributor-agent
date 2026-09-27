@@ -1,6 +1,6 @@
 # 아키텍처 코드맵
 
-> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §6 System Architecture · §21 Redis Job Architecture · §25 Security Architecture (v1.1 Draft).
+> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §6 System Architecture · §21 Redis Job Architecture · §25 Security Architecture (v1.2 Draft).
 > 내부 레이어링 규율은 [`../rules/conventions/architecture.md`](../rules/conventions/architecture.md), 넘으면 안 되는 선은 [`../rules/context/safety-boundaries.md`](../rules/context/safety-boundaries.md).
 > ⚠️ **대부분 비어 있다.** 아래 구조는 설계이고, 지금 존재하는 코드는 § 「구현 현황」의 ✅ 뿐이다.
 

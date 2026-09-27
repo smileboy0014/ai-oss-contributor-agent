@@ -86,7 +86,7 @@ cp .claude/settings.json.example .claude/settings.local.json
 
 | 파일 | 내용 |
 |---|---|
-| [`../docs/ai-oss-contributor-agent-prd.md`](../docs/ai-oss-contributor-agent-prd.md) | PRD v1.1 (Draft) — 836줄 |
+| [`../docs/ai-oss-contributor-agent-prd.md`](../docs/ai-oss-contributor-agent-prd.md) | PRD v1.2 (Draft) — 938줄 |
 
 새 문서를 넣으면 **`rules/context/` 쪽에 포인터를 같이 건다.** 안 걸면 다음 세션이 찾지 못한다.
 

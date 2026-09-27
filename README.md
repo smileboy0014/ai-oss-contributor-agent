@@ -105,4 +105,4 @@ GitHub 인증은 **classic PAT(`public_repo`)** 입니다. fine-grained PAT과 G
 | [`.claude/docs/setup.md`](.claude/docs/setup.md) | 초기 셋업 |
 | [`.claude/docs/rules.md`](.claude/docs/rules.md) | 컨텍스트·컨벤션·코드맵 읽는 순서 |
 | [`.claude/rules/context/open-questions.md`](.claude/rules/context/open-questions.md) | 미결 대장 — **착수 전 확인** |
-| [`docs/ai-oss-contributor-agent-prd.md`](docs/ai-oss-contributor-agent-prd.md) | PRD v1.1 (Draft) |
+| [`docs/ai-oss-contributor-agent-prd.md`](docs/ai-oss-contributor-agent-prd.md) | PRD v1.2 (Draft) |

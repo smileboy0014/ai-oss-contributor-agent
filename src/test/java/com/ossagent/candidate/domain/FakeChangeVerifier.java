@@ -29,10 +29,29 @@ public class FakeChangeVerifier implements ChangeVerifier {
     private VerificationReport nextReport = passingReport();
     private RuntimeException nextFailure;
 
+    /**
+     * 🔴 <b>바퀴별 결과</b> — #21 의 루프를 검증하려면 이것이 있어야 한다.
+     *
+     * <p>고정 결과 하나만 돌려주면 「1바퀴 돌고 실패」와 「3바퀴 돌고 실패」가
+     * <b>상태로 구분되지 않는다</b>(둘 다 {@code FAILED}). 바퀴마다 다른 것을 주고
+     * {@link #requests()} 로 <b>몇 번 불렸나</b>를 세는 것이 유일한 증거다.
+     *
+     * <p>비어 있으면 {@link #nextReport} 로 떨어진다 — 기존 테스트가 그대로 돈다.
+     */
+    private final java.util.Deque<VerificationReport> scripted = new java.util.ArrayDeque<>();
+
     public void reset() {
         requests.clear();
+        scripted.clear();
         nextReport = passingReport();
         nextFailure = null;
+    }
+
+    /** 바퀴 순서대로 돌려준다. 다 쓰면 마지막 것이 반복된다. */
+    public FakeChangeVerifier givenInOrder(VerificationReport... reports) {
+        scripted.clear();
+        scripted.addAll(java.util.List.of(reports));
+        return this;
     }
 
     /** 이 대역이 받은 요청들. 「몇 번째 attempt 로 불렸나」를 단언할 때 쓴다. */
@@ -98,7 +117,26 @@ public class FakeChangeVerifier implements ChangeVerifier {
         if (nextFailure != null) {
             throw nextFailure;
         }
-        return nextReport;
+        // ⚠ 마지막 하나는 남겨 둔다 — 상한을 넘겨 불리면 「대역이 바닥났다」가 아니라
+        //   「같은 실패가 계속된다」가 되어야 루프를 그대로 재현한다
+        if (scripted.size() > 1) {
+            return scripted.poll();
+        }
+        return scripted.isEmpty() ? nextReport : scripted.peek();
+    }
+
+    /** 전부 통과한 보고서 — 테스트가 스크립트에 쓴다. */
+    public static VerificationReport passing() {
+        return passingReport();
+    }
+
+    /** 테스트가 깨진 보고서 — <b>재시도가 의미 있는</b> 실패다. */
+    public static VerificationReport testFailure(String summary) {
+        return new VerificationReport(List.of(
+                passed(VerificationStage.COMPILE),
+                new StageResult(VerificationStage.TEST, StageOutcome.FAILED, 1,
+                        Duration.ofSeconds(1), false, summary),
+                StageResult.skipped(VerificationStage.DIFF)));
     }
 
     private static VerificationReport passingReport() {

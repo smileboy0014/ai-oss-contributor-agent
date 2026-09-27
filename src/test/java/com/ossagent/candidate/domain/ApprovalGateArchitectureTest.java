@@ -243,6 +243,75 @@ class ApprovalGateArchitectureTest {
         };
     }
 
+    // ────────── ①c markPrCreated 를 부르는 곳이 0개다 — 🔴 S-2 (#21) ──────────
+
+    /**
+     * 🔴 <b>허용목록이 아니라 여집합이다.</b>
+     *
+     * <p>위 ①b 를 그대로 재사용하면 <b>「{@code SelectCandidateUseCase} 만 PR 을 만들 수
+     * 있다」</b>가 되어 의미가 뒤집힌다. {@code markPrCreated} 의 정당한 호출자는
+     * <b>#23 의 PR 생성기</b>이고, <b>지금은 아무도 아니다.</b>
+     *
+     * <p>그래서 「0개」를 단언한다. #21 의 재시도 루프는 성공해도 {@code READY_FOR_PR}
+     * 에서 멈추고, 그 다음은 <b>세 번째 승인 게이트</b>다 (S-2 · S-6).
+     *
+     * <h2>#23 이 여는 날 이 테스트가 함께 빨개진다 — 그것이 장치다</h2>
+     *
+     * <p>{@code CandidateApprovalApiTest} 가 「착수·PR 생성 엔드포인트는 404」를 회귀로
+     * 고정해 <b>실행기와 같은 PR 에서 열라</b>고 강제하는 것과 같은 모양이다.
+     * 🔴 <b>테스트를 지우고 열지 않는다</b> — 허용 호출자를 명시적으로 더한다.
+     *
+     * <p>🕳 <b>남는 구멍</b>은 ①b 와 같다 — 리플렉션은 못 보고, 나중에 이 메서드를
+     * 인터페이스로 추출하면 그 타입으로 부르는 경로가 빠져나간다.
+     */
+    private static ArchRule PR_생성_전이를_부르는_곳이_없다() {
+        return noClasses()
+                .should(PR_생성_전이를_부른다())
+                .as("READY_FOR_PR → PR_CREATED 는 세 번째 승인 게이트다 — "
+                        + "자동화가 스스로 밟지 않는다 (S-2). 여는 주체는 #23 이고, "
+                        + "그때 이 규칙에 허용 호출자를 명시한다")
+                // 🔴 true 로 두지 않는다 — 0건 통과가 바로 이 규칙이 경계하는 상태다.
+                //    다만 ArchUnit 은 「대상이 0개」일 때만 이것을 보므로, 실제 방어는
+                //    아래 양성 대조가 한다
+                .allowEmptyShould(true);
+    }
+
+    @Test
+    void 루프는_PR_생성_전이를_부르지_않는다_S2() {
+        PR_생성_전이를_부르는_곳이_없다().check(PRODUCTION);
+    }
+
+    /**
+     * 🔴 <b>이 단언이 위 규칙을 「있다」에서 「문다」로 바꾼다.</b>
+     *
+     * <p>운영 코드에 위반이 0건이라 위 테스트는 <b>판정기가 고장 나도 초록</b>이다.
+     * 미끼를 무는지 확인하는 것 말고는 그것을 가를 방법이 없다.
+     */
+    @Test
+    void 그_규칙이_실제로_무는지_확인한다_양성_대조_S2() {
+        assertThatThrownBy(() -> PR_생성_전이를_부르는_곳이_없다().check(PROBES))
+                .as("미끼(AutoPrCreateProbe)를 놓치면 규칙이 아무것도 막지 않는 것이다 — "
+                        + "운영 코드에 호출자가 0개라 그 사실이 초록에 가려진다")
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("AutoPrCreateProbe");
+    }
+
+    /** ①b 와 같은 축이다 — 호출과 <b>메서드 참조</b>를 함께 본다(#73 이 잡은 구멍). */
+    private static ArchCondition<JavaClass> PR_생성_전이를_부른다() {
+        return new ArchCondition<>("markPrCreated 를 직접 부르거나 참조한다") {
+            @Override
+            public void check(JavaClass item, ConditionEvents events) {
+                Stream.concat(item.getMethodCallsFromSelf().stream(),
+                                item.getMethodReferencesFromSelf().stream())
+                        .filter(access -> access.getTargetOwner()
+                                .isAssignableTo(ContributionCandidate.class))
+                        .filter(access -> "markPrCreated".equals(access.getName()))
+                        .forEach(access -> events.add(
+                                SimpleConditionEvent.satisfied(access, access.getDescription())));
+            }
+        };
+    }
+
     // ────────── ② selectedAt 을 쓰는 곳은 selectByHuman 하나다 (S-6) ──────────
 
     @Test

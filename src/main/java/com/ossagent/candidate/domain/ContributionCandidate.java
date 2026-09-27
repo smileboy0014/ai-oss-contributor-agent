@@ -330,6 +330,28 @@ public class ContributionCandidate {
      *
      * <p>리뷰 실패도 테스트 실패와 <b>같은 카운터</b>를 쓴다 — PRD §17 의 게이트가 하나뿐이고
      * Q-6 이 「합산」으로 확정했다.
+     *
+     * <h2>🔴 통행증을 다시 받지 않는다 — 결정과 잔여 위험 (#18)</h2>
+     *
+     * <p>{@code startImplementing} 과 달리 이 전이는 {@link PolicyClearance} 를 요구하지 않는다.
+     * <b>같은 바퀴 안이므로 설계상 맞다.</b> 그 결과는 <b>통행증이 후보 수명당 1회만
+     * 확인된다</b>는 것이다.
+     *
+     * <p><b>채택 근거는 비용 하나다</b> — 매 바퀴 확인은 대외 호출을 3배로 늘린다.
+     *
+     * <p>🕳 <b>잔여 위험 — 지금 이것을 막는 것은 없다.</b> 루프가 도는 동안 대상 저장소가
+     * AI 기여 금지로 바뀌어도 그 후보는 최대 3바퀴를 계속 돌고 {@code READY_FOR_PR} 까지 간다.
+     *
+     * <p>⚠️ <b>「#22·#23 이 막는다」고 적지 않는다.</b> #23 이 PR 생성 직전에 재확인하는 것은
+     * <b>「활성 PR 존재」</b>(S-2 방어)이지 기여 정책이 아니다 — 그 수용 조건에 정책 재확인이
+     * <b>없다.</b> 존재하지 않는 방어를 근거로 삼으면 다음 사람이 그것을 믿는다.
+     *
+     * <p>⚠️ 「막아서 잃는 것이 되돌릴 수 있으면 막지 않는다」({@code external-deps.md})도
+     * <b>이 자리의 근거가 아니다.</b> 그 표는 <b>규약 판정을 fail-closed 쪽</b>에 두고
+     * 레이트리밋만 「막지 않는다」로 둔다 — <b>같은 표의 다른 행</b>이다.
+     *
+     * <p>밖으로 나가지 않는다는 사실({@code READY_FOR_PR} 까지는 push·PR 이 없다)이
+     * 이 위험을 <b>되돌릴 수 있게</b> 만들 뿐, <b>없애지 않는다.</b>
      */
     public StatusTransition retryImplementation(int maxAttempts, Clock clock) {
         guardAttemptBudget(maxAttempts);

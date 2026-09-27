@@ -5,7 +5,7 @@
 
 ## ⚠️ 문서 상태
 
-[PRD](../../../docs/ai-oss-contributor-agent-prd.md) 는 **v1.1 Draft** 다. 아키텍처 다이어그램은 상세하지만
+[PRD](../../../docs/ai-oss-contributor-agent-prd.md) 는 **v1.2 Draft** 다. 아키텍처 다이어그램은 상세하지만
 **구현 결정(라이브러리·도구·배치)은 대부분 비어 있다.** 이 대장은 그 빈칸이다.
 
 ---

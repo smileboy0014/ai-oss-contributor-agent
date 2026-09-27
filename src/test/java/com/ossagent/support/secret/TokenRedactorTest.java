@@ -536,4 +536,48 @@ class TokenRedactorTest {
         assertThat(TokenRedactor.mask("")).isEqualTo("(none)");
         assertThat(TokenRedactor.mask(null)).isEqualTo("(none)");
     }
+
+    // ─────────── #59 과차단 회귀 — 「더 단순한 길」을 막는다 ───────────
+
+    /**
+     * 🔴 <b>{@code shapeOf} 의 장식 계산에서 줄 안쪽 공백을 빼면 이 줄이 소실된다.</b>
+     *
+     * <p>#28 6차 리뷰가 「전체 프로브로 회귀 0건」이라 측정해 두어 그 단순화가 오랫동안
+     * 유혹으로 남아 있었다. #59 에서 실제로 적용해 재니 <b>과차단이 1/3 → 2/3</b> 이었고,
+     * 새로 소실되는 것이 정확히 이 모양이다 — 누적 스위트에 이 모양이 없어서 0건이
+     * 나왔을 뿐이다.
+     *
+     * <p>⚠️ 소실된 값은 {@code IssueSnapshot} 을 통해 <b>DB 에 영속되고 복구 경로가 없다.</b>
+     * 얻는 것은 {@code decorationBudget} 메서드 하나의 삭제뿐이다.
+     *
+     * <h2>🔴 이것은 「안전 속성」이 아니라 <b>트레이드오프의 동결</b>이다</h2>
+     *
+     * <p>이름이 {@code 먹히지_않는다} 라 「깨면 안 되는 것」으로 읽히기 쉽다. <b>아니다.</b>
+     * 이 테스트가 고정하는 것은 「이 모양을 <b>가리지 않는다</b>」이고, 그 대가로
+     * <b>같은 모양의 진짜 키는 샌다.</b> 두 방향이 같은 손잡이 하나에 있기 때문이다.
+     *
+     * <p>언젠가 그 모양의 키를 잡는 <b>새 축</b>을 찾으면 이 테스트를 <b>의식적으로 고쳐야</b>
+     * 한다 — 그때 「기존 테스트를 깨뜨리면 안 된다」로 물러서지 않도록 여기 적어 둔다.
+     * 🔴 다만 <b>측정 없이</b> 고치지 않는다. #59 가 후보 축 하나를 실제로 재서 기각했다.
+     */
+    @Test
+    void 들여쓴_표_행은_먹히지_않는다_S4() {
+        String hash = "a".repeat(64);
+        String text = "주의: -----BEGIN RSA PRIVATE KEY-----\n\n  | id | " + hash + " | ok |";
+
+        assertThat(TokenRedactor.redact(text))
+                .as("| 주변 공백이 예산을 넘겨 진입을 막는다. 공백을 세지 않으면 "
+                        + "비공백 장식이 4 ≤ 8 이 되어 진입하고 그 뒤가 통째로 먹힌다")
+                .contains(hash);
+    }
+
+    /** 같은 축의 양성 대조 — 공백이 많아도 살아남는 줄이 실제로 있다. */
+    @Test
+    void 공백_많은_설명줄은_먹히지_않는다_S4() {
+        String hash = "b".repeat(64);
+        String text = "-----BEGIN RSA PRIVATE KEY----- 를 문서에 적지 마세요\n\n"
+                + "sha : " + hash + "  (배포 태그)";
+
+        assertThat(TokenRedactor.redact(text)).contains(hash);
+    }
 }

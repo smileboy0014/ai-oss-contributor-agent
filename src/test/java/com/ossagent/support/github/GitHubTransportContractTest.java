@@ -68,7 +68,7 @@ class GitHubTransportContractTest {
         Clock clock = Clock.systemUTC();
         GitHubClientConfig config = new GitHubClientConfig();
         return config.gitHubApiClient(properties, config.gitHubCredentials(properties),
-                config.gitHubErrorTranslator(clock), clock);
+                config.gitHubErrorTranslator(clock), clock, config.gitHubRateLimitBudget(clock));
     }
 
     /**

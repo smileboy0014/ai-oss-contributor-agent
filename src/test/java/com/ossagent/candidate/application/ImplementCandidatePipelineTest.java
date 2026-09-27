@@ -14,15 +14,13 @@ import com.ossagent.agent.domain.SandboxWorkspace;
 import com.ossagent.agent.domain.TargetWorkspaceSource;
 import com.ossagent.agent.domain.WorkspaceDiff;
 import com.ossagent.candidate.domain.CandidateStatus;
-import com.ossagent.candidate.domain.ChangeVerifier;
+import com.ossagent.candidate.domain.FakeChangeVerifier;
 import com.ossagent.candidate.domain.CodingAgent;
 import com.ossagent.candidate.domain.CodingInput;
 import com.ossagent.candidate.domain.GeneratedFile;
 import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.PlannedFile;
 import com.ossagent.candidate.domain.StatusTransition;
-import com.ossagent.candidate.domain.VerificationReport;
-import com.ossagent.candidate.domain.VerificationRequest;
 import com.ossagent.issue.domain.AnalyzableIssue;
 import com.ossagent.issue.domain.FilterOutcome;
 import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
@@ -77,7 +75,7 @@ class ImplementCandidatePipelineTest {
         f.useCase().implement(CANDIDATE_ID);
 
         verify(f.writer()).fail(eq(CANDIDATE_ID), anyString());
-        assertThat(f.verifier().calls)
+        assertThat(f.verifier().requests())
                 .as("🔴 계획 밖인데 검증까지 갔다면 게이트가 없는 것과 같다")
                 .isEmpty();
         verify(f.writer(), never()).recordChange(anyLong(), anyString(), anyString());
@@ -91,7 +89,7 @@ class ImplementCandidatePipelineTest {
         f.useCase().implement(CANDIDATE_ID);
 
         verify(f.writer()).recordChange(eq(CANDIDATE_ID), anyString(), anyString());
-        assertThat(f.verifier().calls).hasSize(1);
+        assertThat(f.verifier().requests()).hasSize(1);
         verify(f.writer(), never()).fail(anyLong(), anyString());
     }
 
@@ -188,7 +186,7 @@ class ImplementCandidatePipelineTest {
 
         FakeTargetWorkspaceSource workspaces =
                 new FakeTargetWorkspaceSource(workspace, changedPaths);
-        FakeChangeVerifier verifier = new FakeChangeVerifier();
+        FakeChangeVerifier verifier = new FakeChangeVerifier().givenPassing();
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
                 contexts, policies, provider(workspaces), provider(new FakeCodingAgent(generatedPath)),
@@ -270,14 +268,4 @@ class ImplementCandidatePipelineTest {
         }
     }
 
-    private static final class FakeChangeVerifier implements ChangeVerifier {
-
-        private final List<VerificationRequest> calls = new ArrayList<>();
-
-        @Override
-        public VerificationReport verify(VerificationRequest request) {
-            calls.add(request);
-            return VerificationReport.success();
-        }
-    }
 }

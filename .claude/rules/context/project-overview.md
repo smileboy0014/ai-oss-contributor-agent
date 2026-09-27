@@ -1,6 +1,6 @@
 # 프로젝트 개요
 
-> 기준일 **2026-09-18**. 근거 문서는 [`docs/ai-oss-contributor-agent-prd.md`](../../../docs/ai-oss-contributor-agent-prd.md) (v1.1, Draft).
+> 기준일 **2026-09-18**. 근거 문서는 [`docs/ai-oss-contributor-agent-prd.md`](../../../docs/ai-oss-contributor-agent-prd.md) (v1.2, Draft).
 > ⚠️ **PRD 는 Draft 다.** 미확정 항목은 [`open-questions.md`](./open-questions.md) 에 모아 두었다 — **구현 착수 전 확인**한다.
 
 ## 무엇을 만드나

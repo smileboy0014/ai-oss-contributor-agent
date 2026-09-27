@@ -82,6 +82,18 @@ class ImplementationPlanTest {
     }
 
     @Test
+    void 정규화가_만들어_낸_모양도_검사에_걸린다() {
+        // 🔴 「검사한 값 == 저장되는 값」을 고정한다.
+        //    역슬래시는 정규화 단계에서 `/` 로 바뀐다. 원문 `src\..\..\etc` 에는 `/` 구분
+        //    세그먼트가 없어, 정규화 「전」을 검사하면 상위 참조가 보이지 않는다.
+        //    이 테스트가 빨개지면 누군가 검사와 정규화의 순서를 뒤집은 것이다 —
+        //    #17 의 SandboxWorkspace 가 같은 실수로 심볼릭 링크에 뚫렸다
+        assertThatThrownBy(() -> new PlannedFile("src\\..\\..\\etc", ChangeKind.CREATE, "만든다"))
+                .as("정규화 후에 검사해야 역슬래시 경로의 상위 참조가 보인다")
+                .isInstanceOf(PlanRejectedException.class);
+    }
+
+    @Test
     void 이름_안의_점_두_개는_막지_않는다() {
         assertThat(new PlannedFile("src/foo..bar/Baz.java", ChangeKind.MODIFY, "고친다").path())
                 .as("문자열 검사가 아니라 세그먼트 검사다 — 무고한 이름을 막지 않는다")

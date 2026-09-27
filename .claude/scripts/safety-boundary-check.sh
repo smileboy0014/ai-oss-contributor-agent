@@ -8,6 +8,31 @@
 
 set -uo pipefail
 
+# 🔴 스크립트 전체를 **바이트 지향**으로 고정한다 — #75.
+#
+#   UTF-8 로케일의 grep 은 유효하지 않은 바이트를 만나면 **그 뒤쪽을 매칭에서 버린다.**
+#   여기서는 그것이 **위반을 놓치는** 방향이다 — 한 줄 안에서 부정 바이트 **뒤에** 오는
+#   ProcessBuilder·docker.sock 이 조용히 통과한다.
+#
+#   ⚠ 이 스크립트의 위반 패턴은 전부 **비앵커**라, 구멍에 그대로 노출된다
+#   (앵커를 쓰는 패턴만 원리적으로 면역이다 — PLAN-75 §1).
+#
+#   ⚠ secret-scan.sh 와 **같은 구멍이고 같은 이유**다. #64 가 sed 에만 LC_ALL=C 를
+#   붙이고 grep 에는 안 붙여 #75 가 났다. 여기서 secret-scan 만 고치면 그 모양을
+#   한 번 더 만든다 — 그래서 같이 고친다(docs/plans/PLAN-75.md §2-5).
+#
+#   ⚠ 아래 두 곳은 반대 방향(과차단)이라 급하지 않지만 같은 원인이다 —
+#   `safety-ok:` 매칭과 직전 줄을 뽑는 sed 가 부정 바이트 줄에서 실패하면
+#   **면제를 못 읽어** 무고하게 빨개진다. 같은 export 가 둘 다 닫는다.
+#
+# 🕳 **secret-scan.sh 에는 있는 기동 자가 점검이 여기에는 없다 — 의도적이다.**
+#   그쪽은 조용한 0건이 **시크릿 유출**(되돌릴 수 없다)이라 fail-closed 가 값을 한다.
+#   여기서 조용한 0건은 정적 탐지 하나를 놓치는 것이고, 그 층은 애초에 보조다 —
+#   「훅 통과 ≠ 합격」이고 호출 그래프 판정은 safety-reviewer 와 사람이 한다.
+#   점검을 더하면 **커밋을 막는 오탐 표면만 두 배**가 된다.
+#   ⚠ 그래서 이 export 가 지워지면 **아무도 모른다.** 그것이 여기 남은 우회다.
+export LC_ALL=C
+
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT" || exit 0
 
@@ -90,6 +115,30 @@ for f in $files; do
     '\.push\(\)[^;]*(upstream|getUrl\(\))' \
     "원본 저장소로의 push 경로로 의심됩니다." \
     "Fork 좌표(fork.getPushUrl())만 사용하고, owner 일치 어설션을 두세요."
+
+  # 🔴 #22 이후 쓰기 경로는 JGit 이 아니라 REST 다. 위 두 패턴은 setRemote·push() 라는
+  #    **JGit 모양만** 보므로 Git Data API 경로를 전혀 보지 못한다. 그 공백을 메운다.
+  #
+  # 🕳 한계를 먼저 적는다 — 새는 방향부터.
+  #    ① 변수명이 upstream 이 아니면 안 걸린다. **거부목록**이고,
+  #       testing-philosophy.md 가 「거부목록으로 방어하지 않는다」고 적은 그 방식이다
+  #    ② 이 스크립트는 src/**/*.java 의 **문자열만** 본다. 실제 위험 표면은 호출 그래프라
+  #       파일 범위와 무관하게 안 잡힌다
+  #    실질 방어는 ⓐ GitHubWriteClient 의 런타임 owner 어설션과
+  #    ⓑ ForkPublishArchitectureTest 의 여집합 ArchUnit 이다. 이 패턴은 **보조**다 —
+  #    방어로 세면 거짓 안전감이 된다.
+  #
+  # ⚠ `\.` 로 메서드 호출 형태를 요구한다. 앵커가 없으면 input( · softDelete( 같은
+  #   평범한 이름이 put( · delete( 를 품어 무고하게 빨개진다.
+  #
+  # ⚠ **첫 인자**만 본다. 인자 전체를 훑으면 `post(fork, "merge-upstream", …)` 이 걸리는데
+  #   그것은 GitHub 엔드포인트 **이름**이고 쓰기 대상은 Fork 다 — 실측으로 걸렸고,
+  #   safety-ok 로 덮는 대신 패턴을 좁혔다. 위험한 모양은 **쓰기 대상이 upstream 인 것**이고
+  #   그것은 첫 인자 자리에 온다. 덮어서 통과시키면 다음 사람이 그 waiver 를 근거로 삼는다.
+  check "$f" "S-1" \
+    '\.(post|patch|put|delete)\([[:space:]]*(upstream|Upstream|UPSTREAM)' \
+    "원본(upstream) 좌표로 REST 쓰기를 보내는 경로로 의심됩니다. 남의 저장소 히스토리는 되돌릴 수 없습니다." \
+    "쓰기 대상은 ForkRef 로만 만드세요. GitHubWriteClient 가 경로 대신 (owner, name, subPath) 를 받아 매 호출 직전 owner 를 단언합니다."
 
   # ── S-2. Draft 고정 · 자동 머지 금지 ─────────────────────────
   check "$f" "S-2" \

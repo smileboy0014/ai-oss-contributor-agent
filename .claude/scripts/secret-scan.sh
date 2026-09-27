@@ -8,6 +8,42 @@
 
 set -uo pipefail
 
+# 🔴 스크립트 전체를 **바이트 지향**으로 고정한다 — #75.
+#
+#   UTF-8 로케일의 grep 은 유효하지 않은 바이트를 만나면 **그 뒤쪽을 매칭에서 버린다.**
+#   파일이 스캔 대상에서 빠지는 것이 아니라 **스캔했는데 히트 0건**이 되므로,
+#   로그로는 통과와 구분되지 않는다.
+#
+#     printf 'caf\xe9 ghp_AAAA…\n'  →  en_US.UTF-8 · C.UTF-8 에서 0건 · LC_ALL=C 에서 1건 (실측)
+#
+#   ⚠ 「줄을 통째로 건너뛴다」가 아니다 — **위치가 가른다.** 실측:
+#
+#     토큰  앞에 부정 바이트  → 0건 (샌다)       토큰  뒤에  → 1건
+#     JSON  앞 필드에         → 0건 (샌다)       JSON  뒤에  → 1건
+#
+#   그래서 앵커(^)를 쓰는 PEM 헤더 검사는 이 구멍에 **원리적으로 닿지 않는다.**
+#   헤더는 줄 시작에 와야 하므로 그 앞의 바이트는 앵커를 정당하게 깨뜨린다.
+#   ⚠ 그 경로로 회귀 테스트를 쓰면 돌연변이를 넣어도 빨개지지 않는다 — 실제로 그랬다.
+#   무는 표본은 **비앵커 패턴**(토큰 5종 · 서비스계정 키 JSON)이다.
+#
+#   ⚠ #64 가 strip_bom 에 LC_ALL=C 를 붙인 근거(「UTF-8 로케일의 sed 가 BOM 을 부정한
+#   바이트열로 보고 거부한다」)가 **grep 에도 그대로 성립하는데 안 붙어 있었다.**
+#   정규화가 절반만 적용돼 있었다.
+#
+#   ⚠ 호출부마다 prefix 를 붙이지 않는다. 그러면 「새 grep 을 추가할 때 잊지 마라」는
+#   부탁이 하나 더 늘고, 이 저장소는 그 모양으로 반복해서 당했다. 열거 대신
+#   **입력 해석 자체를 정규화**한다 — testing-philosophy.md 「여집합으로 뒤집는다」.
+#
+#   ⚠ 「재지 않고 넓혔다」가 아니다. 추적 파일 431개를 양쪽 로케일로 훑어
+#   운영 패턴 7종의 히트 수와 바이너리 판정이 **동일**함을 확인했다. 의미가 갈리는 것은
+#   [[:alpha:]](한글을 문자로 볼 것인가)뿐이고 **운영 패턴은 하나도 쓰지 않는다.**
+#   [[:space:]]·한국어 리터럴·앵커·`-+` 는 전부 동일했다 — docs/plans/PLAN-75.md.
+#
+#   ⚠ 상속한 값은 지우기 전에 챙긴다. 환경이 갈린 원인은 **상속된 로케일**이라,
+#   강제한 값(항상 C)만 찍으면 대조에 쓸 정보가 0이 된다.
+INHERITED_LOCALE="LC_ALL=${LC_ALL:-unset} LANG=${LANG:-unset}"
+export LC_ALL=C
+
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 cd "$ROOT" || exit 0
 
@@ -93,6 +129,45 @@ if [ "$(printf '\xef\xbb\xbfx' | strip_bom)" != "x" ]; then
   exit 1
 fi
 
+# 🔴 이 환경의 grep 이 **부정한 바이트가 섞인 줄을 실제로 무는지** 확인한다 — #75.
+#
+#   위 export 로도 닫히지 않는 경로가 둘 남는다.
+#     · 누군가 export 를 지우거나 LC_ALL 을 덮어쓴다
+#     · LC_ALL 을 무시하는 grep 구현으로 돈다
+#   둘 다 증상이 **「히트 0건 → ✅ 통과」**다. strip_bom 자가 점검이 막는 것과
+#   정확히 같은 종류의 실패라 같은 수법으로 닫는다.
+#
+#   ⚠ 「grep 이 돌았는가」가 아니라 **「이 입력을 무는가」**를 본다 —
+#   가드가 「있다」와 「이 입력에 닿는다」는 다르다(testing-philosophy.md 요구 4).
+#
+#   ⚠ 토큰 모양이 아니라 **중립 센티널**로 잰다. 재는 성질은 「부정 바이트가 섞인 줄을
+#   매칭하는가」라 패턴 종류와 무관하고, 토큰 모양을 박으면 SecretPatternDriftTest 의
+#   패턴 대조와 이 자가 점검이 서로를 오염시킨다. grep -qE 를 쓰는 것도 같은 이유다
+#   (그 테스트는 grep -nE 만 정규식으로 센다).
+#
+#   ⚠ 0xE9 는 latin-1 é 다. 단독으로는 유효한 UTF-8 이 아니라 **그 뒤쪽**이 버려진다 —
+#   그래서 센티널을 바이트 **뒤에** 둔다. 앞에 두면 UTF-8 로케일에서도 매치돼 눈을 감는다.
+#
+#   🔴 **이 점검은 「export 가 지워졌다」보다 넓은 것을 잡는다.** 실측 — PATH 의 grep 이
+#   ugrep 계열이면 부정 바이트가 든 입력을 **바이너리로 보고 통째로 건너뛰어**
+#   `LC_ALL=C` 와 무관하게 0건이 된다. 그때 이 점검이 발화해 **시끄럽게 멈춘다.**
+#   ⚠ 그 환경의 사람은 커밋이 막힌다. 과차단으로 보이지만 **그 grep 으로는 스캔이
+#   성립하지 않는다** — 초록을 찍으며 눈을 감는 것보다 멈추는 쪽이 옳다.
+#   ⚠ #64 와 반대다. BOM 은 ugrep 이 알아서 처리해 **구멍을 가렸지만**, 이쪽은 ugrep 이
+#   더 나쁘다(줄이 아니라 파일 전체). 「ugrep 이면 안전하다」로 일반화하지 않는다.
+if ! printf 'caf\xe9 SENTINELAAAABBBBCCCCDDDD\n' | grep -qE 'SENTINEL[A-Z]{16}'; then
+  echo "❌ 게이트가 고장났습니다 — grep 이 부정한 바이트가 섞인 줄을 건너뜁니다."
+  echo "   그 줄에 있는 토큰·키는 스캔해도 히트 0건이 되어 그대로 커밋됩니다."
+  # 🔴 **구현을 함께 찍는다.** 이 점검이 발화하는 현실적 원인은 둘인데
+  #   (LC_ALL 이 안 먹음 · grep 구현이 애초에 그 입력을 안 봄) 로케일만 안내하면
+  #   ugrep 경우를 **오진**한다 — 로케일을 아무리 만져도 풀리지 않는다.
+  echo "   grep: ${GREP_IMPL}"
+  echo "   상속 로케일: ${INHERITED_LOCALE}"
+  echo "   → LC_ALL=C 가 이 grep 에 먹는지, 또는 그 구현이 부정 바이트 입력을"
+  echo "     통째로 건너뛰지 않는지 확인하세요 (ugrep 계열이 그렇습니다)."
+  exit 1
+fi
+
 read_file() {
   if [ "$SCAN_MODE" = "tree" ]; then
     cat "$1" 2>/dev/null
@@ -147,6 +222,12 @@ scan_pattern() {
   local allow_placeholder="${5:-yes}"
 
   local hits
+  # 🕳 LC_ALL=C 가 **면제를 넓히는** 유일한 경로다 (#75 리뷰).
+  #   한 줄이 `진짜토큰 → 0xE9 → 마커` 순서면, 이전에는 마커 매칭이 버려져 위반으로
+  #   **찍혔고** 지금은 면제된다. 그러나 그 차단은 #75 가 고치는 버그의 **부작용**이었고,
+  #   지금 동작이 이 함수가 정한 「면제는 줄 단위」 그대로다.
+  #   ⚠ `allow_placeholder = no` 인 검사에는 애초에 닿지 않는다 — 아래 분기가 면제를
+  #     주지 않으므로, 키 파일 포맷(PEM · SA JSON)은 이 경로와 무관하다.
   if [ "$allow_placeholder" = "yes" ]; then
     hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
   else
@@ -329,11 +410,14 @@ if [ "$found" -gt 0 ]; then
   fi
 
   echo ""
-  echo "  (grep: ${GREP_IMPL} · sed: ${SED_IMPL})"
+  echo "  (grep: ${GREP_IMPL} · sed: ${SED_IMPL} · 상속 로케일: ${INHERITED_LOCALE})"
   exit 1
 fi
 
 echo "✅ 시크릿 검사 통과 (SCAN_MODE=${SCAN_MODE} · 파일 $(echo "$files" | wc -l | tr -d ' ')개)"
 echo "   grep: ${GREP_IMPL}"
 echo "   sed:  ${SED_IMPL}"
+# 🔴 강제한 값(항상 C)이 아니라 **상속한 값**을 남긴다 — #75.
+#   환경이 갈린 원인은 상속된 로케일이다. 강제값만 찍으면 대조에 쓸 정보가 0이 된다.
+echo "   로케일: LC_ALL=C 강제 (상속: ${INHERITED_LOCALE})"
 exit 0

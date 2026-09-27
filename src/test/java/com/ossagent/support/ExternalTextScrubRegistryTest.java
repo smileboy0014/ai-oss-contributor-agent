@@ -119,7 +119,21 @@ class ExternalTextScrubRegistryTest {
                     "#19 — 빌드·테스트 출력. 환경변수를 찍는 빌드 스크립트가 흔하다."
                             + " #18 은 이 필드를 쓰지 않는다 — 생성 시점에는 검증 전이다")),
             Map.entry("GeneratedChange.reviewResult", new Decision(Mechanism.PENDING,
-                    "#19 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다")),
+                    "#20 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다."
+                            + " #20 이 DiffReview 값 타입을 세워 그 값은 이미 스크럽되지만,"
+                            + " GeneratedChange 에 생성 팩토리가 없어 이 컬럼에 앉는 경로가"
+                            + " 아직 없다 — 대입 경로가 생기는 #18 이후에 VALUE_TYPE 으로 올린다")),
+
+            // ── #20 AI diff 리뷰 — LLM 응답이 새 유출구다 ────────────────
+            // 송신(프롬프트)은 PromptScrubber 가 이미 막는다. 그런데 리뷰가 diff 를
+            // 인용하면 대상 저장소의 시크릿이 우리 DB 로 복제되고, 거기서 #13 조회 API 와
+            // PR 본문(#23)까지 간다. 수신 쪽 방어가 이 두 행이다.
+            Map.entry("DiffReview.summary", new Decision(Mechanism.VALUE_TYPE,
+                    "DiffReview compact 생성자가 redact 한다. String 을 그대로 받는 생성"
+                            + " 경로가 없다 — IssueAnalysis 와 같은 수법이다 (#20)")),
+            Map.entry("DiffReview.findings", new Decision(Mechanism.VALUE_TYPE,
+                    "같은 생성자가 항목마다 redact 한다. 리스트라 한 항목만 새도"
+                            + " 같은 유출이라 요약과 같은 조건이다 (#20)")),
 
             // ── 아래 5행은 #11·#17 이 이 표와 병렬로 머지되며 빠졌다 ──────────
             // 세 PR 이 서로의 CI 를 보지 못했다. 이 표가 있었기에 main 이 빨개져서
@@ -141,8 +155,9 @@ class ExternalTextScrubRegistryTest {
                     "위와 같다. 대상 저장소 본문이 DB 에 앉기 전에 스크럽된다 (#8·#28)")),
 
             Map.entry("SandboxResult.output", new Decision(Mechanism.PENDING,
-                    "#18·#19 — 소비자가 아직 없다. DB 에 앉는 자리는"
-                            + " GeneratedChange.testResult 이고 그쪽도 PENDING 이다."
+                    "#18 — #19 가 소비자 하나를 세웠다(StageResult.summary 가 VALUE_TYPE 으로"
+                            + " 받는다). 그러나 이 필드 자신은 여전히 원문이고, DB 에 앉는"
+                            + " 자리(GeneratedChange.testResult)의 강제 지점은 #18 이 만든다."
                             + " LLM 송신은 PromptScrubber 를 거친다 (#17)")),
 
             // ── #16 구현 계획 — 전부 VALUE_TYPE. 영속되지 않지만 하류(#18 코딩 프롬프트)로
@@ -163,12 +178,31 @@ class ExternalTextScrubRegistryTest {
             Map.entry("ImplementationPlan.testStrategy", new Decision(Mechanism.VALUE_TYPE,
                     "위와 같다. 비어 있을 수 있고 그 판정은 PlanValidator 가 한다 (#16)")),
 
+            // ── #19 검증 파이프라인 ────────────────────────────────────────────
+            Map.entry("StageResult.summary", new Decision(Mechanism.VALUE_TYPE,
+                    "StageResult compact 생성자가 redact 한다. String 을 그대로 받는 생성"
+                            + " 경로가 없다. 🔴 대상 저장소 빌드 출력이고 세 곳으로 나간다 —"
+                            + " 로그 · GeneratedChange.testResult(DB) · 재시도 프롬프트(Q-6"
+                            + " 루프가 실패 사유를 모델에 되먹인다). 빌드 스크립트가 환경변수를"
+                            + " 찍는 것이 흔하다 (#19)")),
+
             Map.entry("SelectedFile.content", new Decision(Mechanism.VALUE_TYPE,
                     "SelectedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"
                             + " 경로가 없다. ⚠ SecretFilePolicy 가 이것을 대신하지 않는다 —"
                             + " 그쪽은 경로를 보고 열지 않는 방어이고, 소스에 하드코딩된 토큰은"
                             + " 경로 정책을 정상 통과한다. 보장하는 것은 「스크럽을 거치지 않은"
-                            + " 값이 들어갈 수 없다」이지 「내용이 깨끗하다」가 아니다 (#15)")));
+                            + " 값이 들어갈 수 없다」이지 「내용이 깨끗하다」가 아니다 (#15)")),
+
+            // ── #22 Fork push ────────────────────────────────────────────
+            // 🔴 여기 실린 내용은 DB 도 LLM 도 아니라 「공개 Fork 에 영구 게시」된다.
+            //    다른 PENDING 행들과 위험의 성격이 다르다 — 회수가 불가능하다.
+            Map.entry("FileChange.content", new Decision(Mechanism.PENDING,
+                    "#18 — #22 는 워크스페이스를 읽지 않고 값으로 받기만 한다(PLAN-22 D-2)."
+                            + " 같은 방어를 두 벌 두지 않기로 해서 이 경로에는 내용 검사가 없다."
+                            + " 거르는 주체는 워크스페이스를 소유한 #18 이고,"
+                            + " 그쪽이 SecretFilePolicy·GeneratedChange 스크럽을 세운다."
+                            + " ⚠ #18 이 채우지 않으면 이 경로가 그대로 유출구다 —"
+                            + " PR 본문이 아니라 이 행이 그 사실을 계속 보이게 한다")));
 
     @Test
     @DisplayName("외부 텍스트 필드는 전부 스크럽 결정이 등록돼 있다")

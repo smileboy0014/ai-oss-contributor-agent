@@ -1,6 +1,5 @@
 package com.ossagent.candidate.application;
 
-import com.ossagent.candidate.adapter.out.UnwiredChangeVerifier;
 import com.ossagent.candidate.domain.ChangeVerifier;
 import com.ossagent.agent.domain.SandboxWorkspace;
 import com.ossagent.agent.domain.TargetWorkspaceSource;
@@ -78,9 +77,8 @@ public class ImplementCandidateUseCase {
     /**
      * 🔴 {@link ChangeVerifier} 를 {@link ObjectProvider} 로 받는다.
      *
-     * <p>#19 가 실물을 넣기 전까지는 {@link UnwiredChangeVerifier} 가 쓰인다 —
-     * <b>항상 실패</b>를 돌려주므로 후보가 {@code IMPLEMENTING} 에 갇히지 않고
-     * {@code FAILED} 라는 <b>사람에게 넘기는 신호</b>가 된다.
+     * <p>셋 다 대역 프로필에서 빠지거나 아직 배선되지 않았을 수 있다. 하나라도 없으면
+     * {@link #executorReady()} 가 거짓이 되어 <b>전이 전에</b> 거부한다.
      *
      * <p>⚠️ {@code @ConditionalOnMissingBean} 을 쓰지 않는다 — 자동설정 전용이라
      * 컴포넌트 스캔 빈에서는 평가 시점이 순서에 좌우돼 <b>조용히 어긋난다.</b>
@@ -101,10 +99,10 @@ public class ImplementCandidateUseCase {
         //    getIfAvailable 로 받아 **없으면 착수를 시작하지 않는다** — executorReady() 참조
         this.workspaces = workspaces.getIfAvailable();
         this.codingAgent = codingAgents.getIfAvailable();
-        this.verifier = verifiers.getIfAvailable(UnwiredChangeVerifier::new);
-        if (this.verifier instanceof UnwiredChangeVerifier) {
-            log.warn("ChangeVerifier 실물이 없다 — 닫히는 기본값으로 동작한다 (#19 대기)");
-        }
+        // 🔴 「항상 실패」 기본값을 두지 않는다. 그것은 **코드를 만든 뒤 반드시 FAILED** 라는
+        //    뜻이라 후보를 태우는 경로였다. 없으면 executorReady() 가 거짓이 되어
+        //    **착수 자체를 시작하지 않는다**(503)
+        this.verifier = verifiers.getIfAvailable();
     }
 
     /**
@@ -189,15 +187,21 @@ public class ImplementCandidateUseCase {
             Long changeId = writer.recordChange(candidateId, branch, diff.unifiedDiff());
 
             MDC.put(MDC_STAGE, "VERIFY");
-            VerificationReport report = verifier.verify(new VerificationRequest(
-                    candidateId, start.attempt(), workspace.path().toString(),
-                    constraints, Set.copyOf(plan.paths())));
+            VerificationReport report = verifier.verify(VerificationRequest.of(
+                    candidateId, coordinates, start.attempt(), workspace.path(),
+                    constraints, plan.files()));
 
             if (!report.passed()) {
-                // ⚠ 실패 사유는 #19 가 만든 값이다 — 우리 어휘로 요약하고 원문을 로그에 싣지 않는다
-                log.warn("검증 실패 candidateId={} changeId={} reasons={}",
-                        candidateId, changeId, report.failures().size());
-                writer.fail(candidateId, "검증 실패 (사유 " + report.failures().size() + "건)");
+                // 🔴 사유를 **우리 어휘로만** 만든다. report.failureSummary() 는 스크럽됐어도
+                //    빌드 출력이라 DB·로그에 싣지 않는다 — 단계와 판정만으로 분류가 된다.
+                //    ⚠ 「판정 불가」를 「실패」로 적지 않는다. 재시도(#21)가 UNDETERMINED 를
+                //    실패로 읽으면 같은 것을 세 번 돌린다
+                String reason = report.firstNotPassed()
+                        .map(it -> "검증 " + it.outcome() + " (" + it.stage() + ")")
+                        .orElse("검증 실패");
+                log.warn("검증 통과하지 못했다 candidateId={} changeId={} outcomes={}",
+                        candidateId, changeId, report.outcomes());
+                writer.fail(candidateId, reason);
                 return;
             }
             // 🔴 여기서 READY_FOR_PR 로 보내지 않는다 — 그 전이는 #21 의 루프가 판정한다.
@@ -265,23 +269,17 @@ public class ImplementCandidateUseCase {
      * <b>{@code FAILED} 는 종단</b>이다. 실행기 없이 전이하면 사람이 버튼 한 번으로
      * <b>후보를 영구히 죽인다.</b>
      *
-     * <p>⚠️ {@code UnwiredChangeVerifier} 와 층이 다르다. 그쪽은 <b>코드를 만든 뒤</b>
-     * 검증기가 없을 때이고, 그때는 작업이 실제로 있었으므로 {@code FAILED} 가 맞다.
-     * 여기는 <b>아무것도 하기 전</b>이라 아무것도 태우지 않는 것이 맞다.
+     * <p>⚠️ 검증기가 <b>코드를 만든 뒤</b> 실패를 돌려주는 것과 층이 다르다. 그때는 작업이
+     * 실제로 있었으므로 {@code FAILED} 가 맞다. 여기는 <b>아무것도 하기 전</b>이라
+     * 아무것도 태우지 않는 것이 맞다.
      *
      * <h2>🔴 검증기까지 요구한다 — 「작업만 하고 반드시 실패」를 막는다</h2>
      *
-     * <p>코딩까지는 검증기 없이도 돌지만, 그러면 <b>LLM 토큰과 clone 비용을 태우고
-     * 반드시 {@code FAILED}</b> 로 끝난다({@link UnwiredChangeVerifier} 가 항상 실패다).
-     * 사람이 그것을 눌러 얻는 것이 없다.
-     *
-     * <p>⚠️ {@code UnwiredChangeVerifier} 는 <b>「코드를 만든 뒤 검증기가 사라진」</b> 경우를
-     * 위한 안전망이지, <b>「처음부터 없는」</b> 경우의 정상 동작이 아니다. 후자는 여기서 막는다.
+     * <p>코딩까지는 검증기 없이도 돌지만, 그러면 <b>LLM 토큰과 clone 비용을 태우고</b>
+     * 검증 없이 멈춘다. 사람이 그 버튼을 눌러 얻는 것이 없다.
      */
     private boolean executorReady() {
-        return workspaces != null
-                && codingAgent != null
-                && !(verifier instanceof UnwiredChangeVerifier);
+        return workspaces != null && codingAgent != null && verifier != null;
     }
 
     /**

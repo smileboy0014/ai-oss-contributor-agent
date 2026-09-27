@@ -13,14 +13,14 @@ package com.ossagent.candidate.domain;
  * <p>그래서 「일단 전이하고 실패로 떨어뜨린다」가 아니라 <b>시작하지 않는다.</b>
  * 후보는 {@code SELECTED} 그대로 남고, 실행기가 들어오면 같은 버튼이 정상 동작한다.
  *
- * <h2>⚠️ 이것과 {@code UnwiredChangeVerifier} 는 다른 층이다</h2>
+ * <h2>⚠️ 이것과 검증기의 실패 보고 는 다른 층이다</h2>
  *
  * <table border="1">
  *   <caption>둘의 차이</caption>
  *   <tr><th></th><th>언제</th><th>후보에 일어나는 일</th></tr>
  *   <tr><td><b>이 예외</b></td><td>착수 <b>시작 전</b></td>
  *       <td>아무 일도 없다 — {@code SELECTED} 유지</td></tr>
- *   <tr><td>{@code UnwiredChangeVerifier}</td><td>코드를 만든 <b>뒤</b></td>
+ *   <tr><td>검증기의 실패 보고</td><td>코드를 만든 <b>뒤</b></td>
  *       <td>{@code FAILED} — 되돌릴 수 없지만 <b>작업은 실제로 있었다</b></td></tr>
  * </table>
  *

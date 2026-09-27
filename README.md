@@ -69,14 +69,15 @@ curl -X POST http://localhost:8080/api/repositories \
     ├── config/                조립 전용 (Clock · GitHub 클라이언트)
     ├── support/               도메인 없는 공통
     │   ├── web/               HTTP 예외 매핑
-    │   ├── github/            GitHub 읽기 클라이언트 — 토큰 · 레이트리밋 · 403 구분
+    │   ├── github/            GitHub 읽기 클라이언트 — 토큰 · 레이트리밋 예산(읽기·쓰기 공유) · 403 구분
     │   └── secret/            토큰 마스킹 (S-4)
     ├── repository/            대상 저장소 등록 · 메타데이터/파일 조회 · 기여 규약 분석
     ├── issue/                 이슈 증분 수집 ✅ · 규칙 필터 ✅ (트리거 없음)
     ├── candidate/             기여 후보 · 상태 전이
     ├── agent/                 LLM 능력·어댑터 ✅ · Docker 샌드박스 ✅
-    │                          · 워크스페이스(JGit) ✅ · 워밍→씨딩→실행 ✅ (호출자는 #19)
-    └── pullrequest/           Fork · Draft PR            (경계만)
+    │                          · 워크스페이스(JGit) ✅ · 워밍→씨딩→실행 ✅
+    └── pullrequest/           Fork 확보 · commit · push ✅ (호출자 없음 — 배선은 #23)
+                               Draft PR ⬜ #23
 ```
 
 각 도메인 내부는 **헥사고날 라이트**로 `domain / application / adapter{in,out}` 3계층을 갖습니다. 상세는 [`.claude/docs/structure.md`](.claude/docs/structure.md).
@@ -106,4 +107,4 @@ GitHub 인증은 **classic PAT(`public_repo`)** 입니다. fine-grained PAT과 G
 | [`.claude/docs/setup.md`](.claude/docs/setup.md) | 초기 셋업 |
 | [`.claude/docs/rules.md`](.claude/docs/rules.md) | 컨텍스트·컨벤션·코드맵 읽는 순서 |
 | [`.claude/rules/context/open-questions.md`](.claude/rules/context/open-questions.md) | 미결 대장 — **착수 전 확인** |
-| [`docs/ai-oss-contributor-agent-prd.md`](docs/ai-oss-contributor-agent-prd.md) | PRD v1.1 (Draft) |
+| [`docs/ai-oss-contributor-agent-prd.md`](docs/ai-oss-contributor-agent-prd.md) | PRD v1.2 (Draft) |

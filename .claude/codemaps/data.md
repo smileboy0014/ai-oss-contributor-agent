@@ -1,6 +1,6 @@
 # 데이터 모델 코드맵
 
-> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §22 Database ERD (v1.1 Draft).
+> 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §22 Database ERD (v1.2 Draft).
 > ✅ **7테이블 전부 실재한다** (Flyway `V1`·`V2` · 엔티티 7개 매핑 · 2026-09-22 · #5).
 > ⚠️ 다만 **읽고 쓰는 코드는 없다** — Spring Data 인터페이스·UseCase 는 각 기능 이슈(#7·#8·#11…) 소관이다.
 > 「스키마가 있다」와 「기능이 있다」를 혼동하지 않는다.

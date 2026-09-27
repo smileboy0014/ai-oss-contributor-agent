@@ -75,11 +75,29 @@ class CandidatePrWriter {
                 candidate.getStatus(),
                 change.map(GeneratedChange::getBranchName).orElse(null),
                 change.map(GeneratedChange::getCommitSha).orElse(null),
+                // diff 는 record(...) 에서 이미 스크럽됐다 — Fork 에 입힐 변경분의 정본
+                change.map(GeneratedChange::getDiff).orElse(null),
                 // 🔴 읽는 자리에서 스크럽한다 — S-4. 아래 javadoc 참조
                 scrub(change.map(GeneratedChange::getTestResult).orElse(null)),
                 scrub(change.map(GeneratedChange::getReviewResult).orElse(null)),
                 pullRequests.findByCandidateId(candidateId)
                         .map(PullRequest::getGithubPrNumber).orElse(null));
+    }
+
+    /**
+     * Fork push 가 <b>성공한 뒤</b> 그 커밋을 최신 변경분 행에 남긴다 — 짧은 트랜잭션 (S-1 · #23).
+     *
+     * <p>PR 생성(다음 대외 호출)이 실패해도 이 기록은 남는다. 다음 호출이 그것을 보고
+     * 「우리가 이미 올린 브랜치」라 판단해 <b>갱신</b>으로 다시 push 한다 — 새 브랜치 생성 시도가
+     * 422 로 죽는 것을 막는다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void recordPublished(Long candidateId, String commitSha) {
+        GeneratedChange change = changes.findFirstByCandidateIdOrderByCreatedAtDesc(candidateId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "push 했는데 변경분 행이 없다 candidateId=" + candidateId));
+        change.markPublished(commitSha);
+        changes.saveAndFlush(change);
     }
 
     /**
@@ -167,10 +185,12 @@ class CandidatePrWriter {
      *
      * <h2>왜 여기인가 — {@code PrBody} 가 이미 하는데</h2>
      *
-     * <p>{@code GeneratedChange.testResult}·{@code reviewResult} 는
-     * {@code ExternalTextScrubRegistryTest} 에 <b>{@code PENDING}</b> 으로 올라 있다.
-     * 즉 <b>적재 쪽에 강제 지점이 없어</b> DB 에 원문이 들어 있을 수 있고, 지금까지 유일한
-     * 스크럽은 {@code PrBody} 생성자였다 — <b>값이 UseCase 를 통과한 뒤</b>다.
+     * <p>{@code GeneratedChange.testResult}·{@code reviewResult} 는 오랫동안
+     * {@code ExternalTextScrubRegistryTest} 에 <b>{@code PENDING}</b> 으로 올라 있었다 —
+     * 적재 쪽에 강제 지점이 없어 DB 에 원문이 들어 있을 수 있었고, 유일한 스크럽은
+     * {@code PrBody} 생성자였다(<b>값이 UseCase 를 통과한 뒤</b>). 지금은
+     * {@code recordVerification}·{@code recordReview} 가 적재 쪽 강제 지점이지만,
+     * 그 전에 앉은 행이 있을 수 있어 읽는 자리의 스크럽을 <b>지우지 않는다.</b>
      *
      * <p>그 사이 구간에서 값은 {@code PrSnapshot} 에 <b>원문으로</b> 앉아 있었고,
      * 그것을 {@code CandidateResponseRuleTest} 가 잡았다. 그 가드의 축은 「{@code application}
@@ -189,8 +209,14 @@ class CandidatePrWriter {
      * @param scrubbedReview       AI 리뷰 텍스트. 〃
      * @param existingPrNumber     이미 붙어 있는 PR 번호. <b>{@code null} 이 정상</b>이다
      */
+    /**
+     * @param commitSha   Fork 에 올라간 커밋. {@code null} 이면 <b>아직 push 하지 않았다</b> — PR 생성기가
+     *                    이 값으로 「새 브랜치 생성」과 「우리 브랜치 갱신」을 가른다
+     * @param unifiedDiff 검증을 통과한 변경분(스크럽 후). Fork 에 올릴 파일은 이것을 새 워크스페이스에
+     *                    입혀 만든다 — 착수 때의 디렉토리를 다시 읽지 않는다
+     */
     record PrSnapshot(Long issueId, CandidateStatus status, String branchName, String commitSha,
-                      String scrubbedVerification, String scrubbedReview,
+                      String unifiedDiff, String scrubbedVerification, String scrubbedReview,
                       Integer existingPrNumber) {
     }
 

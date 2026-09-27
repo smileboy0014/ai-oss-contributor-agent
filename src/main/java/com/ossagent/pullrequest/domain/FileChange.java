@@ -1,6 +1,8 @@
 package com.ossagent.pullrequest.domain;
 
 import com.ossagent.support.ExternalText;
+import com.ossagent.support.secret.SecretFilePolicy;
+import com.ossagent.support.secret.TokenRedactor;
 
 /**
  * Fork 에 올릴 파일 1건의 변경.
@@ -11,9 +13,17 @@ import com.ossagent.support.ExternalText;
  * 그렇게 가른 이유는 {@code SandboxWorkspace} 검증과 {@code SecretFilePolicy} 배선을
  * <b>한 벌 더 갖지 않기 위해서</b>다 — 같은 방어가 두 곳에 있으면 한쪽이 느슨해질 때 드러나지 않는다.
  *
- * <p>🔴 <b>그 대가로 이 경로에는 내용 검사가 없다.</b> 여기 실린 내용은 <b>공개 Fork 에
- * 영구 게시</b>된다. 대상 저장소가 커밋해 둔 시크릿이나 LLM 이 넣은 문자열이 섞여 있어도
- * 이 타입은 알지 못한다 — 그것을 거르는 것은 #18 의 책임이다(S-4 잔여 위험).
+ * <h2>🔴 마지막 그물 — S-4</h2>
+ *
+ * <p>여기 실린 내용은 <b>공개 Fork 에 영구 게시</b>된다. 회수가 불가능하다는 점에서 DB 컬럼보다
+ * 무겁다. 상류({@code GeneratedFile})가 이미 경로를 배제하고 내용을 스크럽하지만, PR 시점에는
+ * 워크스페이스를 <b>다시 읽어</b> 이 값을 만들므로 상류의 보증이 그대로 전달된다고 말할 수 없다.
+ * 그래서 {@code PrBody} 와 같은 이유로 <b>compact 생성자가 경로 배제와 내용 스크럽을 강제</b>한다 —
+ * 스크럽되지 않은 값이 이 타입을 거쳐 나갈 수 없다({@code ExternalTextScrubRegistryTest} · VALUE_TYPE).
+ *
+ * <p>⚠️ 「같은 방어를 두 벌 두지 않는다」(PLAN-22 D-2)에 어긋나 보이지만, 그 결정의 대가로
+ * 이 경로의 내용 검사가 0 이었고 등록표가 그것을 「#18 이 채운다」로 미뤄 두었다. 상류가 느슨해질 때
+ * 드러나지 않는 것보다, 나가는 문에서 한 번 더 막히는 것이 되돌릴 수 있는 쪽이다.
  *
  * <h2>⚠️ 텍스트만 다룬다</h2>
  *
@@ -39,12 +49,19 @@ public record FileChange(String path,
 
     public FileChange {
         path = requirePath(path);
+        if (SecretFilePolicy.isSecretPath(path)) {
+            // 🔴 경로 배제 — 내용 스크럽이 이것을 대신하지 않는다 (glossary 「혼동 주의」).
+            //    키 파일에는 우리가 모르는 형식의 자격증명이 들어 있어 패턴으로 「가렸다」고 말할 수 없다
+            throw new IllegalArgumentException("시크릿 경로는 Fork 에 올리지 않는다 (S-4): " + path);
+        }
         if (deleted) {
             if (content != null) {
                 throw new IllegalArgumentException("삭제되는 파일에 내용을 실을 수 없습니다: " + path);
             }
         } else if (content == null) {
             throw new IllegalArgumentException("파일 내용이 없습니다: " + path);
+        } else {
+            content = TokenRedactor.redact(content);
         }
     }
 

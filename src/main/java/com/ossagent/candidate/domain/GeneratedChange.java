@@ -81,9 +81,14 @@ public class GeneratedChange {
      *
      * <h2>여기서 채우지 <b>않는</b> 것</h2>
      *
-     * <p>{@code testResult} 는 <b>#19</b>, {@code reviewResult} 는 <b>#20</b> 이 채운다.
-     * 생성 시점에는 아직 검증 전이므로 <b>담을 값이 없다</b> — 빈 문자열로 채우면
-     * 「검증했는데 출력이 없다」와 구분되지 않는다.
+     * <p>{@code testResult}·{@code reviewResult}·{@code commitSha} 는 생성 시점에 <b>담을 값이
+     * 없다</b> — 검증·리뷰·push 가 아직 전이다. 빈 문자열로 채우면 「검증했는데 출력이 없다」와
+     * 구분되지 않는다. 각각 {@link #recordVerification} · {@link #recordReview} ·
+     * {@link #markPublished} 가 <b>유일한 대입 지점</b>이다.
+     *
+     * <p>⚠️ 그 셋은 오랫동안 <b>아무도 부르지 않았다</b> — #19·#20 이 「채운다」고 적어 두고 각자
+     * 값 타입만 만들었고, 컬럼에 앉히는 코드는 어느 이슈에도 없었다. PR 본문의 검증 절이 늘 빈 값을
+     * 받았던 이유다. 지금은 {@code ImplementCandidateUseCase} 가 바퀴마다 둘을 기록한다.
      *
      * @param candidateId 다른 애그리거트로의 ID 참조
      * @param branchName  PRD §14 의 {@code oss-agent/issue-{번호}-{설명}}
@@ -108,5 +113,47 @@ public class GeneratedChange {
         change.diff = com.ossagent.support.secret.TokenRedactor.redact(diff);
         change.createdAt = java.time.Instant.now(clock);
         return change;
+    }
+
+    /**
+     * 샌드박스 검증 결과를 남긴다 — <b>이 필드의 유일한 대입 지점</b>이고 여기서 스크럽한다 (S-4 · #19).
+     *
+     * <p>입력은 {@code StageResult.summary} 를 이어 붙인 것이라 이미 스크럽돼 있지만, 이 메서드는
+     * 그것을 <b>믿지 않는다</b>. 호출자가 다른 재료를 넘겨도 컬럼에 원문이 앉지 않게 한 번 더 가린다.
+     *
+     * @param testResult 빌드·테스트 출력 요약. 🔴 {@code null} 은 「검증을 돌리지 않았다」이므로 거부한다
+     */
+    public void recordVerification(String testResult) {
+        if (testResult == null) {
+            throw new IllegalArgumentException("검증 결과는 필수다 — 출력이 없으면 빈 문자열이다");
+        }
+        this.testResult = com.ossagent.support.secret.TokenRedactor.redact(testResult);
+    }
+
+    /**
+     * AI 리뷰 결과를 남긴다 — <b>이 필드의 유일한 대입 지점</b>이고 여기서 스크럽한다 (S-4 · #20).
+     *
+     * <p>리뷰가 diff 를 인용하면 diff 안의 시크릿이 복제된다. {@code DiffReview} 가 1차로 거르지만
+     * 컬럼에 앉는 마지막 문은 여기다.
+     */
+    public void recordReview(String reviewResult) {
+        if (reviewResult == null) {
+            throw new IllegalArgumentException("리뷰 결과는 필수다 — 판정이 없으면 리뷰를 돌리지 않은 것이다");
+        }
+        this.reviewResult = com.ossagent.support.secret.TokenRedactor.redact(reviewResult);
+    }
+
+    /**
+     * Fork 에 올라간 커밋을 기록한다 — 세 번째 승인 게이트 뒤에서만 불린다 (S-1 · S-6 · #23).
+     *
+     * <p>🔴 이 값은 <b>관측</b>이다. GitHub 이 돌려준 sha 를 그대로 적고 우리가 조립하지 않는다.
+     * {@code null} 인 채로 남아 있는 행은 「검증은 끝났지만 아직 Fork 에 올리지 않았다」이고,
+     * PR 생성기가 그것을 push 가 필요하다는 신호로 읽는다.
+     */
+    public void markPublished(String commitSha) {
+        if (commitSha == null || commitSha.isBlank()) {
+            throw new IllegalArgumentException("커밋 sha 는 필수다 — push 응답에서 읽는다");
+        }
+        this.commitSha = commitSha.trim();
     }
 }

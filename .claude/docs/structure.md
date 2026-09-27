@@ -26,21 +26,24 @@ ai-oss-contributor-agent/
 ```
 com.ossagent
 ├── OssContributorAgentApplication
-├── config/                     조립 전용. 비즈니스 코드 금지 (ClockConfig)
+├── config/                     조립 전용. 비즈니스 코드 금지 (Clock · GitHub · LLM · 샌드박스 · 스케줄링)
 ├── support/                    도메인 없는 공통
-│   └── web/                    ApiExceptionHandler — HTTP 매핑은 여기 한 곳
-├── repository/                 대상 저장소 등록 · 기여 규약 분석 ✅ (#7)
+│   ├── web/                    ApiExceptionHandler — HTTP 매핑은 여기 한 곳
+│   ├── github/                 읽기 클라이언트 · 레이트리밋 예산 · 403 구분
+│   ├── secret/                 TokenRedactor · SecretFilePolicy (S-4)
+│   └── observability/          PipelineMetrics — 태그를 만드는 유일한 지점 (#25)
+├── repository/                 등록 · 규약 분석 ✅ (#7 · #68) · 스캔 파이프라인 + 스케줄러 ✅ (#14) · 컨텍스트 ✅ (#15)
 ├── issue/                      이슈 증분 수집 ✅ (#8) · 규칙 필터 ✅ (#9)
-├── candidate/                  기여 후보 · 상태머신 ✅ (#12)
-├── agent/                      LLM 능력·어댑터 ✅ (#10) · Docker 샌드박스 ✅ (#17)
-└── pullrequest/                Fork · Draft PR            (비어 있음)
+├── candidate/                  상태머신 ✅ (#12) · 게이트 셋 ✅ (#24 · #18 · #23) · 계획 ✅ (#16) · 루프 ✅ (#21) · 검증·리뷰 어댑터 ✅ (#19 · #20)
+├── agent/                      LLM 능력·어댑터 ✅ (#10) · Docker 샌드박스 ✅ (#17) · JGit 워크스페이스 ✅ (#18)
+└── pullrequest/                Fork push ✅ (#22) · Draft PR ✅ (#23) — 유일한 쓰기 클라이언트
 ```
 
-⚠️ **✅ 는 「그 코드가 있다」이지 「파이프라인이 흐른다」가 아니다.** 단계를 잇는 트리거가
-아직 없다 — 규칙 필터는 부르는 곳이 없고(#14), 후보 생성도 마찬가지다(#11).
+⚠️ **✅ 는 「그 코드가 있다」이지 「실 대상으로 돌아 봤다」가 아니다.** 단계를 잇는 트리거는 전부 있다
+(스캔은 `202` 비동기, 그 뒤는 사람이 누르는 게이트 셋). 없는 것은 `spring-kafka` End-to-End 실측이다.
 
-비어 있는 도메인에는 `package-info.java` 만 있다. **경계를 먼저 그어 둔 것**이다 —
-나중에 `candidate` 안에 수집 로직이, `agent` 안에 PR 생성이 섞여 들어가는 것을 구조로 막는다.
+`agent`·`pullrequest` 는 **엔티티를 갖지 않는다** — 능력과 어댑터만 있다. `candidate` 가 실행 이력·변경분·PR 행을
+소유한다(architecture.md 규율 ④).
 
 ## 도메인 내부 — 헥사고날 라이트
 

@@ -268,6 +268,8 @@ class ImplementCandidateRetryLoopTest {
                 List.of(), "https://example.invalid/i/42", FilterOutcome.PASSED, null);
 
         CandidateImplementationWriter writer = mock(CandidateImplementationWriter.class);
+        given(writer.admit(eq(CANDIDATE_ID), eq(true))).willReturn(
+                new CandidateImplementationWriter.Admission(CANDIDATE_ID, issue));
         given(writer.start(eq(CANDIDATE_ID), eq(true))).willReturn(
                 new CandidateImplementationWriter.ImplementationStart(CANDIDATE_ID, issue, 1,
                         new StatusTransition(CandidateStatus.SELECTED,
@@ -308,7 +310,11 @@ class ImplementCandidateRetryLoopTest {
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
                 contexts, policies, provider(new FixedWorkspaceSource(workspace)),
-                provider(coder), provider(verifier), provider(reviewer), retries);
+                provider(coder), provider(verifier), provider(reviewer), retries,
+                new ExecutionProperties(MAX_ATTEMPTS, 1800),
+                new com.ossagent.support.observability.PipelineMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+                java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
 
         return new Fixture(useCase, verifier, reviewer, coder, retries);
     }
@@ -381,6 +387,11 @@ class ImplementCandidateRetryLoopTest {
         @Override
         public WorkspaceDiff diff(SandboxWorkspace workspace) {
             return new WorkspaceDiff("--- a\n+++ b\n", Set.of(PLANNED));
+        }
+
+        @Override
+        public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+            throw new UnsupportedOperationException("착수 경로는 diff 를 입히지 않는다 — PR 게이트의 일이다");
         }
     }
 }

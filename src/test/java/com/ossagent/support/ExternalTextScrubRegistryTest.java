@@ -113,16 +113,18 @@ class ExternalTextScrubRegistryTest {
                             + " 거기서 redact 한다. 생성자는 protected 라 다른 경로가 없다."
                             + " 대상 저장소 코드 조각이 그대로 담기므로 저장소가 시크릿을"
                             + " 커밋해 뒀으면 diff 에 실려 온다 (#18)")),
-            // 🔴 여전히 PENDING 이다 — 담당이 #18 이 아니라 #19 였다.
-            //    검증 결과를 쓰는 코드가 그쪽에서 생긴다 (recordVerification)
-            Map.entry("GeneratedChange.testResult", new Decision(Mechanism.PENDING,
-                    "#19 — 빌드·테스트 출력. 환경변수를 찍는 빌드 스크립트가 흔하다."
-                            + " #18 은 이 필드를 쓰지 않는다 — 생성 시점에는 검증 전이다")),
-            Map.entry("GeneratedChange.reviewResult", new Decision(Mechanism.PENDING,
-                    "#20 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다."
-                            + " #20 이 DiffReview 값 타입을 세워 그 값은 이미 스크럽되지만,"
-                            + " GeneratedChange 에 생성 팩토리가 없어 이 컬럼에 앉는 경로가"
-                            + " 아직 없다 — 대입 경로가 생기는 #18 이후에 VALUE_TYPE 으로 올린다")),
+            // 📌 둘은 #19·#20 이 머지된 뒤에도 PENDING 이었다 — 각자 값 타입만 세우고 「컬럼에
+            //    앉히는 것은 다른 이슈」로 서로 넘겨, 쓰는 코드가 어느 이슈에도 없었다.
+            //    PR 본문의 검증 절이 늘 빈 값을 받았던 이유다. 지금은 ImplementCandidateUseCase 가
+            //    바퀴마다 둘을 기록하고, 엔티티 메서드가 유일한 대입 지점이다.
+            Map.entry("GeneratedChange.testResult", new Decision(Mechanism.FORCED_POINT,
+                    "GeneratedChange.recordVerification(...) — 이 필드에 대입하는 유일한 지점이고"
+                            + " 거기서 redact 한다. 재료(StageResult.summary)도 이미 스크럽·절단됐지만"
+                            + " 이 메서드는 그것을 믿지 않는다. 환경변수를 찍는 빌드 스크립트가 흔하다 (#19)")),
+            Map.entry("GeneratedChange.reviewResult", new Decision(Mechanism.FORCED_POINT,
+                    "GeneratedChange.recordReview(...) — 이 필드에 대입하는 유일한 지점이고 거기서"
+                            + " redact 한다. 재료(DiffReview)는 생성자에서 이미 스크럽됐다 —"
+                            + " 리뷰가 diff 를 인용하면 diff 의 시크릿이 복제되므로 두 겹이다 (#20)")),
 
             // ── #20 AI diff 리뷰 — LLM 응답이 새 유출구다 ────────────────
             // 송신(프롬프트)은 PromptScrubber 가 이미 막는다. 그런데 리뷰가 diff 를
@@ -154,11 +156,14 @@ class ExternalTextScrubRegistryTest {
             Map.entry("AnalyzableIssue.body", new Decision(Mechanism.FORCED_POINT,
                     "위와 같다. 대상 저장소 본문이 DB 에 앉기 전에 스크럽된다 (#8·#28)")),
 
-            Map.entry("SandboxResult.output", new Decision(Mechanism.PENDING,
-                    "#18 — #19 가 소비자 하나를 세웠다(StageResult.summary 가 VALUE_TYPE 으로"
-                            + " 받는다). 그러나 이 필드 자신은 여전히 원문이고, DB 에 앉는"
-                            + " 자리(GeneratedChange.testResult)의 강제 지점은 #18 이 만든다."
-                            + " LLM 송신은 PromptScrubber 를 거친다 (#17)")),
+            // ⚠ 이 필드 자신은 원문이다 — 어댑터가 컨테이너 출력을 그대로 담는다. 여기 적는 것은
+            //   「나가는 길이 전부 스크럽을 거친다」다: DB 는 StageResult.summary(값 타입) →
+            //   GeneratedChange.recordVerification(강제 지점), LLM 은 PromptScrubber. 원문을 직접
+            //   로그·뷰로 내보내는 경로를 만들면 이 근거가 무너진다 — PromptBoundaryTest 가 로그 쪽을 본다
+            Map.entry("SandboxResult.output", new Decision(Mechanism.VALUE_TYPE,
+                    "StageResult compact 생성자가 redact·절단한다 — DB 로 가는 유일한 길이다 (#19)."
+                            + " 그 값이 앉는 GeneratedChange.testResult 는 recordVerification 이"
+                            + " 한 번 더 가린다. LLM 송신은 PromptScrubber 를 거친다 (#17)")),
 
             // ── #16 구현 계획 — 전부 VALUE_TYPE. 영속되지 않지만 하류(#18 코딩 프롬프트)로
             //    다시 나가므로 방어 조건은 같다 ───────────────────────────────────
@@ -204,15 +209,14 @@ class ExternalTextScrubRegistryTest {
                             + " 값이 들어갈 수 없다」이지 「내용이 깨끗하다」가 아니다 (#15)")),
 
             // ── #22 Fork push ────────────────────────────────────────────
-            // 🔴 여기 실린 내용은 DB 도 LLM 도 아니라 「공개 Fork 에 영구 게시」된다.
-            //    다른 PENDING 행들과 위험의 성격이 다르다 — 회수가 불가능하다.
-            Map.entry("FileChange.content", new Decision(Mechanism.PENDING,
-                    "#18 — #22 는 워크스페이스를 읽지 않고 값으로 받기만 한다(PLAN-22 D-2)."
-                            + " 같은 방어를 두 벌 두지 않기로 해서 이 경로에는 내용 검사가 없다."
-                            + " 거르는 주체는 워크스페이스를 소유한 #18 이고,"
-                            + " 그쪽이 SecretFilePolicy·GeneratedChange 스크럽을 세운다."
-                            + " ⚠ #18 이 채우지 않으면 이 경로가 그대로 유출구다 —"
-                            + " PR 본문이 아니라 이 행이 그 사실을 계속 보이게 한다")),
+            // 🔴 여기 실린 내용은 DB 도 LLM 도 아니라 「공개 Fork 에 영구 게시」된다 — 회수가 불가능하다.
+            //    이 행은 #18 이 머지된 뒤에도 「#18 이 채운다」로 남아 있었다. #18 은 GeneratedFile 에
+            //    경로 배제·스크럽을 세웠지만 FileChange 는 그것을 거치지 않았고(PR 시점에 워크스페이스를
+            //    다시 읽어 만든다), 그래서 마지막 문인 이 타입이 스스로 막게 했다.
+            Map.entry("FileChange.content", new Decision(Mechanism.VALUE_TYPE,
+                    "FileChange compact 생성자가 SecretFilePolicy 로 경로를 배제하고 내용을 redact 한다."
+                            + " String 을 그대로 받는 생성 경로가 없다. 상류(GeneratedFile)의 같은 방어와"
+                            + " 두 겹이지만, 이쪽은 공개 게시 직전의 마지막 그물이라 PrBody 와 같은 취급이다 (#22·#23)")),
 
             // ── #23 Draft PR 본문 ────────────────────────────────────────
             // 🔴 FileChange.content 와 같은 성격이다 — 공개 저장소에 영구 게시되고 회수가

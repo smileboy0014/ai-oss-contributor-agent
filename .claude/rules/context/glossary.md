@@ -73,7 +73,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `VerificationReport` | — | 검증 한 바퀴의 결과 **값**. 🔴 `passed()` 는 **모든 단계가 `PASSED`** 일 때만 참이다 — 「실패가 없으면 통과」로 적으면 「판정 불가」가 조용히 접힌다 |
 | `StageResult` | — | 단계 하나의 결과 **값**. compact 생성자가 빌드 출력 **스크럽을 강제**한다 (S-4) |
 | `LlmPricing` | — | 모델 하나의 **단가** 값 — 100만 토큰당 USD. 설정(`agent.llm.pricing.<model>`)에서만 온다.<br>🔴 **없으면 비용 미터를 만들지 않는다**(#71) — 0 은 「공짜」로 읽히고 그것은 「모른다」와 다른 말이다. 한쪽만 적힌 단가는 **기동에서 거부**한다 |
-| `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 `DraftPrPublisher` 이고 그 앞에 세 번째 승인 게이트가 있다 |
+| `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 `DraftPrPublisher` 다. 호출자는 세 번째 승인 게이트 **뒤**의 `CreateDraftPrUseCase` 하나다(push 도 게이트 뒤다). ⚠️ #22~#23 사이 `publish` 에 호출자가 없어 PR 게이트가 항상 실패했다 — 2026-09-28 배선 |
 | `DraftPrPublisher` | `GitHubDraftPrPublisher` | upstream 에 **Draft PR** 을 연다 — **S-2 의 실행체**(#23). 🔴 이 제품이 대상 저장소에 남기는 **유일한 글**이다. `markReadyForReview`·`requestReviewers`·`merge` 는 **없는 것이 방어**다.<br>⚠️ 상태 전이도 영속화도 하지 않는다 — 능력을 합치면 게이트가 부산물이 된다 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `CandidateNotifier` | `LoggingCandidateNotifier` | 새 후보가 `ANALYZED` 로 쌓였음을 알린다(#26). 🔴 **관찰이지 행위가 아니다** — 승인 게이트를 부르지 않는다(S-6).<br>🔴 **지금 나가는 곳은 로그와 메트릭뿐이다** — Slack·Webhook 이 아니다. 「알림 경로가 있다」로만 적으면 다음 사람이 외부 전송이 있다고 믿는다 |
@@ -104,7 +104,8 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `PrBody` | — | Draft PR 본문. 🔴 **상류에 강제 지점이 없는 값 셋이 여기 모인다** — 대상 저장소 템플릿 · 빌드 출력 · LLM 리뷰. 밖으로 나가기 직전이라 **마지막 그물**이고 compact 생성자가 스크럽을 강제한다 (S-4) |
 | `PrBodyMaterials` | — | `PrBody` 의 재료. **스크럽 「전」인 것이 정체다** — 유일한 소비자가 `PrBody.compose` 라 나가는 길이 스크럽을 통과하는 길 하나뿐이다. 🔴 getter 말고 다른 출구를 만들지 않는다 |
 | `PullRequestTarget` | — | PR 을 열기 위해 대상 저장소에서 읽어야 하는 것 전부 — 좌표 · 기준 브랜치 · 템플릿. 🔴 `template == null` 은 **「없다」**이고 「못 읽었다」가 아니다(그쪽은 예외로 끊긴다 — S-5) |
-| `FileChange` | — | Fork 에 올릴 파일 1건. 🔴 **내용 검사가 이 경로에 없다** — 워크스페이스를 읽는 #18 이 거른다. `@ExternalText` 등록표에 `PENDING #18` 로 남겨 그 사실이 계속 보이게 했다 (#22) |
+| `FileChange` | — | Fork 에 올릴 파일 1건. compact 생성자가 **경로 배제(`SecretFilePolicy`) + 내용 스크럽**을 강제한다 — 공개 게시 직전의 마지막 그물이라 `PrBody` 와 같은 취급(S-4). ⚠️ 2026-09-28 까지는 내용 검사가 0 이었고 등록표가 「#18 이 채운다」로 미뤄 둔 채 #18 이 머지됐다 |
+| `TargetWorkspaceSource.apply` | `JGitWorkspaceSource` | 저장된 diff 를 **새로 받은** 워크스페이스에 입힌다 — PR 게이트가 push 할 파일을 만드는 길. 착수 때의 디렉토리를 다시 읽지 않는 이유는 그것이 다른 후보의 착수로 비워질 수 있어서다. 적용 실패는 예외다(upstream 이 움직였다 → 재착수) |
 
 ## 증분 수집 — 「언제 돌렸나」와 「어디까지 봤나」는 다르다 (#8)
 

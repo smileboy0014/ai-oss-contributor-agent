@@ -27,11 +27,23 @@ public class FakeForkPublisher implements ForkPublisher {
     private RuntimeException ensureForkFailure;
     private RuntimeException publishFailure;
     private String commitSha = "fake-commit-sha";
+    private CommitIdentity commitIdentity;
+    private RuntimeException syncFailure;
 
     // ── 대역 조작 ───────────────────────────────────────────────────────
 
     public void givenForkOwner(String owner) {
         this.forkOwner = owner;
+    }
+
+    /** 커밋 서명자. 기본은 비어 있다 — sign-off 가 필수인 규약에서 그 부재가 드러나야 한다. */
+    public void givenCommitIdentity(CommitIdentity identity) {
+        this.commitIdentity = identity;
+    }
+
+    /** 동기화 자체가 실패한다(레이트리밋·5xx). 값이 아니라 예외로 오는 경로다. */
+    public void givenSyncFails(RuntimeException failure) {
+        this.syncFailure = failure;
     }
 
     public void givenSyncOutcome(SyncOutcome outcome) {
@@ -62,6 +74,8 @@ public class FakeForkPublisher implements ForkPublisher {
         publishFailure = null;
         syncOutcome = SyncOutcome.ALREADY_UP_TO_DATE;
         commitSha = "fake-commit-sha";
+        commitIdentity = null;
+        syncFailure = null;
     }
 
     // ── 기록 ────────────────────────────────────────────────────────────
@@ -85,7 +99,15 @@ public class FakeForkPublisher implements ForkPublisher {
     }
 
     @Override
+    public java.util.Optional<CommitIdentity> commitIdentity() {
+        return java.util.Optional.ofNullable(commitIdentity);
+    }
+
+    @Override
     public SyncedFork syncWithUpstream(ForkRef fork, BaseBranch baseBranch) {
+        if (syncFailure != null) {
+            throw syncFailure;
+        }
         return new SyncedFork(fork, syncOutcome);
     }
 

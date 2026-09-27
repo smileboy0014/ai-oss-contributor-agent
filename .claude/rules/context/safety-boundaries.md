@@ -1,6 +1,9 @@
 # 넘으면 안 되는 선 — 되돌릴 수 없는 규칙
 
-> 기준일 **2026-09-18**. 근거는 [PRD](../../../docs/ai-oss-contributor-agent-prd.md) §3 Non-Goals · §16 Docker Sandbox · §18 GitHub Contribution Flow · §20 Human-in-the-loop · §25 Security Architecture.
+> 기준일 **2026-09-18**. 근거는 [PRD](../../../docs/ai-oss-contributor-agent-prd.md) **v1.2** §3 Non-Goals · §16 Docker Sandbox · §18 GitHub Contribution Flow · §20 Human-in-the-loop · §23·§24 API · §25 Security Architecture.
+>
+> ⚠️ **PRD 가 이 문서를 따라온 것이지 그 반대가 아니다.** §24·§25 는 v1.1 에서 이 조항들과
+> 충돌했고 v1.2 에서 정정됐다(#30). 둘이 다시 어긋나면 **이 문서가 정본**이다.
 
 이 프로젝트가 만드는 것은 **남의 저장소에 코드를 밀어 넣을 수 있는 자동화**다.
 평범한 버그는 우리 서비스가 죽지만, 여기서의 사고는 **외부 OSS 커뮤니티에 직접 나간다.**
@@ -240,8 +243,9 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
   `CandidateApprovalApiTest` 가 둘 다 404 인 것을 회귀로 고정하므로, 여는 사람은
   그 테스트를 함께 고쳐야 한다 — 실행기와 같은 PR 에서 열라는 강제다.
 
-  🔴 **`implement` 가 PR 까지 흘려보내면 반려다.** PRD §24 시퀀스가 그렇게 그려져 있으나
-  **그 다이어그램이 틀렸다**(#30). 그대로 구현하면 세 번째 게이트가 사라지고 S-2 까지 뚫린다.
+  🔴 **`implement` 가 PR 까지 흘려보내면 반려다.** ~~PRD §24 시퀀스가 그렇게 그려져 있다~~ —
+  **PRD v1.2 가 그 다이어그램을 정정했다**(2026-09-27 · #30). 이제 §23·§24 가 함께
+  게이트 셋을 말한다. 그대로 구현하면 세 번째 게이트가 사라지고 S-2 까지 뚫린다는 사실은 그대로다.
 
   선택 취소(`SELECTED` → `REJECTED`)도 사람 행위로만 일어난다 — `POST /api/candidates/{id}/reject`.
   자동 취소 경로를 만들지 않는다. 🔴 `cancelSelection` 은 **출발 상태를 직접 본다** —

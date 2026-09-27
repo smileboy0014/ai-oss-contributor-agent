@@ -104,8 +104,8 @@ S-6 이 요구하는 승인 지점이다. **스케줄러·워커가 이 선을 �
 | 착수 | `POST /candidates/{id}/implement` | ⬜ #18 | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
 | **PR 생성** | `POST /candidates/{id}/pull-request` | ⬜ #23 | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
 
-⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스는 `implement` 한 번으로
-Draft PR 까지 그렸는데, 그대로 구현하면 위 세 번째 게이트가 사라진다 — PRD 결함이다(#30).
+⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스가 `implement` 한 번으로
+Draft PR 까지 그려 두었던 것이 결함이었고, **PRD v1.2 에서 게이트 셋으로 정정됐다**(#30).
 
 선택 취소(`SELECTED → REJECTED`)도 **사람 행위로만** 일어난다. 자동 취소 경로를 만들지 않는다.
 구현된 엔드포인트는 `POST /candidates/{id}/reject` 다 — 🔴 `DELETE` 가 아니다.

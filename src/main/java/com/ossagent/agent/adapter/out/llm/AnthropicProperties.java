@@ -58,7 +58,9 @@ public record AnthropicProperties(
         retryBackoff = retryBackoff == null ? DEFAULT_RETRY_BACKOFF : retryBackoff;
         // 🔴 기본값이 「빈 표」다. 여기에 기본 단가를 채우지 않는다 —
         //    모델은 환경변수로 바뀌는데 단가는 시점·계약에 따라 다르다 (LlmPricing javadoc)
-        pricing = pricing == null ? Map.of() : Map.copyOf(pricing);
+        // ⚠ Map.copyOf 는 값이 null 이면 맨 NPE 로 죽는다. 기동 실패는 맞지만 메시지가
+        //   「어느 키가 비었는지」를 말해 주지 않는다 — 설정 오류는 읽을 수 있어야 고친다
+        pricing = normalizePricing(pricing);
         if (maxRetries < 0 || maxRetries > MAX_ALLOWED_RETRIES) {
             // 상한을 두는 이유 — 파이프라인 재시도(3)와 곱해진다. 전송 5 면 후보 1건당
             // 대외 호출 18회다. 「조용히 돈을 태우는」 경로를 설정으로도 만들 수 없게 한다 (S-6)
@@ -98,6 +100,20 @@ public record AnthropicProperties(
                 .filter(entry -> normalize(entry.getKey()).equals(wanted))
                 .map(Map.Entry::getValue)
                 .findFirst();
+    }
+
+    private static Map<String, LlmPricing> normalizePricing(Map<String, LlmPricing> pricing) {
+        if (pricing == null) {
+            return Map.of();
+        }
+        pricing.forEach((model, rates) -> {
+            if (rates == null) {
+                throw new IllegalArgumentException(
+                        "agent.llm.pricing.%s 가 비어 있다 — 단가를 적거나 줄을 지운다"
+                                .formatted(model));
+            }
+        });
+        return Map.copyOf(pricing);
     }
 
     private static String normalize(String modelId) {

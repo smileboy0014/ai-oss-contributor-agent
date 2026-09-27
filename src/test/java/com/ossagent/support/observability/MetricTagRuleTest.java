@@ -199,6 +199,35 @@ class MetricTagRuleTest {
     }
 
     @Test
+    @DisplayName("🔴 비용 기록이 터져도 나머지 계측이 남는다 (#71)")
+    void 비용이_터져도_시도_번호는_기록된다() {
+        // 🔴 「비용을 못 셌다」가 「시도 번호도 못 셌다」가 되면 안 된다.
+        //    한 record() 람다에 묶여 있으면 실제로 그렇게 된다 — 뒤의 기록이 통째로 날아가고,
+        //    증상은 WARN 한 줄이라 사라진 시계열이 대시보드에서 0 과 구분되지 않는다
+        var 비용만_고장난_레지스트리 = new SimpleMeterRegistry() {
+            @Override
+            protected io.micrometer.core.instrument.Counter newCounter(Meter.Id id) {
+                if (MetricNames.LLM_COST.equals(id.getName())) {
+                    throw new IllegalStateException("비용 미터 등록 고장");
+                }
+                return super.newCounter(id);
+            }
+        };
+
+        new PipelineMetrics(비용만_고장난_레지스트리).llmCall(
+                LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED, new LlmUsage(10, 20), 2, SONNET);
+
+        assertThat(비용만_고장난_레지스트리.find(MetricNames.LLM_CALL_ATTEMPT).summary())
+                .as("비용 기록의 실패가 삼켜야 하는 것은 「그 계측 하나」다 — "
+                        + "같은 람다에 있던 나머지 전부가 아니다")
+                .isNotNull();
+        assertThat(비용만_고장난_레지스트리.find(MetricNames.LLM_CALLS).counter()).isNotNull();
+        assertThat(비용만_고장난_레지스트리.find(MetricNames.LLM_COST).counter())
+                .as("정작 실패한 비용은 없어야 한다 — 없는 값을 0 으로 꾸미지 않는다")
+                .isNull();
+    }
+
+    @Test
     @DisplayName("🔴 비용은 통화를 태그가 아니라 baseUnit 으로 싣는다 (#71)")
     void 비용_미터가_통화를_단위로_담는다() {
         metrics.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED,

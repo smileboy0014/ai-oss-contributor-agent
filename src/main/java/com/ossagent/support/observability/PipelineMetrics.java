@@ -84,14 +84,19 @@ public class PipelineMetrics {
             if (usage != null) {
                 tokens(site, "input", usage.inputTokens());
                 tokens(site, "output", usage.outputTokens());
-                if (pricing != null) {
-                    cost(site, pricing.costOf(usage));
-                }
             }
             registry.summary(MetricNames.LLM_CALL_ATTEMPT,
                             MetricNames.TAG_CALL_SITE, site.name())
                     .record(attempt);
         });
+        // 🔴 비용을 별도 record() 로 가른다 — 한 람다에 묶으면 단가 계산이 던졌을 때
+        //    그 뒤의 기록(attempt)이 통째로 사라진다. 방어가 삼키는 것은 「그 계측 하나」여야
+        //    하고, 「같은 람다에 있던 나머지 전부」여서는 안 된다.
+        //    ⚠️ 증상이 보이지 않는 종류다 — 예외는 WARN 한 줄로 끝나고, 사라진 것은
+        //       「있었어야 할 시계열」이라 대시보드에서 0 과 구분되지 않는다
+        if (usage != null && pricing != null) {
+            record(() -> cost(site, pricing.costOf(usage)));
+        }
     }
 
     /** 파이프라인 단계 1회 — 소요 시간과 결과. */

@@ -74,7 +74,8 @@ curl -X POST http://localhost:8080/api/repositories \
     ├── repository/            대상 저장소 등록 · 메타데이터/파일 조회 · 기여 규약 분석
     ├── issue/                 이슈 증분 수집 ✅ · 규칙 필터 ✅ (트리거 없음)
     ├── candidate/             기여 후보 · 상태 전이
-    ├── agent/                 LLM 능력·어댑터 ✅ · Docker 샌드박스 ✅ (호출자 없음)
+    ├── agent/                 LLM 능력·어댑터 ✅ · Docker 샌드박스 ✅
+    │                          · 워크스페이스(JGit) ✅ · 워밍→씨딩→실행 ✅ (호출자는 #19)
     └── pullrequest/           Fork · Draft PR            (경계만)
 ```
 

@@ -170,7 +170,9 @@ Q-3 이 확정되면 다시 검토한다.
 
 ```bash
 ./gradlew bootRun &
-curl -s localhost:8080/actuator/health
+# 🔴 actuator 는 앱 포트에 없다 — 관리 포트 9090 · 루프백 전용 (#74).
+#    8080 으로 치면 404 다. 그것이 정상이고, 그 사실이 이 문서의 요점이다
+curl -s 127.0.0.1:9090/actuator/health
 curl -s -X POST localhost:8080/api/repositories \
   -H 'Content-Type: application/json' \
   -d '{"owner":"spring-projects","name":"spring-kafka","url":"https://github.com/spring-projects/spring-kafka"}'

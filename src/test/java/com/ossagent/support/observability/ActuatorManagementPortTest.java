@@ -98,6 +98,9 @@ class ActuatorManagementPortTest {
                         「인증 없이 열린다」는 사실이 그대로 남는다 — #74""")
                 .isNotBlank();
 
+        // ⚠ 호스트명을 적으면 여기서 DNS 를 탄다 — 테스트가 네트워크를 타는 유일한 경로다.
+        //   운영 설정이 IP 리터럴(127.0.0.1)이라 지금은 해석이 일어나지 않는다.
+        //   호스트명으로 바꾸려는 사람은 이 줄을 함께 본다
         assertThat(InetAddress.getByName(address).isLoopbackAddress())
                 .as("관리 엔드포인트가 루프백 밖(%s)에 묶여 있다 — 외부에서 인증 없이 읽힌다", address)
                 .isTrue();
@@ -111,6 +114,8 @@ class ActuatorManagementPortTest {
                         Boot 기본값과 같더라도 값으로 적어 둔다.
                         적혀 있지 않으면 「지금 무엇이 나가는가」가 코드에 없고,
                         when-authorized 로 바꾸는 순간 인증이 없어 always 처럼 동작한다 — #74""")
-                .isEqualTo("never");
+                // ⚠ 대소문자를 가리지 않는다. Boot 의 느슨한 바인딩은 NEVER·Never 를 모두 받는데
+                //   여기서만 빨개지면 그것은 오탐이고, 오탐으로 죽는 게이트는 반드시 꺼진다
+                .isEqualToIgnoringCase("never");
     }
 }

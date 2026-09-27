@@ -2,6 +2,10 @@ package com.ossagent.support.observability;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -58,6 +62,22 @@ import org.springframework.test.context.ActiveProfiles;
 @ActiveProfiles("fakes")
 class ActuatorManagementPortIsolationTest {
 
+    /**
+     * 🔴 <b>허용집합이다 — 거부목록이 아니다.</b>
+     *
+     * <p>「{@code env} 가 열렸는가」를 묻는 거부목록은 <b>목록에 없는 엔드포인트마다 구멍이
+     * 새로 난다</b>({@code testing-philosophy.md} 「거부목록으로 방어하지 않는다」).
+     * 뒤집어서 <b>열려도 되는 것</b>을 세면 무엇이 늘어나든 걸린다.
+     *
+     * <p>⚠️ {@code include: "*"} 도 이 단언에 걸린다 — 그때 링크가 수십 개로 늘기 때문이다.
+     * 설정 문자열을 파싱하지 않고 <b>실제로 열린 것</b>을 읽는 이유가 그것이다.
+     *
+     * <p>ℹ️ {@code self} 와 {@code *-path}·{@code *-requiredMetricName} 류는 엔드포인트가
+     * 늘어난 것이 아니라 {@code /actuator} 자신과 각 엔드포인트의 <b>경로 변수 링크</b>다.
+     */
+    private static final Set<String> ALLOWED_ENDPOINTS = Set.of(
+            "self", "health", "health-path", "info", "metrics", "metrics-requiredMetricName");
+
     @LocalServerPort
     private int appPort;
 
@@ -100,6 +120,32 @@ class ActuatorManagementPortIsolationTest {
         assertThat(response.getBody())
                 .as("계측을 만들고 안 보여주면 #25 가 하는 일이 없다")
                 .contains(MetricNames.CANDIDATE_COUNT);
+    }
+
+    @Test
+    @DisplayName("🔴 열린 엔드포인트가 허용집합 안이다 — 넓히면 빨개진다 #74")
+    void 열린_엔드포인트가_허용집합_안이다() {
+        ResponseEntity<JsonNode> response =
+                restTemplate.getForEntity(url(managementPort, "/actuator"), JsonNode.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+
+        List<String> exposed = new ArrayList<>();
+        response.getBody().get("_links").fieldNames().forEachRemaining(exposed::add);
+
+        assertThat(exposed)
+                .as("/actuator 가 링크를 하나도 안 돌려줬다 — 0건을 검사하고 초록이 된 것이다")
+                .isNotEmpty();
+
+        assertThat(exposed)
+                .as("""
+                        허용집합 밖의 actuator 엔드포인트가 열렸다.
+                        이 저장소에는 시큐리티가 없으므로 늘어난 것은 그대로 인증 없이 읽힌다 —
+                        env·configprops 는 설정값을(시크릿 포함) 내보내고
+                        heapdump·threaddump 는 메모리를 통째로 준다. S-4 와 같은 방향이다.
+                        의도한 추가라면 ALLOWED_ENDPOINTS 에 함께 넣는다 —
+                        그 diff 가 리뷰에 보이는 것이 요점이다""")
+                .isSubsetOf(ALLOWED_ENDPOINTS);
     }
 
     private String url(int port, String path) {

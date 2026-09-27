@@ -2,7 +2,9 @@ package com.ossagent.agent.domain;
 
 import com.ossagent.support.testing.FakeAdapter;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 
 /**
@@ -27,11 +29,14 @@ public class FakeCodeSandbox implements CodeSandbox {
 
     private final List<SandboxCommand> commands = new ArrayList<>();
 
+    private final Deque<SandboxResult> queued = new ArrayDeque<>();
+
     private SandboxResult nextResult = success();
     private RuntimeException nextFailure;
 
     public void reset() {
         commands.clear();
+        queued.clear();
         nextResult = success();
         nextFailure = null;
     }
@@ -69,6 +74,43 @@ public class FakeCodeSandbox implements CodeSandbox {
         return given(new SandboxResult(0, "ok", false, false, Duration.ofSeconds(1), false));
     }
 
+    // ── 호출별 결과 (#19 이 더했다) ─────────────────────────────
+
+    /**
+     * 🔴 <b>호출 순서대로</b> 결과를 돌려준다 — {@link #given(SandboxResult)} 와 다르다.
+     *
+     * <p>검증 파이프라인(#19)은 한 바퀴에 샌드박스를 <b>여러 번</b> 부른다
+     * (컴파일 · 테스트 · diff 목록 · diff 본문). 결과가 하나뿐이면 「컴파일은 통과하고
+     * 테스트는 실패한다」 같은 <b>단계별 분기를 표현할 수 없고</b>, 그러면
+     * 「첫 실패에서 멈춘다」·「뒤 단계는 SKIPPED」를 검증할 방법이 없다.
+     *
+     * <p>⚠️ 큐가 <b>비면</b> {@link #given(SandboxResult)} 의 값으로 되돌아간다 —
+     * 큐를 소진한 뒤의 호출이 조용히 예외가 되면 「몇 번 불렸나」를 테스트가
+     * 단언하기 전에 죽는다.
+     */
+    public FakeCodeSandbox givenSequence(SandboxResult... results) {
+        queued.clear();
+        for (SandboxResult result : results) {
+            queued.add(result);
+        }
+        return this;
+    }
+
+    /** 종료코드 0 · 주어진 출력. {@link #givenSequence} 의 재료다. */
+    public static SandboxResult ok(String output) {
+        return new SandboxResult(0, output, false, false, Duration.ofSeconds(1), true);
+    }
+
+    /** 0 이 아닌 종료코드. {@link #givenSequence} 의 재료다. */
+    public static SandboxResult exitedWith(int exitCode, String output) {
+        return new SandboxResult(exitCode, output, false, false, Duration.ofSeconds(1), true);
+    }
+
+    /** 출력이 잘렸다. {@link #givenSequence} 의 재료다. */
+    public static SandboxResult truncated(String partial) {
+        return new SandboxResult(0, partial, true, false, Duration.ofSeconds(1), true);
+    }
+
     /** 실행 자체를 못 했다. <b>이때만</b> 예외다. */
     public FakeCodeSandbox thenFailWith(RuntimeException failure) {
         this.nextFailure = failure;
@@ -83,7 +125,8 @@ public class FakeCodeSandbox implements CodeSandbox {
         if (nextFailure != null) {
             throw nextFailure;
         }
-        return nextResult;
+        SandboxResult queuedResult = queued.poll();
+        return queuedResult != null ? queuedResult : nextResult;
     }
 
     private static SandboxResult success() {

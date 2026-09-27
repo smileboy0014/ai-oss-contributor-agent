@@ -5,6 +5,7 @@ import com.ossagent.agent.domain.AgentRunRecorder;
 import com.ossagent.agent.domain.LanguageModel;
 import com.ossagent.agent.domain.LlmException;
 import com.ossagent.agent.domain.LlmFailureReason;
+import com.ossagent.agent.domain.LlmPricing;
 import com.ossagent.agent.domain.LlmRequest;
 import com.ossagent.agent.domain.LlmResponse;
 import com.ossagent.support.observability.LlmOutcome;
@@ -32,6 +33,16 @@ import org.slf4j.MDC;
  * <p>절단({@link LlmFailureReason#TRUNCATED})은 응답을 받았으므로 사용량을 안다 —
  * 그 경우 실제 토큰을 기록한다.
  *
+ * <h2>비용도 같은 길목에서 센다 (#71)</h2>
+ *
+ * <p>토큰을 여기서 세는 이유가 그대로 금액에도 적용된다. 단가는 <b>설정에서만</b> 오고,
+ * 없으면 {@code null} 이다 — 그때는 비용 미터를 만들지 않는다. 0 으로 두면 「공짜」로
+ * 읽히고, 그것은 「모른다」와 전혀 다른 말이다.
+ *
+ * <p>⚠️ <b>단가를 생성자 인자로 둔 것이 의도다.</b> 기본값을 주면 「단가 없이 조립하는 길」이
+ * 조용히 생기고, 비용이 안 찍히는데 아무도 모르는 상태로 돌아간다. 없으면 {@code null} 을
+ * <b>명시</b>한다 — {@code LanguageModelConfig} 가 그 사실을 기동 로그에 남긴다.
+ *
  * <p>MDC 3키는 {@code logging.md} 가 요구하는 것과 {@link AgentRunContext} 의 필드가
  * 정확히 1:1 이다. {@code finally} 에서 반드시 지운다 — 스레드가 재사용되면 남은 값이
  * 다음 요청 로그에 붙는다.
@@ -42,11 +53,15 @@ public class RecordingLanguageModel implements LanguageModel {
     private final AgentRunRecorder recorder;
     private final PipelineMetrics metrics;
 
+    /** 🔴 단가가 설정에 없으면 {@code null} — 비용 미터를 만들지 않는다 (#71). */
+    private final LlmPricing pricing;
+
     public RecordingLanguageModel(LanguageModel delegate, AgentRunRecorder recorder,
-            PipelineMetrics metrics) {
+            PipelineMetrics metrics, LlmPricing pricing) {
         this.delegate = delegate;
         this.recorder = recorder;
         this.metrics = metrics;
+        this.pricing = pricing;
     }
 
     @Override
@@ -69,7 +84,7 @@ public class RecordingLanguageModel implements LanguageModel {
                 LlmResponse response = delegate.complete(ctx, request);
                 recorder.succeeded(runId, response.usage());
                 metrics.llmCall(ctx.callSite(), LlmOutcome.SUCCEEDED, response.usage(),
-                        ctx.attempt());
+                        ctx.attempt(), pricing);
                 return response;
             } catch (LlmException e) {
                 // 실패로 기록하되 아는 토큰은 함께 남긴다. 절단은 응답을 받았으므로 사용량을 안다 —
@@ -78,11 +93,11 @@ public class RecordingLanguageModel implements LanguageModel {
                 // 🔴 실패도 토큰을 센다 — 절단은 응답을 받았으므로 사용량을 알고,
                 //    모델은 이미 토큰을 생성했다. 성공만 세면 장부가 거짓말을 한다
                 metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, e.usage().orElse(null),
-                        ctx.attempt());
+                        ctx.attempt(), pricing);
                 throw e;
             } catch (RuntimeException e) {
                 recorder.failed(runId, LlmFailureReason.INVALID_REQUEST, null);
-                metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, null, ctx.attempt());
+                metrics.llmCall(ctx.callSite(), LlmOutcome.FAILED, null, ctx.attempt(), pricing);
                 throw e;
             }
         } finally {

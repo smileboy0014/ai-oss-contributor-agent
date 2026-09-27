@@ -110,7 +110,7 @@ class LlmDiffReviewerTest {
         RecordingRuns runs = new RecordingRuns();
         LanguageModel recording = new RecordingLanguageModel(
                 (ctx, req) -> new LlmResponse(body("PASS"), usage()), runs,
-                new PipelineMetrics(new SimpleMeterRegistry()));
+                new PipelineMetrics(new SimpleMeterRegistry()), null);
 
         new LlmDiffReviewer(recording, DiffReviewProperties.defaults(), new ObjectMapper())
                 .review(CONTEXT, request("diff"));

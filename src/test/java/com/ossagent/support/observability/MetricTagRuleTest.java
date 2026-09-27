@@ -3,11 +3,13 @@ package com.ossagent.support.observability;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ossagent.agent.domain.LlmCallSite;
+import com.ossagent.agent.domain.LlmPricing;
 import com.ossagent.agent.domain.LlmUsage;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -40,6 +42,10 @@ import org.junit.jupiter.api.Test;
  */
 class MetricTagRuleTest {
 
+    /** 100만 토큰당 USD — 실제 공시 단가의 모양이다. 값 자체는 테스트의 관심이 아니다. */
+    private static final LlmPricing SONNET =
+            new LlmPricing(new BigDecimal("3.00"), new BigDecimal("15.00"));
+
     private SimpleMeterRegistry registry;
     private PipelineMetrics metrics;
 
@@ -51,8 +57,9 @@ class MetricTagRuleTest {
 
     /** 이 PR 이 만드는 모든 계측을 한 번씩 태운다 — 가드가 0건을 검사하고 초록이 되지 않게. */
     private void exerciseAll() {
-        metrics.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED, new LlmUsage(10, 20), 1);
-        metrics.llmCall(LlmCallSite.POLICY, LlmOutcome.FAILED, null, 2);
+        metrics.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED, new LlmUsage(10, 20), 1,
+                SONNET);
+        metrics.llmCall(LlmCallSite.POLICY, LlmOutcome.FAILED, null, 2, SONNET);
         for (PipelineStage stage : PipelineStage.values()) {
             for (StageOutcome outcome : StageOutcome.values()) {
                 metrics.pipelineStage(stage, outcome, Duration.ofMillis(5));
@@ -151,7 +158,8 @@ class MetricTagRuleTest {
         // 던지면 스캔 파이프라인이 메트릭 때문에 죽는다 — 본말전도다
         broken.safetyGate(SafetyClause.S5, GateOutcome.PASSED, null);
         broken.analysisOutcome(AnalysisOutcome.ANALYZED, 1);
-        broken.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED, new LlmUsage(1, 1), 1);
+        broken.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED, new LlmUsage(1, 1), 1,
+                SONNET);
     }
 
     @Test
@@ -160,6 +168,64 @@ class MetricTagRuleTest {
         metrics.analysisOutcome(AnalysisOutcome.FAILED, 0);
 
         assertThat(ourMeters().count()).isZero();
+    }
+
+
+    @Test
+    @DisplayName("🔴 단가가 없으면 비용 미터를 만들지 않는다 — 0 은 「공짜」로 읽힌다 (#71)")
+    void 단가가_없으면_비용_미터가_없다() {
+        metrics.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED, new LlmUsage(10, 20), 1, null);
+
+        assertThat(registry.find(MetricNames.LLM_COST).counter())
+                .as("""
+                        단가가 없을 때 0 을 기록하면 「비용이 0 이다」로 읽힌다 — 그것은
+                        「모른다」와 전혀 다른 말이다. 미터가 아예 없어야 대시보드에서
+                        「측정하지 않음」으로 보인다.""")
+                .isNull();
+        assertThat(registry.find(MetricNames.LLM_TOKENS).counters())
+                .as("토큰은 단가와 무관하게 센다 — 나중에 단가를 알면 곱하면 된다")
+                .isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("사용량을 모르면 비용도 만들지 않는다 (#71)")
+    void 사용량을_모르면_비용이_없다() {
+        // 타임아웃으로 끊긴 호출이다. 모델은 토큰을 생성했지만 얼마인지 모른다 —
+        // 0 으로 적으면 가장 비싼 경로가 장부에서 「공짜」가 된다
+        metrics.llmCall(LlmCallSite.CODE, LlmOutcome.FAILED, null, 1, SONNET);
+
+        assertThat(registry.find(MetricNames.LLM_COST).counter()).isNull();
+        assertThat(registry.find(MetricNames.LLM_CALLS).counter()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("🔴 비용은 통화를 태그가 아니라 baseUnit 으로 싣는다 (#71)")
+    void 비용_미터가_통화를_단위로_담는다() {
+        metrics.llmCall(LlmCallSite.ANALYZE, LlmOutcome.SUCCEEDED,
+                new LlmUsage(1_000_000, 1_000_000), 1, SONNET);
+
+        var cost = registry.find(MetricNames.LLM_COST).counter();
+        assertThat(cost).isNotNull();
+        assertThat(cost.count()).isEqualTo(18.0);
+        assertThat(cost.getId().getBaseUnit())
+                .as("값이 하나뿐인 태그를 모든 시계열에 붙일 이유가 없다")
+                .isEqualTo(MetricNames.CURRENCY);
+        assertThat(cost.getId().getTags())
+                .as("모델은 설정 문자열이라 우리가 통제하는 어휘가 아니다 — 태그로 달지 않는다")
+                .singleElement()
+                .extracting(Tag::getKey)
+                .isEqualTo(MetricNames.TAG_CALL_SITE);
+    }
+
+    @Test
+    @DisplayName("🔴 절단된 호출도 비용을 센다 — 응답을 받았으므로 사용량을 안다 (#71)")
+    void 실패해도_아는_사용량은_비용에_들어간다() {
+        metrics.llmCall(LlmCallSite.CODE, LlmOutcome.FAILED, new LlmUsage(1_000_000, 0), 1,
+                SONNET);
+
+        assertThat(registry.find(MetricNames.LLM_COST).counter().count())
+                .as("실패를 빼면 가장 비싼 경로가 장부에서 사라진다")
+                .isEqualTo(3.0);
     }
 
     private Stream<Meter> ourMeters() {

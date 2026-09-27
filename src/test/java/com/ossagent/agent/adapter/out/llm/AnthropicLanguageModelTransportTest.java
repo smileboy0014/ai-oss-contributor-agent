@@ -67,7 +67,8 @@ class AnthropicLanguageModelTransportTest {
 
     private AnthropicProperties props(Duration timeout, int maxRetries) {
         return new AnthropicProperties("http://localhost:" + wireMock.port(),
-                "test-key-not-a-real-secret", null, 100, timeout, maxRetries, Duration.ofMillis(1));
+                "test-key-not-a-real-secret", null, 100, timeout, maxRetries,
+                Duration.ofMillis(1), null);
     }
 
     @Test

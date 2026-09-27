@@ -68,6 +68,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `ChangeVerifier` | `SandboxChangeVerifier` | 생성된 변경분을 샌드박스에서 검증. `CodeSandbox` 위에 얹히는 **2층**(#19). 🔴 **빌드 실패로 예외를 던지지 않는다** — 그것은 게이트가 작동한 모습이고 예외로 내보내면 호출자가 재시도 루프에서 삼킨다 |
 | `VerificationReport` | — | 검증 한 바퀴의 결과 **값**. 🔴 `passed()` 는 **모든 단계가 `PASSED`** 일 때만 참이다 — 「실패가 없으면 통과」로 적으면 「판정 불가」가 조용히 접힌다 |
 | `StageResult` | — | 단계 하나의 결과 **값**. compact 생성자가 빌드 출력 **스크럽을 강제**한다 (S-4) |
+| `LlmPricing` | — | 모델 하나의 **단가** 값 — 100만 토큰당 USD. 설정(`agent.llm.pricing.<model>`)에서만 온다.<br>🔴 **없으면 비용 미터를 만들지 않는다**(#71) — 0 은 「공짜」로 읽히고 그것은 「모른다」와 다른 말이다. 한쪽만 적힌 단가는 **기동에서 거부**한다 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |

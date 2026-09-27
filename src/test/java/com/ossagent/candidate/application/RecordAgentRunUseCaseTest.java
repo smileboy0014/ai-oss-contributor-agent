@@ -48,7 +48,7 @@ class RecordAgentRunUseCaseTest {
             return new LlmResponse("응답", new LlmUsage(1, 2));
         };
 
-        new RecordingLanguageModel(probe, recorder, PipelineMetricsFixtures.discarding())
+        new RecordingLanguageModel(probe, recorder, PipelineMetricsFixtures.discarding(), null)
                 .complete(CTX, new LlmRequest(null, "질문", 100));
 
         assertThat(sawTransaction)
@@ -60,7 +60,7 @@ class RecordAgentRunUseCaseTest {
     void 후보가_없는_POLICY_실행도_DB_에_적재된다() {
         var model = new RecordingLanguageModel(
                 (ctx, request) -> new LlmResponse("판정", new LlmUsage(5, 6)), recorder,
-                PipelineMetricsFixtures.discarding());
+                PipelineMetricsFixtures.discarding(), null);
 
         model.complete(AgentRunContext.forRepository(LlmCallSite.POLICY),
                 new LlmRequest(null, "규약 문서", 100));
@@ -83,7 +83,7 @@ class RecordAgentRunUseCaseTest {
     void 시작과_종료가_각각_커밋되어_조회된다() {
         var model = new RecordingLanguageModel(
                 (ctx, request) -> new LlmResponse("응답", new LlmUsage(13, 17)), recorder,
-                PipelineMetricsFixtures.discarding());
+                PipelineMetricsFixtures.discarding(), null);
 
         model.complete(CTX, new LlmRequest(null, "질문", 100));
 

@@ -1,7 +1,7 @@
 # AI OSS Contributor Agent
 ## Product Requirements Document
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Status:** Draft
 
 > AI가 Java/Spring 오픈소스의 GitHub Issue를 탐색하고, 기여 가능성을 분석한 뒤 코드 구현·테스트·검증을 수행하고 Draft Pull Request까지 생성하는 개발자용 OSS Contribution Agent.
@@ -609,21 +609,35 @@ erDiagram
 ### Repository
 
 ```http
-POST /api/repositories
-GET /api/repositories
-POST /api/repositories/{id}/scan
+POST   /api/repositories
+GET    /api/repositories
+POST   /api/repositories/{id}/scan              # 202 Accepted — 비동기
+GET    /api/repositories/{id}/scan              # 진행 상태 조회
+POST   /api/repositories/{id}/policy/resolution # 규약 보류를 사람이 해소한다
 ```
 
 ### Candidate
 
 ```http
-GET /api/candidates
-GET /api/candidates/{id}
-POST /api/candidates/{id}/analyze
-POST /api/candidates/{id}/implement
-POST /api/candidates/{id}/verify
-POST /api/candidates/{id}/pull-request
+GET    /api/candidates
+GET    /api/candidates/{id}
+POST   /api/candidates/{id}/select              # 게이트 1 — 사람이 고른다
+POST   /api/candidates/{id}/reject              # 선택 취소 (사람 행위로만)
+POST   /api/candidates/{id}/implement           # 게이트 2 — 아직 없다
+POST   /api/candidates/{id}/pull-request        # 게이트 3 — 아직 없다
 ```
+
+**`POST /candidates/{id}/analyze`는 없앴다.** 분석은 스캔 파이프라인의 한 단계이지
+사람이 거는 호출이 아니다. 후보는 `ANALYZED` 상태로 만들어진 뒤 §24의 게이트를 기다린다.
+
+`POST /candidates/{id}/verify`는 **열지 말지를 아직 정하지 않았다.** S-6이 세는 승인 지점은
+셋(선정·착수·PR 생성)이고 verify는 그중에 없다. 여는 것은 게이트를 하나 늘리는 일이 아니라
+**「검증을 사람이 건너뛸 수 있는가」라는 질문을 만드는 일**이라, 검증 파이프라인을 만드는
+단계에서 판단한다.
+
+> **게이트 2·3이 아직 없는 것은 일정 문제가 아니다.** 실행기 없이 열면 후보가 각각
+> `IMPLEMENTING`(탈출 트리거 없음)과 **PR 없는 종단 `PR_CREATED`**에 갇힌다.
+> 실행기와 같은 변경에서 함께 연다.
 
 ## 24. API Workflow
 
@@ -644,47 +658,104 @@ sequenceDiagram
     LLM-->>W: Candidates
     W->>DB: Save Candidates
 
+    U->>API: POST /candidates/{id}/select
+    API->>DB: SELECTED (사람이 골랐다는 기록)
+
     U->>API: POST /candidates/{id}/implement
     W->>GH: Create Fork / Branch
     W->>LLM: Implementation Plan
     LLM-->>W: Plan
-    W->>W: Modify Code
-    W->>W: Run Tests
+    W->>W: Modify Code (Sandbox)
+    W->>W: Run Tests (Sandbox)
     W->>LLM: Review Diff
     LLM-->>W: Review Result
+    W->>DB: READY_FOR_PR
+    API-->>U: 변경분 · 검증 결과 (PR 아님)
+
+    U->>API: POST /candidates/{id}/pull-request
     W->>GH: Create Draft PR
     GH-->>W: PR URL
-    W->>DB: Save PR
-    API-->>U: Draft PR
+    W->>DB: PR_CREATED
+    API-->>U: Draft PR URL
 ```
+
+### 🔴 v1.1의 이 다이어그램은 틀렸다
+
+v1.1은 **`implement` 호출 하나가 Fork → 계획 → 코딩 → 테스트 → 리뷰 → Draft PR 생성까지**
+수행하는 것으로 그려져 있었다. 그대로 구현하면 **세 번째 승인 지점이 사라지고**,
+검증되지 않은 AI 코드가 사람의 별도 승인 없이 메인테이너에게 나간다.
+
+§23은 `implement`·`pull-request`를 처음부터 **따로** 두고 있었다 — 두 절이 서로 모순이었고,
+**§23이 맞다.** 사람이 거는 호출은 셋이다.
+
+| 게이트 | 무엇을 승인하나 | 없으면 |
+|---|---|---|
+| `select` | 「이건 해볼 만하다」 — 트리아지 | 스캔이 곧바로 30분짜리 실행으로 이어진다 |
+| `implement` | 「돈과 시간을 쓴다」 — LLM 호출 + 샌드박스 최대 30분 | 자동화가 비용을 스스로 결정한다 |
+| **`pull-request`** | 「이 diff를 남의 저장소에 보낸다」 | **검증 안 된 코드가 메인테이너 큐로 나간다** |
+
+> 스케줄러는 `ANALYZED`에서 멈춘다. 그 뒤로는 **사람이 세 번 눌러야** Draft PR이 생긴다.
 
 ## 25. Security Architecture
 
+### 25.1 인증 — GitHub App도 「최소 권한」도 성립하지 않는다
+
+> v1.1은 `GitHub App → Minimal Repository Permissions → GitHub`으로 그려져 있었다.
+> **그 경로는 이 제품의 핵심 시나리오에서 동작하지 않는다.** 근거는 `open-questions.md` Q-1(#2).
+
+upstream에 Pull Request를 만들려면 **대상 저장소 소유자 수준의 권한**이 필요하다.
+
+| 방식 | Fork 생성 | **upstream에 PR 생성** | 판정 |
+|---|---|---|---|
+| fine-grained PAT | 가능 | **불가** — `403 Resource not accessible by personal access token` | 쓸 수 없다 |
+| GitHub App (설치 토큰) | 공개 저장소는 가능 | **불가** — upstream이 우리 App을 설치할 리 없다 | 쓸 수 없다 |
+| GitHub App (user-to-server OAuth) | 가능 | 가능 | 다중 사용자 확장 경로 (§29) |
+| **classic PAT (`public_repo`)** | 가능 | 가능 | **채택** |
+
+**선택지가 하나뿐이었다.** 트레이드오프 문제가 아니라 둘 중 하나만 동작한다.
+
+### 25.2 그래서 「최소 권한」이라는 방어가 없다
+
+classic PAT의 `public_repo` 스코프는 **저장소별 권한 제한이 불가능**하다.
+「원본에는 write를 주지 않는 토큰」이라는 것이 GitHub에 존재하지 않는다.
+
 ```mermaid
 flowchart TB
-    GitHub[GitHub Repository]
+    GitHub[Target OSS Repository]
     --> Clone[Repository Clone]
     Clone --> Sandbox[Isolated Docker Sandbox]
     Sandbox --> Build[Build / Test]
 
-    Sandbox -.-> Internet[Restricted Network]
+    Sandbox -.-> Network[Network - phase dependent]
     Sandbox -.-> Filesystem[Isolated Filesystem]
-    Sandbox -.-> Resources[CPU / Memory Limit]
+    Sandbox -.-> Resources[CPU / Memory / PIDs Limit]
 
-    GitHubApp[GitHub App]
-    --> Permission[Minimal Repository Permissions]
-    Permission --> GitHub
+    PAT["classic PAT (public_repo)"]
+    PAT -.->|read only| Upstream[Upstream Repository]
+    PAT --> Assert{{"Fork owner assertion"}}
+    Assert -->|owner matches| ForkPush[Push to User Fork]
+    Assert -->|mismatch| Abort[Abort - no request sent]
 ```
 
-원칙:
+**토큰은 upstream에도 write 권한을 가질 수 있다.** 대부분의 대상(`spring-projects/*` 등)은
+collaborator가 아니라 실제 권한이 없지만, **없는 권한에 기대지 않는다.** 사용자가
+collaborator인 공개 저장소를 대상으로 등록하면 그 토큰은 진짜로 write 권한을 갖는다.
 
-- GitHub Token 최소 권한
-- 원본 Repository 직접 Push 금지
-- Build는 Sandbox에서 실행
-- Network 제한
-- CPU/Memory 제한
-- 실행 Timeout
-- Secret 환경변수 직접 노출 금지
+### 25.3 원칙
+
+| 원칙 | 무엇이 강제하나 |
+|---|---|
+| **원본 저장소에 대한 방어는 권한이 아니라 코드 어설션이다** | push 직전 원격 URL의 owner가 Fork owner와 일치하는지 단언한다. **어설션 없는 push 경로는 반려** |
+| 원본 Repository 직접 Push 금지 | 위 어설션. 브랜치 삭제·force push도 Fork 안에서만 |
+| PR은 항상 draft · 자동 Merge 금지 | 생성 시 `draft: true` 고정. 설정으로도 끌 수 없다 |
+| Build는 Sandbox에서 실행 | 호스트에서 대상 저장소 빌드를 돌리는 경로는 반려 |
+| Network 제한 | **설정 키가 아니라 명령 타입이 정한다** — 워밍만 네트워크가 열리고, 대상 저장소 코드를 돌리는 실행 단계는 네트워크가 없다 |
+| CPU / Memory / PIDs 제한 · 실행 Timeout | fork 폭탄은 CPU·메모리로 막히지 않아 PIDs 상한을 함께 건다 |
+| Secret 환경변수 직접 노출 금지 | 샌드박스 명령 타입에 **환경변수를 받는 자리가 없다** |
+| Secret은 코드·로그·LLM 프롬프트 어디에도 넣지 않는다 | 송신 직전 스크럽 + 시크릿 파일 경로 배제. **둘은 서로를 대신하지 않는다** |
+
+> 이 표의 정본은 `.claude/rules/context/safety-boundaries.md`(S-1~S-6)다.
+> **PRD가 잘못된 방어를 약속하면, 그것을 믿고 어설션을 생략하는 구현이 나온다.**
 
 ## 26. Observability
 
@@ -783,6 +854,28 @@ MVP의 핵심 질문:
 
 ## 29. Future Expansion
 
+### Multi-User — GitHub App + user-to-server OAuth
+
+§25가 classic PAT을 택한 것은 **단일 사용자 전제**에서다. 사용자가 늘면 그 전제가 깨진다 —
+사람마다 PAT을 받아 보관하는 것은 「우리가 남의 전권 토큰을 들고 있는다」는 뜻이고,
+classic PAT은 저장소별 제한이 불가능하므로 그 토큰의 사고 범위가 그 사람의 **모든 공개 저장소**다.
+
+확장 경로는 **GitHub App + user-to-server OAuth** 다. 표의 세 번째 줄이었던 그 방식이고,
+upstream에 PR을 만들 수 있는 유일한 다른 수단이다 — App이 **사용자를 대행**하기 때문이다.
+
+| | 지금 (classic PAT) | 다중 사용자 (user-to-server) |
+|---|---|---|
+| 토큰 수명 | 사용자가 폐기할 때까지 | 단수명 + refresh |
+| 우리가 보관하는 것 | 전권 토큰 | App 자격증명 + 사용자별 refresh token |
+| 사용자 동의 | 토큰 발급 시 1회 (범위 표시 없음) | OAuth 화면에서 **명시적으로** |
+| 필요한 것 | 없음 | OAuth 플로우 · 콜백 · 토큰 갱신 |
+
+⚠️ **「더 안전해 보인다」는 이유로 fine-grained PAT이나 설치 토큰으로 바꾸지 않는다.**
+바꾸면 PR 생성이 403으로 죽는다 — §25.1의 표가 그 이유다.
+
+🔴 이 전환이 가능하려면 **자격증명 공급이 능력 인터페이스 뒤에 있어야** 한다.
+호출부가 토큰 문자열을 직접 들고 다니면 갈아끼울 이음매가 없다.
+
 ### Multi-Repository
 
 ```mermaid
@@ -834,3 +927,12 @@ flowchart LR
 AI는 Issue 탐색부터 Draft PR 생성까지의 반복적인 개발 workflow를 자동화하고, Build/Test/Review를 통해 비결정적인 AI 코드 생성을 검증한다.
 
 최종적으로 사용자는 AI가 생성한 변경사항을 검토한 후 실제 OSS에 제출할지 결정한다.
+
+---
+
+## 변경 이력
+
+| 버전 | 일자 | 변경 내용 |
+|---|---|---|
+| 1.2 | 2026-09-27 | **§25 Security Architecture 개정** — GitHub App · 「최소 권한」 전제가 성립하지 않음을 반영하고(Q-1 · #2), 원본 저장소에 대한 방어를 **코드 어설션**으로 정정. **§24 API Workflow 정정** — `implement` 하나가 Draft PR까지 흘려보내던 시퀀스를 승인 지점 셋으로 가름. **§23 API** 를 실제 엔드포인트와 맞춤(`select`·`reject`·`policy/resolution` 추가, `analyze` 삭제, `verify` 보류). **§29** 에 다중 사용자 인증 경로 추가 (#30) |
+| 1.1 | — | 초안 |

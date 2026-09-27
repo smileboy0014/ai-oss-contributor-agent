@@ -134,7 +134,7 @@ CPU 가 바쁠수록 핸들러가 자주 이긴다.
 | 축 | 설정 키 | 무엇을 세나 |
 |---|---|---|
 | **전송 계층** | `agent.llm.max-retries` (2) | 429 · 5xx · 연결 실패 · 타임아웃. `github.max-retries` 와 같은 성격 |
-| **파이프라인** | `agent.execution.max-retries` (3) | `CODE → VERIFY → REVIEW` 한 바퀴 — Q-6 확정. `AgentRun.attempt` 에 기록 |
+| **파이프라인** | `agent.execution.max-attempts` (3) | `CODE → VERIFY → REVIEW` 한 바퀴 — Q-6 확정. `AgentRun.attempt` 에 기록 |
 
 ⚠️ 절단(`TRUNCATED`)은 **전송 재시도 대상이 아니다.** 같은 상한으로 재전송하면 같은 지점에서
 잘려 입력 토큰만 배로 태운다. 전송 실패가 아니라 출력이 예산을 넘은 것이고, 고칠 주체는 호출자다.

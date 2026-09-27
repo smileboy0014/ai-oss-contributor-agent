@@ -16,7 +16,7 @@ import java.time.Duration;
  * @param pidsLimit 프로세스 수 상한. ⚠ <b>이슈 본문에 없지만 넣는다</b> —
  *                  CPU·메모리만으로는 fork 폭탄을 막지 못한다. 컨테이너가 살아 있는 동안
  *                  호스트 PID 공간을 고갈시킬 수 있다
- * @param timeout   실행 1회의 상한. 🔴 {@code agent.execution.max-retries} 가 세는
+ * @param timeout   실행 1회의 상한. 🔴 {@code agent.execution.max-attempts} 가 세는
  *                  <b>파이프라인 예산과 다른 축</b>이다 — Q-6
  */
 public record SandboxLimits(

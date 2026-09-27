@@ -312,7 +312,7 @@ Implementation ──> Test ──PASS──> AI Review ──PASS──> Ready 
 | 항목 | 값 |
 |---|---|
 | 세는 단위 | `CODE` → `VERIFY` → `REVIEW` **한 바퀴 = `attempt` 1** |
-| 상한 | 3 — `agent.execution.max-retries` |
+| 상한 | 3 — `agent.execution.max-attempts` |
 | 소진하면 | 후보가 `FAILED`. 그 자체가 **사람에게 넘기는 신호**다 (S-6) |
 | `AgentRun.attempt` | 그 사이클 번호. **같은 사이클의 3행이 같은 값을 갖는다** |
 | `ANALYZE`·`PLAN` | 파이프라인 재시도 없음. 실패는 즉시 `FAILED` |
@@ -342,11 +342,20 @@ append-only 로 무한정 자란다).
 (`attempt >= 0` 이 항상 참이라 즉시 `FAILED`), 정작 위험한 `10000` 은 무저항 통과한다.
 **위쪽 경계가 본체다.**
 
-⚠️ **프로퍼티 이름이 의미와 어긋난다.** `agent.execution.max-retries` 인데 값은
-**총 시도 수(attempts)** 로 쓰인다 — 1 만큼 다른 개념이다. 이름만 보고 「off-by-one 버그」로
-판단해 비교를 고치면 **위 곱셈 예산이 함께 무효**가 된다. 개명(`max-attempts`)은 그 프로퍼티를
-실제로 읽는 **#21** 에서 한다 — 지금 바꾸면 이 문서·`architecture.md`·`external-deps.md` 를
-동시에 건드려 교차 충돌이 된다.
+#### ✅ 개명 잔여도 닫혔다 — `max-retries` → `max-attempts` (2026-09-27 · #21)
+
+이 항목은 오랫동안 「키 이름이 `agent.execution.max-retries` 인데 값은 **총 시도 수**라
+1 만큼 다른 개념이다」를 경고로 달고 있었고, 개명을 **그 프로퍼티를 실제로 읽는 #21** 로
+미뤄 두었다. #21 이 루프를 만들며 닫았다.
+
+🔴 **이름만 바꿨다.** 값(3)도 비교(`attempt >= maxAttempts`)도 그대로다.
+경고가 가리키던 위험은 **개명이 아니라 비교를 고치는 것**이었다 —
+「이름이 retries 니 3회 재시도 = 총 4회겠지」로 읽고 비교를 한 칸 옮기면
+**위 곱셈 예산(3 × (1+2) = 9회)이 함께 무효**가 된다.
+
+⚠️ **전송 계층 축 둘은 `max-retries` 인 채로 남는다** — `github.max-retries` ·
+`agent.llm.max-retries`. 그쪽은 **이름과 의미가 맞다**(첫 시도를 세지 않는다).
+「일관성」을 이유로 셋을 같은 이름으로 맞추지 않는다 — 세는 것이 다르다.
 
 ---
 

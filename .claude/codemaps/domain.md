@@ -379,7 +379,7 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 
 | 항목 | 값 |
 |---|---|
-| 상한 | `agent.execution.max-retries: 3` (`application.yml`) |
+| 상한 | `agent.execution.max-attempts: 3` (`application.yml`) |
 | 단계 타임아웃 | `agent.execution.timeout-seconds: 1800` (30분) |
 | 상한 소진 | `FAILED` — **그 자체가 사람에게 넘기는 신호다** |
 
@@ -388,9 +388,13 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 판정 필드는 **`contribution_candidate.attempt`** 이고 도메인이 `MAX_ALLOWED_ATTEMPTS = 3` 을
 넘는 값을 거부한다 — 상한을 올리려면 도메인 코드를 고쳐야 하고 그것이 리뷰에 보인다(불변식 ⑧).
 
-⚠️ `application.yml` 의 키 이름은 `agent.execution.max-retries` 인데 **의미는 attempts**(총 시도 수)다.
-1 만큼 다른 개념이라 「off-by-one 버그」로 오인해 고치면 Q-6 의 곱셈 예산이 무효가 된다.
-개명은 그 프로퍼티를 실제로 읽는 #21 에서 한다.
+✅ **키 이름이 `agent.execution.max-attempts` 로 맞춰졌다** (2026-09-27 · #21).
+값은 **총 시도 수**이고 이제 이름이 그것을 말한다 — 이전 이름(`max-retries`)은 1 만큼
+다른 개념이었다. 🔴 **이름만 바꿨다** — 값(3)도 비교도 그대로다. 「retries 니 한 번 더」로
+읽고 비교를 옮기면 Q-6 의 곱셈 예산이 무효가 된다.
+
+⚠️ **전송 계층 축 둘은 `max-retries` 인 채로 남는다**(`github.max-retries` ·
+`agent.llm.max-retries`) — 그쪽은 이름과 의미가 맞다. 셋을 같은 이름으로 맞추지 않는다.
 
 **재시도마다 `agent_run` 과 `generated_change` 를 새 행으로 남긴다.** 덮어쓰면 무엇이 왜 바뀌었는지 추적이 사라진다.
 

@@ -301,7 +301,7 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
   자동 취소 경로를 만들지 않는다. 🔴 `cancelSelection` 은 **출발 상태를 직접 본다** —
   전이표에는 `ANALYZED → REJECTED` 도 있어서 맡겨 두면 시스템 판정(`rejectAsInfeasible`)과
   같은 것이 되고, 둘이 같아진 순간 다음 사람이 메서드 하나로 합친다
-- 재시도 상한(`agent.execution.max-retries`)을 코드에서 무한으로 바꾸지 않는다 — 상한 소진은 `FAILED` 이고, 그 자체가 사람에게 넘기는 신호다
+- 재시도 상한(`agent.execution.max-attempts`)을 코드에서 무한으로 바꾸지 않는다 — 상한 소진은 `FAILED` 이고, 그 자체가 사람에게 넘기는 신호다
 - 상태머신의 종단 상태(`PR_CREATED`·`REJECTED`·`FAILED`)에서 나가는 전이를 만들지 않는다
 
 **어기면** — 「사람이 최종 승인한다」는 제품 정의가 무너진다. 이 제품의 존재 이유가 사라진다.

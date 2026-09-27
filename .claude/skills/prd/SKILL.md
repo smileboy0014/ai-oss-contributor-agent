@@ -72,7 +72,7 @@ description: PRD(Product Requirements Document)를 생성합니다. 자연어 �
 | 대상 도메인 | `repository` / `issue` / `candidate` / `agent` / `pullrequest` / 공통 |
 | 후보 상태 전이 | `DISCOVERED`·`ANALYZING`·`ANALYZED`·`SELECTED`·`IMPLEMENTING`·`TESTING`·`REVIEWING`·`READY_FOR_PR`·`PR_CREATED`·`REJECTED`·`FAILED` 중 관련 전이 |
 | 외부 경계 | GitHub API(조회·Fork·push·Draft PR) / LLM API(분석·계획·코딩·리뷰) / Docker 샌드박스(빌드·테스트) |
-| 멱등 & 재시도 | 스캔 재실행 멱등 · `agent.execution.max-retries` 소진 조건 · 재시도 카운터 단위 |
+| 멱등 & 재시도 | 스캔 재실행 멱등 · `agent.execution.max-attempts` 소진 조건 · 재시도 카운터 단위 |
 | **안전 경계 접촉** | **S-1~S-6 중 어디에 닿는가** — 닿으면 해당 조항을 FR·수용 기준에 명시 |
 | 대상 저장소 규약 영향 | `RepositoryPolicy`(sign-off·이슈 참조·테스트 필수·AI 기여 허용 여부)를 바꾸거나 소비하는가 |
 | 비용·레이트리밋 | GitHub 레이트리밋 · LLM 토큰 소비에 영향이 있는가 |

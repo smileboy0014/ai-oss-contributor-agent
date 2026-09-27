@@ -11,7 +11,7 @@ package com.ossagent.agent.domain;
  * 나오는 것이 가장 흔한 시크릿 유출 사고다 (S-4).
  *
  * <p>⚠️ 여기서 말하는 재시도는 <b>전송 재시도</b>(같은 요청 재전송)다.
- * 파이프라인 재시도 상한({@code agent.execution.max-retries})과 다른 축이다 — S-6.
+ * 파이프라인 재시도 상한({@code agent.execution.max-attempts})과 다른 축이다 — S-6.
  */
 public enum LlmFailureReason {
 

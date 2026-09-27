@@ -74,7 +74,7 @@ github:
   connect-timeout: 5s
   read-timeout: 10s
   # 전송 계층 재시도 상한 — 5xx·타임아웃에만 적용된다.
-  # ⚠ agent.execution.max-retries 와 다른 축이다. 그쪽은 「구현→테스트」 루프 카운터이고
+  # ⚠ agent.execution.max-attempts 와 다른 축이다. 그쪽은 「구현→테스트」 루프 카운터이고
   #   AgentRun.attempt 에 기록된다. HTTP 5xx 한 번으로 그 카운터를 태우면
   #   후보가 코드 문제 없이 FAILED 로 떨어진다 — 재시도 단위의 정의는 미결(Q-6)
   max-retries: 2
@@ -188,7 +188,7 @@ scan:
 
 agent:
   execution:
-    max-retries: 3
+    max-attempts: 3
     timeout-seconds: 1800
   # 이슈 분석(#11) — PRD §11. LLM 호출 1건 = 후보 1건이다
   analysis:
@@ -211,7 +211,7 @@ agent:
   plan:
     # 🔴 3번째 재시도 축이다. 다른 둘과 섞지 않는다 —
     #    agent.llm.max-retries       전송 실패(429·5xx·타임아웃)
-    #    agent.execution.max-retries CODE→VERIFY→REVIEW 루프 한 바퀴
+    #    agent.execution.max-attempts CODE→VERIFY→REVIEW 루프 한 바퀴
     #    여기                         「모델이 없는 파일을 지목했다」는 의미 실패
     #    ⚠ 곱셈 예산: 2 × (1 + agent.llm.max-retries 2) = LLM 호출 최대 6회
     max-attempts: 2
@@ -270,7 +270,7 @@ agent:
     #   바인딩되지 않아 값을 낮춰도 아무 일도 일어나지 않는다 — github.read-timeout 과 같은 형식
     timeout: 120s
     # 전송 계층 재시도 상한 — github.max-retries 와 같은 축이다.
-    # ⚠ agent.execution.max-retries(3) 와는 다른 축이다. Q-6 확정:
+    # ⚠ agent.execution.max-attempts(3) 와는 다른 축이다. Q-6 확정:
     #   그쪽은 CODE→VERIFY→REVIEW 한 바퀴를 세고 AgentRun.attempt 에 기록된다.
     #   곱셈 예산 3 × (1 + 2) = 후보 1건당 대외 호출 최대 9회
     max-retries: 2

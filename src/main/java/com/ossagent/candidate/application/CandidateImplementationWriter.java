@@ -124,7 +124,7 @@ class CandidateImplementationWriter {
         //     코드가 그 제약을 말해주지 않는다 — 메트릭·이벤트는 롤백되지 않는다.
         //     「판정과 전이가 한 메서드에 묶여 어쩔 수 없다」는 **사실이 아니었다.**
         try {
-            candidate.assertCanStartImplementing(clearance, properties.maxRetries());
+            candidate.assertCanStartImplementing(clearance, properties.maxAttempts());
         } catch (RuntimeException e) {
             // 🔴 거부는 여기서 남긴다 — afterCommit 은 롤백 경로에서 돌지 않으므로
             //    거기 두면 「막았다」는 기록이 영영 남지 않는다
@@ -140,7 +140,7 @@ class CandidateImplementationWriter {
         }
 
         StatusTransition transition =
-                candidate.startImplementing(clearance, properties.maxRetries(), clock);
+                candidate.startImplementing(clearance, properties.maxAttempts(), clock);
 
         logAfterCommit(candidateId, transition);
         return new ImplementationStart(candidateId, issue, candidate.getAttempt(), transition);

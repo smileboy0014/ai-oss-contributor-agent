@@ -49,7 +49,7 @@ public interface ForkPublisher {
      * <p>돌려주는 {@link SyncedFork} 는 {@link PublishRequest} 가 <b>인자로 요구</b>하므로,
      * 결과를 보지 않고 {@link #publish} 로 넘어가는 경로가 없다.
      */
-    SyncedFork syncWithUpstream(ForkRef fork, String baseBranch);
+    SyncedFork syncWithUpstream(ForkRef fork, BaseBranch baseBranch);
 
     /**
      * 커밋을 만들고 브랜치를 가리키게 한다.

@@ -9,6 +9,7 @@ import com.ossagent.pullrequest.adapter.out.github.GitDataPayloads.TreeEntry;
 import com.ossagent.pullrequest.adapter.out.github.GitDataPayloads.TreeRequest;
 import com.ossagent.pullrequest.adapter.out.github.GitDataPayloads.UpdateRefRequest;
 import com.ossagent.pullrequest.adapter.out.github.GitHubWriteClient.Idempotency;
+import com.ossagent.pullrequest.domain.BaseBranch;
 import com.ossagent.pullrequest.domain.BranchName;
 import com.ossagent.pullrequest.domain.CommitIdentity;
 import com.ossagent.pullrequest.domain.FileChange;
@@ -161,10 +162,10 @@ public class GitHubForkPublisher implements ForkPublisher {
     // ── 동기화 ──────────────────────────────────────────────────────────
 
     @Override
-    public SyncedFork syncWithUpstream(ForkRef fork, String baseBranch) {
+    public SyncedFork syncWithUpstream(ForkRef fork, BaseBranch baseBranch) {
         try {
             JsonNode result = writeClient.post(fork, "merge-upstream",
-                    new MergeUpstreamRequest(baseBranch), Idempotency.UNSAFE);
+                    new MergeUpstreamRequest(baseBranch.value()), Idempotency.UNSAFE);
             SyncOutcome outcome = outcomeOf(result);
             log.info("Fork 동기화 fork={} base={} outcome={}", fork.fullName(), baseBranch, outcome);
             return new SyncedFork(fork, outcome);
@@ -223,9 +224,10 @@ public class GitHubForkPublisher implements ForkPublisher {
         return new PublishedBranch(fork, request.branchName(), commitSha, updated);
     }
 
-    private String readBaseCommitSha(ForkRef fork, String baseBranch) {
+    private String readBaseCommitSha(ForkRef fork, BaseBranch baseBranch) {
         GitHubResponse response = readClient.get(GitHubRequest.of(
-                "/repos/%s/%s/git/ref/heads/%s".formatted(fork.owner(), fork.name(), baseBranch)));
+                "/repos/%s/%s/git/ref/heads/%s".formatted(fork.owner(), fork.name(),
+                        baseBranch.value())));
         String sha = response.hasBody() ? text(response.body().path("object"), "sha") : null;
         if (sha == null) {
             throw new ForkPublishException(

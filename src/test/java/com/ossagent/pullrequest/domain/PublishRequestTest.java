@@ -114,7 +114,7 @@ class PublishRequestTest {
     }
 
     private static PublishRequest request(SyncedFork fork, List<FileChange> changes) {
-        return new PublishRequest(fork, "main", BranchName.of(1, "x"),
+        return new PublishRequest(fork, BaseBranch.main(), BranchName.of(1, "x"),
                 CommitMessage.from("Fix it", null, ContributionConstraints.unknown(), 1, null),
                 changes, false);
     }

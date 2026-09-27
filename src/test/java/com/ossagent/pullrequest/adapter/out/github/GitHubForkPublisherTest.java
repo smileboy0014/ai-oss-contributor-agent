@@ -10,6 +10,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.ossagent.pullrequest.domain.BaseBranch;
 import com.ossagent.pullrequest.domain.BranchName;
 import com.ossagent.pullrequest.domain.CommitMessage;
 import com.ossagent.pullrequest.domain.FileChange;
@@ -138,7 +139,7 @@ class GitHubForkPublisherTest {
         server.expect(once(), requestTo(FORK + "/merge-upstream"))
                 .andRespond(withSuccess("{\"merge_type\":\"none\"}", MediaType.APPLICATION_JSON));
 
-        SyncedFork synced = publisher.syncWithUpstream(fork(), "main");
+        SyncedFork synced = publisher.syncWithUpstream(fork(), BaseBranch.main());
 
         assertThat(synced.outcome())
                 .as("merge-upstream 은 성공 시 200 + 본문이고 「이미 최신」은 merge_type: none 이다")
@@ -152,7 +153,7 @@ class GitHubForkPublisherTest {
                 .andRespond(withSuccess("{\"merge_type\":\"fast-forward\"}",
                         MediaType.APPLICATION_JSON));
 
-        assertThat(publisher.syncWithUpstream(fork(), "main").outcome())
+        assertThat(publisher.syncWithUpstream(fork(), BaseBranch.main()).outcome())
                 .isEqualTo(SyncOutcome.MERGED);
     }
 
@@ -163,7 +164,7 @@ class GitHubForkPublisherTest {
                 .andRespond(withStatus(HttpStatus.CONFLICT).body("{}")
                         .contentType(MediaType.APPLICATION_JSON));
 
-        assertThat(publisher.syncWithUpstream(fork(), "main").outcome())
+        assertThat(publisher.syncWithUpstream(fork(), BaseBranch.main()).outcome())
                 .as("예외로 올리면 호출자가 재시도 루프에서 삼킨다. 진행 판단은 #23 이 한다")
                 .isEqualTo(SyncOutcome.CONFLICT);
     }
@@ -174,7 +175,7 @@ class GitHubForkPublisherTest {
         server.expect(once(), requestTo(FORK + "/merge-upstream"))
                 .andRespond(withStatus(HttpStatus.INTERNAL_SERVER_ERROR).body("{}"));
 
-        assertThatThrownBy(() -> publisher.syncWithUpstream(fork(), "main"))
+        assertThatThrownBy(() -> publisher.syncWithUpstream(fork(), BaseBranch.main()))
                 .as("「갈라졌다」와 「못 물어봤다」는 다르다")
                 .isInstanceOf(RuntimeException.class);
     }
@@ -291,7 +292,7 @@ class GitHubForkPublisherTest {
     }
 
     private static PublishRequest request(List<FileChange> changes, boolean allowUpdate) {
-        return new PublishRequest(new SyncedFork(fork(), SyncOutcome.MERGED), "main",
+        return new PublishRequest(new SyncedFork(fork(), SyncOutcome.MERGED), BaseBranch.main(),
                 BranchName.of(1, "x"),
                 CommitMessage.from("Fix it", null, ContributionConstraints.unknown(), 1, null),
                 changes, allowUpdate);

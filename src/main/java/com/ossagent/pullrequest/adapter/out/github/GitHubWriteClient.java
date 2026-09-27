@@ -71,6 +71,36 @@ public class GitHubWriteClient {
     private static final String FORKS_SUB_PATH = "forks";
 
     /**
+     * 🔴 하위 경로 세그먼트의 <b>허용</b> 문자 — 여집합 방어.
+     *
+     * <h2>거부목록이었다가 바꿨다</h2>
+     *
+     * <p>처음에는 {@code ""}·{@code "."}·{@code ".."} <b>셋만 거부</b>했다. 안전 리뷰가
+     * {@code %2e%2e}·{@code ..%2f}·{@code ..\..} 가 그 셋과 <b>문자열이 달라 통과</b>한다고
+     * 짚었다 — {@code testing-philosophy.md} 「거부목록으로 방어하지 않는다」 그대로다.
+     *
+     * <p>🔴 <b>실측이 이것을 승격시켰다.</b> {@code RestClient} 의
+     * {@code uriBuilder.path(...).build()} 가 {@code ..} 를 <b>정규화도 재인코딩도 하지 않는다</b> —
+     * 세그먼트 검증을 지우고 보냈더니 URI 가 그대로 나갔다:
+     *
+     * <pre>
+     * POST https://api.github.test/repos/{fork}/spring-kafka/../../spring-projects/spring-kafka/git/refs
+     * </pre>
+     *
+     * <p>서버나 중간 프록시가 정규화하면 <b>owner 어설션이 참인 채로 upstream 에 쓴다.</b>
+     * 이 검증은 belt-and-braces 가 아니라 <b>하중을 받는 방어</b>다.
+     *
+     * <p>퍼센트 인코딩 변종이 실제로 뚫리는지는 서버의 디코드 순서에 달렸고 그것은
+     * <b>남의 시스템 동작</b>이다. 거기에 기대지 않고 {@code %}·{@code \}·{@code @}·{@code :}·
+     * {@code ?}·{@code #} 를 <b>전부</b> 막는다 — 새 변종이 나와도 목록을 고칠 필요가 없다.
+     *
+     * <p>⚠️ 운영 경로는 전부 리터럴이거나 {@code BranchName}(고정 정규식)이라 이 제한이
+     * 좁아서 막히는 호출은 없다.
+     */
+    private static final java.util.regex.Pattern SAFE_SEGMENT =
+            java.util.regex.Pattern.compile("[A-Za-z0-9._~-]+");
+
+    /**
      * 이 호출을 전송 계층이 재전송해도 되는가.
      *
      * <p>🔴 <b>기본값이 없다.</b> 호출부가 매번 고르게 한다 — 새 쓰기가 추가될 때
@@ -295,11 +325,10 @@ public class GitHubWriteClient {
         if (trimmed.startsWith("/")) {
             throw new IllegalArgumentException("하위 경로는 /repos/{owner}/{name} 뒤에 붙습니다: " + trimmed);
         }
-        // 🔴 상대 참조가 섞이면 /repos/{owner}/{name} 접두어를 빠져나가 다른 저장소를 가리킨다.
-        //    그러면 owner 어설션이 참인 채로 다른 대상에 쓰게 된다 — 어설션이 우회되는 유일한 모양이다.
         for (String segment : trimmed.split("/", -1)) {
-            if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
-                throw new IllegalArgumentException("하위 경로에 빈 세그먼트나 상대 참조가 있습니다: " + trimmed);
+            if (!SAFE_SEGMENT.matcher(segment).matches() || segment.equals(".")
+                    || segment.equals("..")) {
+                throw new IllegalArgumentException("하위 경로 세그먼트가 허용 문자를 벗어났습니다: " + trimmed);
             }
         }
         return trimmed;

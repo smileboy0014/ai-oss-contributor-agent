@@ -96,6 +96,65 @@ class GitHubWriteClientTest {
     }
 
     @Test
+    @DisplayName("경로 탈출에 쓰일 수 있는 하위 경로는 전부 전송 전에 거부된다")
+    void 하위_경로는_전송_전에_거부된다_S1() {
+        // 🔴 축을 두 번 고쳤다. 기록해 둔다 — 같은 실수를 반복하지 않기 위해서다.
+        //
+        //  1차: 「../ 를 거부한다」 — 내가 생각해 낸 형태만 봤다 (요구 4 입력 도달 실패)
+        //  2차: 「보낸 URI 가 /repos/{fork}/ 로 시작한다」 — 🔴 **이 축이 틀렸다.**
+        //       %2e%2e 가 실려 나가도 문자열은 접두어로 시작하므로 통과한다.
+        //       서버가 디코드 후 정규화하면 그때 탈출이고, 우리는 그 시점을 못 본다.
+        //  3차(지금): 「전송 자체가 일어나지 않는다」 — 서버 동작에 기대지 않는다.
+        //
+        // 🔴 실측 근거: RestClient 의 uriBuilder.path(...).build() 는 `..` 를 정규화도
+        //    재인코딩도 하지 않는다. 세그먼트 검증을 지우고 보냈더니 URI 가 그대로 나갔다.
+        //    그러므로 이 검증은 belt-and-braces 가 아니라 하중을 받는 방어다.
+        String[] hostile = {
+                "../../spring-projects/spring-kafka/git/refs",   // 리터럴 상대 참조
+                "%2e%2e/%2e%2e/spring-projects/x",               // 퍼센트 인코딩된 ..
+                "..%2f..%2fspring-projects/x",                   // 인코딩된 구분자
+                "git/refs/..%5c..%5cx",                          // 인코딩된 백슬래시
+                "git\\..\\..\\x",                                // 생 백슬래시
+                "http://evil.test/x",                            // 절대 URL
+                "x@evil.test/y",                                 // authority 치환 시도
+                "git/refs#frag",                                 // 프래그먼트
+                "git/refs?owner=spring-projects",                // 쿼리
+                "git/./refs",                                    // 점 세그먼트
+                "git//refs",                                     // 빈 세그먼트
+        };
+
+        // 🔴 어떤 요청도 기대하지 않는다 — 하나라도 나가면 MockRestServiceServer 가 터진다
+        for (String subPath : hostile) {
+            assertThatThrownBy(() -> client.post(fork(), subPath, "{}", Idempotency.UNSAFE))
+                    .as("입력=%s — 서버의 디코드·정규화 순서에 기대지 않는다. 남의 시스템 동작이다",
+                            subPath)
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+
+        server.verify();   // 전송 0건
+    }
+
+    @Test
+    @DisplayName("정상 하위 경로는 통과한다 — 좁혀서 정상 호출이 막히지 않는다")
+    void 정상_하위_경로는_통과한다() {
+        // 🔴 과차단 대조. 이것이 없으면 「전부 거부」로 고장 나도 위 테스트가 초록이다.
+        //    운영이 실제로 쓰는 모양 전부를 여기 적는다.
+        String[] legit = {"git/blobs", "git/trees", "git/commits", "git/refs",
+                "git/refs/heads/oss-agent/issue-12-fix-it", "merge-upstream"};
+
+        for (String subPath : legit) {
+            server.expect(once(), requestTo(BASE_URL + "/repos/" + FORK_OWNER + "/spring-kafka/"
+                            + subPath))
+                    .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        }
+        for (String subPath : legit) {
+            client.post(fork(), subPath, "{}", Idempotency.UNSAFE);
+        }
+
+        server.verify();
+    }
+
+    @Test
     @DisplayName("createFork 만 owner 어설션을 거치지 않는다")
     void createFork만_upstream_경로로_나간다_S1() {
         server.expect(once(), requestTo(BASE_URL + "/repos/spring-projects/spring-kafka/forks"))

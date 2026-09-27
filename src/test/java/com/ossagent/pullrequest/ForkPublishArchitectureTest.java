@@ -106,19 +106,62 @@ class ForkPublishArchitectureTest {
 
     // ── S-2 ─────────────────────────────────────────────────────────────
 
+    /**
+     * 🔴 <b>쓰기가 닿는 GitHub 엔드포인트를 화이트리스트로 고정한다</b> — S-2.
+     *
+     * <p>⚠️ 초안은 {@code mergePullRequest}·{@code readyForReview}·{@code requestReviewers} 라는
+     * <b>우리가 만든 적 없는 메서드 이름</b>을 찾았다. 실제 S-2 위반의 모양은
+     * {@code writeClient.post(fork, "pulls", body, UNSAFE)} 이고 <b>그 가드에 걸리지 않는다</b> —
+     * 위반 표본이 0건이라 영구 초록이었고, 「막혔다」가 아니라 <b>검사 축이 실제 입력 공간에
+     * 닿지 않는</b> 것이었다({@code testing-philosophy.md} 가드 요구 4).
+     *
+     * <p>축을 <b>subPath 리터럴</b>로 옮겼다. 새 엔드포인트를 쓰면 여기 등록해야 하고,
+     * 등록하는 순간 <b>리뷰가 그것을 본다.</b>
+     */
+    private static final Set<String> ALLOWED_SUB_PATHS = Set.of(
+            "forks", "merge-upstream",
+            "git/blobs", "git/trees", "git/commits", "git/refs", "git/refs/heads/");
+
+    /** {@code writeClient.post(fork, "git/refs", …)} 의 두 번째 인자 리터럴을 뽑는다. */
+    private static final java.util.regex.Pattern SUB_PATH_LITERAL = java.util.regex.Pattern.compile(
+            "(?:writeClient|client)\\.(?:post|patch|delete)\\([^,;]+,\\s*\"([^\"]*)\"");
+
     @Test
-    @DisplayName("PR 생성·머지·ready 전환 경로가 존재하지 않는다")
-    void PR_경로가_없다_S2() {
+    @DisplayName("쓰기가 닿는 엔드포인트가 화이트리스트를 벗어나지 않는다")
+    void 쓰기_엔드포인트가_화이트리스트_안이다_S2() throws Exception {
+        java.nio.file.Path adapter = java.nio.file.Path.of(
+                "src/main/java/com/ossagent/pullrequest/adapter/out/github/GitHubForkPublisher.java");
+        String source = java.nio.file.Files.readString(adapter);
+
+        Set<String> used = new TreeSet<>();
+        var matcher = SUB_PATH_LITERAL.matcher(source);
+        while (matcher.find()) {
+            used.add(matcher.group(1));
+        }
+
+        // 🔴 모수 단언 — 하나도 못 찾았으면 정규식이 구현과 어긋난 것이고, 그 상태에서
+        //    「위반 없음」은 아무 의미가 없다
+        assertThat(used)
+                .as("subPath 리터럴을 하나도 찾지 못했다 — 이 가드가 구현을 보고 있지 않다")
+                .isNotEmpty();
+        assertThat(used)
+                .as("Draft PR 생성(pulls)·머지는 세 번째 승인 게이트 뒤에 있어야 한다 — #23. "
+                        + "여기서 만들면 게이트가 사라지고 S-2 까지 뚫린다")
+                .allSatisfy(subPath -> assertThat(ALLOWED_SUB_PATHS).contains(subPath));
+    }
+
+    @Test
+    @DisplayName("PR 생성·머지·ready 전환을 부르는 타입이 없다")
+    void PR_호출이_없다_S2() {
         Set<String> offenders = PRODUCTION.stream()
                 .filter(type -> type.getPackageName().startsWith(BASE_PACKAGE + ".pullrequest"))
                 .filter(ForkPublishArchitectureTest::mentionsPullRequestApi)
                 .map(JavaClass::getName)
                 .collect(Collectors.toCollection(TreeSet::new));
 
-        assertThat(offenders)
-                .as("Draft PR 생성은 세 번째 승인 게이트 뒤에 있어야 한다 — #23. "
-                        + "여기서 만들면 게이트가 사라지고 S-2 까지 뚫린다")
-                .isEmpty();
+        // ⚠️ 이것만으로는 부족하다 — 위 화이트리스트가 본체다. 여기는 라이브러리 기반
+        //    PR 생성(hub4j 류)이 나중에 들어올 때를 위한 보조다
+        assertThat(offenders).isEmpty();
     }
 
     // ── 트랜잭션 ────────────────────────────────────────────────────────

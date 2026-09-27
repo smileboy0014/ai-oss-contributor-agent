@@ -85,7 +85,7 @@ public class FakeForkPublisher implements ForkPublisher {
     }
 
     @Override
-    public SyncedFork syncWithUpstream(ForkRef fork, String baseBranch) {
+    public SyncedFork syncWithUpstream(ForkRef fork, BaseBranch baseBranch) {
         return new SyncedFork(fork, syncOutcome);
     }
 

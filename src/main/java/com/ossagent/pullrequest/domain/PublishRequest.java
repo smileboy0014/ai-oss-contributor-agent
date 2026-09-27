@@ -20,14 +20,14 @@ import java.util.Set;
  * <p>잘못된 요청은 <b>애초에 존재할 수 없는 편</b>이 낫다.
  *
  * @param fork        쓰기 대상 + 동기화 결과 — S-1 · D-4b
- * @param baseBranch  이 커밋이 올라갈 기준 브랜치 (보통 {@code main})
+ * @param baseBranch  이 커밋이 올라갈 기준 브랜치 — 경로에 조립되므로 값 타입이다
  * @param branchName  만들거나 갱신할 브랜치
  * @param message     대상 저장소 규약을 따른 커밋 메시지 — S-5
  * @param changes     올릴 변경. 비어 있을 수 없다
  * @param allowUpdate 🔴 이미 있는 브랜치를 <b>덮어쓸 것인가.</b> 기본은 {@code false} 다 —
  *                    {@code true} 는 재시도 경로에서만 <b>명시적으로</b> 준다
  */
-public record PublishRequest(SyncedFork fork, String baseBranch, BranchName branchName,
+public record PublishRequest(SyncedFork fork, BaseBranch baseBranch, BranchName branchName,
                              CommitMessage message, List<FileChange> changes,
                              boolean allowUpdate) {
 
@@ -47,10 +47,9 @@ public record PublishRequest(SyncedFork fork, String baseBranch, BranchName bran
         if (fork == null) {
             throw new UpstreamWriteAttemptException("쓰기 대상 Fork 가 없습니다");
         }
-        if (baseBranch == null || baseBranch.isBlank()) {
-            throw new IllegalArgumentException("기준 브랜치가 비어 있습니다");
+        if (baseBranch == null) {
+            throw new IllegalArgumentException("기준 브랜치가 없습니다");
         }
-        baseBranch = baseBranch.trim();
         if (branchName == null) {
             throw new IllegalArgumentException("브랜치 이름이 없습니다");
         }

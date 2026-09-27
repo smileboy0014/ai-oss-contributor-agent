@@ -1,8 +1,10 @@
 package com.ossagent.config;
 
 import com.ossagent.pullrequest.adapter.out.github.ForkPublishProperties;
+import com.ossagent.pullrequest.adapter.out.github.GitHubDraftPrPublisher;
 import com.ossagent.pullrequest.adapter.out.github.GitHubForkPublisher;
 import com.ossagent.pullrequest.adapter.out.github.GitHubWriteClient;
+import com.ossagent.pullrequest.domain.DraftPrPublisher;
 import com.ossagent.pullrequest.domain.ForkPublisher;
 import com.ossagent.support.ExternalAdapter;
 import com.ossagent.support.github.GitHubApiClient;
@@ -48,15 +50,31 @@ public class ForkPublishConfig {
     }
 
     /**
-     * 🔴 <b>이 빈에 호출자가 없다 — 의도다.</b>
+     * ✅ <b>#23 이 호출자를 붙였다.</b> 원래 이 빈에는 호출자가 없었고, 그것이 의도였다 —
+     * 배선이 <b>세 번째 승인 게이트 뒤</b>에 와야 했기 때문이다.
      *
-     * <p>배선은 #23 이 세 번째 승인 게이트({@code POST /api/candidates/{id}/pull-request})
-     * <b>뒤에</b> 놓는다. 지금 스케줄러나 {@code implement} 경로에서 부르게 하면 그 시점에
-     * S-6 위반이다 — #16 의 {@code PlanImplementationUseCase.build()} 와 같은 처리다.
+     * <p>지금 유일한 호출자는 {@code CreateDraftPrUseCase} 이고 그것은
+     * {@code POST /api/candidates/{id}/pull-request} 뒤에 있다. 스케줄러나
+     * {@code implement} 경로에서 부르면 그 시점에 S-6 위반이고,
+     * {@code ApprovalGateArchitectureTest} 가 「승인 UseCase 를 web 어댑터만 부른다」를
+     * 허용목록으로 고정한다.
      */
     @Bean
     public ForkPublisher forkPublisher(GitHubApiClient readClient, GitHubWriteClient writeClient,
             ForkPublishProperties forkProperties, Clock clock) {
         return new GitHubForkPublisher(readClient, writeClient, forkProperties, clock);
+    }
+
+    /**
+     * 🔴 <b>Draft PR 생성 — 이 제품이 대상 저장소에 남기는 유일한 글</b> (S-2).
+     *
+     * <p>{@link GitHubWriteClient} 를 공유한다. 별도 클라이언트를 만들면
+     * {@code ForkPublishArchitectureTest.쓰기_표면은_한_곳이다_S1} 이 빨개지고, 그것이
+     * 빨개지는 것이 옳다 — 쓰기 표면이 늘면 owner 어설션을 거치지 않는 경로가 생긴다.
+     */
+    @Bean
+    public DraftPrPublisher draftPrPublisher(GitHubApiClient readClient,
+            GitHubWriteClient writeClient) {
+        return new GitHubDraftPrPublisher(readClient, writeClient);
     }
 }

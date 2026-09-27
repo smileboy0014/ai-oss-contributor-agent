@@ -29,8 +29,24 @@ upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md
 | 수단 | **Git Data API** (blob → tree → commit → ref). JGit 을 쓰지 않는다 |
 | 왜 JGit 이 아닌가 | 🔴 **어설션 지점**이다. JGit 은 push 대상이 원격 URL **문자열**이라 S-1 어설션이 URL 파싱(스킴·`user@`·포트·`.git`)이 되고, Git Data API 는 owner 가 **인자**라 문자열 비교 한 줄이다. **유일한 방어를 정규식 위에 세우지 않는다** |
 | 어설션 | `(owner, name, subPath)` 로 받아 **매 호출 직전** 단언하고 **자기가 경로를 조립**한다. 경로를 통째로 받으면 호출자가 조립해 우회할 수 있다 |
-| 유일한 예외 | `createFork` — `POST /repos/{upstream}/forks`. upstream **히스토리를 바꾸지 않고** 내 계정에 저장소를 만든다. `subPath` 가 리터럴이라 다른 경로를 만들 수 없다 |
+| 어설션 면제 | **둘이다** (2026-09-27 · #23) — 아래 |
 | 레이트리밋 | 🔴 **읽기 클라이언트와 예산을 공유**한다(`GitHubRateLimitBudget`). 갈리면 읽기가 태운 예산을 쓰기가 몰라 「임계 미만이면 호출하지 않는다」(#8)가 무력해진다 |
+
+#### 🔴 어설션 면제는 둘이고, 둘의 성격이 다르다 (2026-09-27 · #23)
+
+`assertForkOwner` 를 거치지 않고 전송하는 메서드다. **셋이 되면 `ForkPublishArchitectureTest` 가 빨개진다.**
+
+| 메서드 | upstream 히스토리를 바꾸나 | 우회 경로가 되나 | 되돌릴 수 있나 |
+|---|---|---|---|
+| `createFork` (`POST /forks`) | ❌ 내 계정에 저장소를 만든다 | ❌ `subPath` 가 리터럴 | ✅ Fork 를 지운다 |
+| **`createDraftPullRequest`** (`POST /pulls`) | ❌ 커밋·브랜치·태그를 건드리지 않는다 | ❌ `subPath` 리터럴 + 좌표가 `RepositoryCoordinates` 값 타입 + payload 가 `draft` 를 **상수로** 든다 | 🔴 **부분적으로만** — PR 은 닫아도 **메일 알림이 회수되지 않는다** |
+
+🔴 **셋째 행이 다르다.** 그래서 PR 생성의 실질 방어는 면제 근거가 아니라 **호출 위치**다 —
+사람이 누르는 승인 게이트(`POST /api/candidates/{id}/pull-request`) 뒤에만 놓이고,
+`ApprovalGateArchitectureTest` 가 그것을 구조로 고정한다. **면제보다 게이트가 본체다.**
+
+⚠️ 새 면제를 추가할 때 **세 행을 모두 통과하는지 먼저 본다.** 통과하지 못하면 면제가 아니라
+게이트를 함께 만들어야 한다는 뜻이다.
 
 ⚠️ **비멱등 쓰기에 전송 재시도를 걸지 않는다.** 읽기 타임아웃은 요청이 **도달했는지 알 수 없는**
 실패라, ref 갱신·fork 생성·merge 를 재전송하면 상태가 두 번 바뀐다. 호출마다 `Idempotency` 를
@@ -39,7 +55,7 @@ upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md
 | 축 | 재시도 | 왜 |
 |---|---|---|
 | blob · tree · commit | ✅ `SAFE` | 결과 sha 를 쓰는 것은 **마지막 응답 하나뿐**이고 중간 객체는 어떤 ref 도 가리키지 않는다.<br>⚠️ commit 해시에 `author.date` 가 들어가므로 **날짜를 고정**해야 진짜 멱등이다 |
-| ref · forks · merge-upstream | 🔴 `UNSAFE` | 상태 변경이다 |
+| ref · forks · merge-upstream · **pulls** | 🔴 `UNSAFE` | 상태 변경이다. PR 을 재전송하면 **남의 저장소에 두 개가 열린다** |
 
 ⚠️ **`merge-upstream` 은 상태코드가 아니라 본문 `merge_type` 으로 판정한다.** 성공은 200 + 본문이고
 「이미 최신」은 `merge_type: none` 이다. 상태코드로 판정하면 테스트 스텁이 실제와 다른 응답을

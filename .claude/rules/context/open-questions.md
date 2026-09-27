@@ -260,20 +260,29 @@ PRD **§23** 은 `implement`·`verify`·`pull-request` 를 **따로** 두는데,
 
 전이 표와 게이트 3개는 [`../../codemaps/domain.md`](../../codemaps/domain.md) 가 정본이다.
 
-#### ✅ 구현 — 셋 중 **하나만** 열었다 (2026-09-26 · #24)
+#### ✅ 구현 — 셋 중 **둘이 열렸다** (2026-09-27 개정 · #23)
 
-`POST /api/candidates/{id}/select` 와 `POST /api/candidates/{id}/reject` 가 열렸다.
-**`implement`·`pull-request` 는 열지 않았다.**
+| 게이트 | 상태 |
+|---|---|
+| `POST /api/candidates/{id}/select` · `…/reject` | ✅ #24 (2026-09-26) |
+| **`POST /api/candidates/{id}/pull-request`** | ✅ **#23** (2026-09-27) |
+| `POST /api/candidates/{id}/implement` | ⬜ **여전히 404** — #18 |
 
-「아직 안 만든 것」이 아니라 **지금 만들면 후보가 빠져나올 수 없는 상태에 갇히기 때문**이다.
+미뤘던 이유는 일정이 아니라 **지금 만들면 후보가 빠져나올 수 없는 상태에 갇히기
+때문**이었다. #23 이 그중 하나의 조건을 없앴다.
 
-| 엔드포인트 | 지금 열면 | 함께 열 이슈 |
+| 엔드포인트 | 열면 어땠나 | 해소됐나 |
 |---|---|---|
-| `implement` | `IMPLEMENTING` 에서 **나갈 트리거가 없다** — 실행기가 없으니 거기 멈춘다 | #18 |
-| `pull-request` | PR 을 만들 코드가 없어 **PR 없이 종단 `PR_CREATED`** 가 된다. 종단이라 나올 수도 없다 — S-2 | #23 |
+| `implement` | `IMPLEMENTING` 에서 **나갈 트리거가 없다** | ❌ 실행기(#18)가 아직 없다 |
+| `pull-request` | PR 을 만들 코드가 없어 **PR 없이 종단 `PR_CREATED`** | ✅ **생성기와 같은 PR 에서 열었다** |
 
-`CandidateApprovalApiTest` 가 **둘 다 404 인 것을 회귀로 고정**한다. 열려면 그 테스트를
-함께 고쳐야 하고, 그것이 「실행기와 같은 PR 에서 연다」를 강제한다.
+🔴 #23 이 조건을 없앤 방식은 둘이고 **함께 서야 한다** — ① 대외 호출이 **성공한 뒤에만**
+쓰기 트랜잭션을 연다 ② `markPrCreated` 가 **`PullRequest` 를 인자로 요구**해 PR 없이
+전이하는 것이 표현 불가능하다.
+
+⚠️ `CandidateApprovalApiTest` 는 이제 **`implement` 만** 404 로 고정하고, `pull-request` 는
+**409**(`READY_FOR_PR` 이 아니다)를 고정한다 — **404 가 아니라 409 라는 것이
+「문이 열렸다」의 증거**다. 「셋 다 열렸다」로 뭉뚱그리지 않는다.
 
 ⚠️ 취소 엔드포인트는 **`POST …/reject`** 다. `DELETE …/select` 가 아니다 — 지우는 것이
 아니라 종단으로 전이시키는 행위이고, `DELETE` 로 두면 「선정을 되돌린다 → `ANALYZED` 복귀」로
@@ -637,3 +646,4 @@ Q-1 의 근거 3개를 LLM 에 대보면 하나도 서지 않는다.
 | 2026-09-25 | smileboy0014 | Q-6 잔여 항목 확정 — 불변식 ⑧ 판정 필드는 `candidate.attempt` · 절대 상한은 도메인 상수 (#12) |
 | 2026-09-26 | smileboy0014 | Q-3 판단 기록 — 비동기로 흡수하고 열어 둔다. 닫을 때 드는 비용 3가지를 명시 (#14) |
 | 2026-09-27 | smileboy0014 | Q-1·Q-5 의 **PRD 개정 숙제 해소** — PRD v1.2 (#30) |
+| 2026-09-27 | smileboy0014 | Q-5 구현 갱신 — 승인 게이트 셋 중 **둘**이 열렸다. PR 생성이 생성기와 함께 (#23) |

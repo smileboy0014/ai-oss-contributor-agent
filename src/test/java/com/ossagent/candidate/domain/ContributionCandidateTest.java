@@ -61,6 +61,22 @@ class ContributionCandidateTest {
         return candidate;
     }
 
+    /** {@code READY_FOR_PR} 까지 끌고 온다 — PR 생성 게이트의 출발 상태. */
+    private static ContributionCandidate readyForPr() {
+        ContributionCandidate candidate = implementing();
+        candidate.startTesting(clock());
+        candidate.startReview(clock());
+        candidate.markReadyForPr(clock());
+        return candidate;
+    }
+
+    /** 이 후보의 Draft PR. 🔴 {@code draftFor} 가 유일한 생성 경로다 — S-2. */
+    private static PullRequest draftPrFor(ContributionCandidate candidate) {
+        return PullRequest.draftFor(candidate, "https://github.com/fork-owner/spring-kafka",
+                "oss-agent/issue-42-fix", 7, "https://github.com/upstream/spring-kafka/pull/7",
+                clock());
+    }
+
     // ─────────────────────────────── 생성 ───────────────────────────────
 
     @Test
@@ -95,13 +111,81 @@ class ContributionCandidateTest {
         prCreated.startTesting(clock());
         prCreated.startReview(clock());
         prCreated.markReadyForPr(clock());
-        prCreated.markPrCreated(clock());
+        prCreated.markPrCreated(draftPrFor(prCreated), clock());
 
         assertThat(prCreated.isTerminal()).isTrue();
         assertThatThrownBy(() -> prCreated.startImplementing(clearance(), MAX_ATTEMPTS, clock()))
                 .as("PR_CREATED 후보가 다시 구현 루프에 들어가면 같은 PR 을 덮어쓴다 — 불변식 ①")
                 .isInstanceOf(CandidateTransitionException.class);
         assertThatThrownBy(() -> prCreated.fail(clock()))
+                .isInstanceOf(CandidateTransitionException.class);
+    }
+
+    // ─────────────────────── 불변식 ③ PR 행 존재 (#23) ───────────────────────
+
+    @Test
+    @DisplayName("PR 없이 PR_CREATED 로 갈 수 없다")
+    void PR_없이_종단으로_갈_수_없다_S2() {
+        ContributionCandidate candidate = readyForPr();
+
+        assertThatThrownBy(() -> candidate.markPrCreated(null, clock()))
+                .as("종단이라 「PR 이 있다고 기록됐는데 없는」 후보는 빠져나올 수 없다")
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(candidate.getStatus())
+                .as("거부된 호출이 애그리거트를 반쯤 바꿔 놓지 않는다")
+                .isEqualTo(CandidateStatus.READY_FOR_PR);
+        assertThat(candidate.getPullRequest()).isNull();
+    }
+
+    @Test
+    @DisplayName("남의 후보의 PR 은 붙일 수 없다")
+    void 남의_후보의_PR_은_붙일_수_없다_S2() {
+        ContributionCandidate mine = readyForPr();
+        ContributionCandidate other = readyForPr();
+
+        assertThatThrownBy(() -> mine.markPrCreated(draftPrFor(other), clock()))
+                .as("UNIQUE(candidate_id) 로는 안 잡힌다 — 행은 하나씩이고 소유만 어긋난다")
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("markPrCreated 는 양방향을 함께 채운다 — 같은 트랜잭션에서 보여야 한다")
+    void markPrCreated_는_양방향을_채운다_S2() {
+        ContributionCandidate candidate = readyForPr();
+        PullRequest pullRequest = draftPrFor(candidate);
+
+        candidate.markPrCreated(pullRequest, clock());
+
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.PR_CREATED);
+        assertThat(candidate.getPullRequest())
+                .as("mappedBy 역방향이라 여기서 채우지 않으면 같은 트랜잭션에서 null 이다")
+                .isSameAs(pullRequest);
+        assertThat(pullRequest.getStatus())
+                .as("draft 외의 상태가 존재하지 않는다 — S-2")
+                .isEqualTo(PullRequest.Status.DRAFT);
+    }
+
+    @Test
+    @DisplayName("상태가 틀리면 PR 을 받고도 전이하지 않는다")
+    void 상태가_틀리면_PR_을_받아도_전이하지_않는다_S6() {
+        ContributionCandidate candidate = implementing();
+
+        assertThatThrownBy(() -> candidate.markPrCreated(draftPrFor(candidate), clock()))
+                .isInstanceOf(CandidateTransitionException.class);
+        assertThat(candidate.getPullRequest())
+                .as("전이가 먼저다 — 거부되면 필드를 하나도 건드리지 않는다")
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("두 번째 PR 생성은 거부된다 — 승인은 한 번 일어난 사건이다")
+    void 두_번째_PR_생성은_거부된다_S6() {
+        ContributionCandidate candidate = readyForPr();
+        candidate.markPrCreated(draftPrFor(candidate), clock());
+
+        assertThatThrownBy(() -> candidate.markPrCreated(draftPrFor(candidate), clock()))
+                .as("「이미 그 상태니 성공」으로 뭉개면 「사람이 한 번 승인했다」를 셀 수 없다")
                 .isInstanceOf(CandidateTransitionException.class);
     }
 

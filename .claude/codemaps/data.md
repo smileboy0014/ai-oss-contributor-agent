@@ -289,7 +289,7 @@ stage enum 문자열에 묶이기 때문이다.
 |---|---|---|
 | `id` | BIGINT PK | |
 | `candidate_id` | BIGINT FK **UNIQUE** | 후보당 PR 1건 |
-| `fork_url` | VARCHAR NOT NULL | **쓰기 대상은 Fork 뿐** — S-1 |
+| `fork_url` | VARCHAR NOT NULL | **쓰기 대상은 Fork 뿐** — S-1.<br>🔴 **조립하지 않고 GitHub 응답(`head.repo.html_url`)에서 읽는다**(#23) — fork 이름이 `{name}-1` 로 만들어지는 경우가 있고, 조립한 값은 우리의 **믿음**이지 관측이 아니다. 증거는 관측이어야 한다 |
 | `branch_name` | VARCHAR | |
 | `github_pr_number` | INT | |
 | `pr_url` | VARCHAR | |
@@ -298,6 +298,20 @@ stage enum 문자열에 묶이기 때문이다.
 
 멱등키 — **`UNIQUE(candidate_id)`** · 보조로 `UNIQUE(fork_url, branch_name)`.
 없으면 재시도 시 같은 후보로 PR 이 두 개 열린다. **남의 저장소에 중복 PR 을 여는 것은 스팸으로 취급된다.**
+
+✅ **#23 이 이 테이블의 첫 쓰기 경로를 만들었다.** 그전까지는 행이 조회 픽스처에만 있었다.
+
+🔴 **멱등은 이 제약 하나가 아니라 셋이 함께 선다** — 하나만 믿으면 창이 남는다.
+
+| 층 | 무엇을 막나 |
+|---|---|
+| 상태 전이(`READY_FOR_PR → PR_CREATED`) + `@Version` | 두 번째 **승인**. 종단이라 두 번째 호출은 409 다 |
+| `DraftPrPublisher.findOpen` | upstream 에 **이미 열린 PR** — 새로 만들지 않고 붙인다 |
+| `UNIQUE(candidate_id)` | 위 둘의 **창**을 빠져나온 동시 요청 |
+
+⚠️ **생성 경로는 `PullRequest.draftFor` 하나**이고, 그것을 부르는 곳이 승인 경로뿐임을
+`ApprovalGateArchitectureTest` 가 고정한다 — PR 생성 승인의 **증거**는 필드가 아니라
+**이 행의 존재**인데, 행은 어느 경로로 만들어졌는지를 스스로 말하지 않기 때문이다.
 
 ---
 

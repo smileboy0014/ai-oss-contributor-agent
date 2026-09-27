@@ -158,7 +158,13 @@ fi
 if ! printf 'caf\xe9 SENTINELAAAABBBBCCCCDDDD\n' | grep -qE 'SENTINEL[A-Z]{16}'; then
   echo "❌ 게이트가 고장났습니다 — grep 이 부정한 바이트가 섞인 줄을 건너뜁니다."
   echo "   그 줄에 있는 토큰·키는 스캔해도 히트 0건이 되어 그대로 커밋됩니다."
-  echo "   LC_ALL=C 가 이 grep 에 먹는지 확인하세요 (상속: ${INHERITED_LOCALE})."
+  # 🔴 **구현을 함께 찍는다.** 이 점검이 발화하는 현실적 원인은 둘인데
+  #   (LC_ALL 이 안 먹음 · grep 구현이 애초에 그 입력을 안 봄) 로케일만 안내하면
+  #   ugrep 경우를 **오진**한다 — 로케일을 아무리 만져도 풀리지 않는다.
+  echo "   grep: ${GREP_IMPL}"
+  echo "   상속 로케일: ${INHERITED_LOCALE}"
+  echo "   → LC_ALL=C 가 이 grep 에 먹는지, 또는 그 구현이 부정 바이트 입력을"
+  echo "     통째로 건너뛰지 않는지 확인하세요 (ugrep 계열이 그렇습니다)."
   exit 1
 fi
 
@@ -200,6 +206,11 @@ scan_pattern() {
   local f="$4"
 
   local hits
+  # 🕳 LC_ALL=C 가 **면제를 넓히는** 유일한 경로다 (#75 리뷰).
+  #   한 줄이 `진짜토큰 → 0xE9 → 마커` 순서면, 이전에는 마커 매칭이 버려져 위반으로
+  #   **찍혔고** 지금은 면제된다. 그러나 그 차단은 이 PR 이 고치는 버그의 **부작용**이었고,
+  #   지금 동작이 #66 이 정한 「면제는 줄 단위」 그대로다.
+  #   ⚠ 키 파일 포맷에는 닿지 않는다 — PEM·SA JSON 검사는 이 면제를 받지 않는다.
   hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
   if [ -n "$hits" ]; then
     while IFS= read -r line; do

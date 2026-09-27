@@ -1,6 +1,7 @@
 package com.ossagent.support.secret;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -156,11 +157,43 @@ class SecretScanScriptTest {
     }
 
     @Test
+    @DisplayName("🔴 양성 대조 — 이 환경에서 구멍이 실제로 재현된다")
+    void 물림의_전제가_이_환경에서_성립한다_S4(@TempDir Path repo) throws Exception {
+        // 🔴 「초록의 원인이 둘이다」를 가른다 — 아래 회귀들이 초록인 이유가
+        //    **수정이 막아서**인지 **애초에 구멍이 없어서**인지 구분되지 않으면 공허하다.
+        //
+        //    이 검사는 게이트를 **끈 사본**(로케일 고정 제거 + 자가 점검 무력화)을
+        //    UTF-8 로케일로 돌린다. 여기서 「통과」가 나와야 구멍이 살아 있는 것이고,
+        //    그래야 아래 회귀의 「차단」이 수정의 공로가 된다.
+        //
+        //    ⚠ 「빨개지면 나쁨」이 아니다 — 이 환경의 grep·로케일 조합에 구멍이 없다는
+        //    뜻이고(ugrep · musl 의 C 폴백 등), 그때는 **명시적으로 skip** 한다.
+        //    조용히 초록이 되는 것만 막으면 된다.
+        writeWithInvalidByte(repo.resolve("note.txt"), "caf", " " + SAMPLE_TOKEN + "\n");
+
+        ScanResult unguarded = scan(repo, "note.txt", SecretScanScriptTest::disableLocaleGuard,
+                UTF8_LOCALE);
+
+        assumeTrue(!unguarded.blocked(), """
+                이 실행 환경에서는 #75 의 구멍이 재현되지 않는다 — 아래 회귀들은 물림을
+                증명하지 못하고 「원래 잡히던 것을 계속 잡는다」까지만 본다.
+                grep 구현이 부정 바이트 입력을 통째로 건너뛰거나(ugrep),
+                C.UTF-8 이 없어 C 로 폴백했을 수 있다. 출력:
+                %s""".formatted(unguarded.output()));
+
+        assertThat(unguarded.output())
+                .as("구멍이 재현됐다면 게이트는 **스캔하고 0건**을 냈어야 한다 — 파일이 빠진 것이 아니다")
+                .contains("시크릿 검사 통과");
+    }
+
+    @Test
     @DisplayName("토큰과 같은 줄에 비-UTF-8 바이트가 있어도 차단된다")
     void 같은_줄의_비UTF8_바이트가_토큰을_가리지_못한다_S4(@TempDir Path repo) throws Exception {
         writeWithInvalidByte(repo.resolve("note.txt"), "caf", " " + SAMPLE_TOKEN + "\n");
 
-        ScanResult result = scan(repo, "note.txt");
+        // ⚠ 상속 로케일을 고정한다. 안 하면 JVM 이 물려받은 값에 좌우돼,
+        //   LANG 을 주지 않는 CI 에서는 수정 없이도 초록이 된다(#75 리뷰).
+        ScanResult result = scan(repo, "note.txt", Function.identity(), UTF8_LOCALE);
 
         assertThat(result.blocked())
                 .as("""
@@ -304,6 +337,22 @@ class SecretScanScriptTest {
     private static ScanResult scanWithBrokenPreprocessor(Path repo, String target)
             throws Exception {
         return scan(repo, target, script -> script.replace("LC_ALL=C sed ", "LC_ALL=C no_such_cmd "));
+    }
+
+    /**
+     * 로케일 방어를 <b>둘 다</b> 끈다 — 양성 대조 전용(#75).
+     *
+     * <p>🔴 <b>둘 다 꺼야 한다.</b> {@code export} 만 지우면 기동 자가 점검이 먼저 발화해
+     * 게이트가 통째로 멈추고, 그러면 재고 싶었던 <b>유출</b>이 아니라 <b>자가 점검의 발화</b>를
+     * 재게 된다 — {@code testing-philosophy.md} 의 「제거 지점이 측정 대상보다 위」다.
+     *
+     * <p>센티널을 유효한 UTF-8({@code cafe})로 바꿔 점검이 항상 통과하게 만든다.
+     * 구조와 {@code | grep -qE 'SENTINEL} 리터럴은 남으므로 다른 돌연변이 검사와 겹치지 않는다.
+     */
+    private static String disableLocaleGuard(String script) {
+        return script
+                .replace("\nexport LC_ALL=C\n", "\n")
+                .replace("'caf\\xe9 SENTINEL", "'cafe SENTINEL");
     }
 
     private static ScanResult scan(Path repo, String target, Function<String, String> mutate)

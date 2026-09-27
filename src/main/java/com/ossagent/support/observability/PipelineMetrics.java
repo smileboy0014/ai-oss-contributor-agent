@@ -1,12 +1,14 @@
 package com.ossagent.support.observability;
 
 import com.ossagent.agent.domain.LlmCallSite;
+import com.ossagent.agent.domain.LlmPricing;
 import com.ossagent.agent.domain.LlmUsage;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
@@ -56,13 +58,22 @@ public class PipelineMetrics {
     }
 
     /**
-     * LLM 호출 1건 — 건수 · 토큰 · 시도 번호.
+     * LLM 호출 1건 — 건수 · 토큰 · <b>비용</b> · 시도 번호.
      *
      * <p>🔴 <b>실패도 토큰을 센다.</b> 절단({@code TRUNCATED})은 응답을 받았으므로
      * 사용량을 알고, 모델은 이미 토큰을 생성했다. 성공만 세면 <b>장부가 거짓말을 한다</b> —
      * {@code RecordingLanguageModel} 이 같은 이유로 실패도 기록한다.
+     *
+     * <p>🔴 <b>비용은 단가가 있을 때만 센다</b>(#71). 없으면 미터를 만들지 않는다 —
+     * 0 으로 두면 「공짜」로 읽히고, 그것은 「모른다」와 전혀 다른 말이다.
+     * 토큰은 단가와 무관하게 언제나 세므로 나중에 곱할 수 있다.
+     *
+     * @param usage   모르면 {@code null} — 토큰도 비용도 만들지 않는다. 0 은 「안 썼다」이지
+     *                「모른다」가 아니다
+     * @param pricing 이 호출을 처리한 모델의 단가. 설정에 없으면 {@code null}
      */
-    public void llmCall(LlmCallSite site, LlmOutcome outcome, LlmUsage usage, int attempt) {
+    public void llmCall(LlmCallSite site, LlmOutcome outcome, LlmUsage usage, int attempt,
+            LlmPricing pricing) {
         record(() -> {
             Counter.builder(MetricNames.LLM_CALLS)
                     .tag(MetricNames.TAG_CALL_SITE, site.name())
@@ -78,6 +89,14 @@ public class PipelineMetrics {
                             MetricNames.TAG_CALL_SITE, site.name())
                     .record(attempt);
         });
+        // 🔴 비용을 별도 record() 로 가른다 — 한 람다에 묶으면 단가 계산이 던졌을 때
+        //    그 뒤의 기록(attempt)이 통째로 사라진다. 방어가 삼키는 것은 「그 계측 하나」여야
+        //    하고, 「같은 람다에 있던 나머지 전부」여서는 안 된다.
+        //    ⚠️ 증상이 보이지 않는 종류다 — 예외는 WARN 한 줄로 끝나고, 사라진 것은
+        //       「있었어야 할 시계열」이라 대시보드에서 0 과 구분되지 않는다
+        if (usage != null && pricing != null) {
+            record(() -> cost(site, pricing.costOf(usage)));
+        }
     }
 
     /** 파이프라인 단계 1회 — 소요 시간과 결과. */
@@ -156,6 +175,22 @@ public class PipelineMetrics {
         Gauge.builder(MetricNames.CANDIDATE_COUNT, value, AtomicLong::doubleValue)
                 .tag(MetricNames.TAG_STATUS, statusName)
                 .register(registry);
+    }
+
+    /**
+     * 🔴 통화는 <b>태그가 아니라 {@code baseUnit}</b> 이다 — 값이 하나뿐인 태그를 모든
+     * 시계열에 붙일 이유가 없고, 「통화를 바꿀 수 있다」는 인상까지 준다.
+     *
+     * <p>🔴 모델도 태그로 달지 않는다. 설정 문자열이라 <b>우리가 통제하는 어휘가 아니고</b>,
+     * 「시그니처가 enum 만 받으면 문자열을 넣을 방법이 없다」는 이 클래스의 성질이
+     * 그 태그 하나로 무너진다. 어느 모델의 값인지는 기동 로그가 답한다.
+     */
+    private void cost(LlmCallSite site, BigDecimal amount) {
+        Counter.builder(MetricNames.LLM_COST)
+                .tag(MetricNames.TAG_CALL_SITE, site.name())
+                .baseUnit(MetricNames.CURRENCY)
+                .register(registry)
+                .increment(amount.doubleValue());
     }
 
     private void tokens(LlmCallSite site, String direction, int amount) {

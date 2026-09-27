@@ -1,7 +1,11 @@
 package com.ossagent.agent.adapter.out.llm;
 
+import com.ossagent.agent.domain.LlmPricing;
 import com.ossagent.support.secret.TokenRedactor;
 import java.time.Duration;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -23,6 +27,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param timeout         호출 타임아웃
  * @param maxRetries      <b>전송 계층</b> 재시도 상한. {@code agent.execution.max-retries} 와 다른 축이다
  * @param retryBackoff    재시도 간 기본 대기. 시도마다 배수로 늘어난다
+ * @param pricing         모델별 단가표 — 키는 모델 ID. <b>비어 있으면 비용 미터를 만들지 않는다</b>(#71)
  */
 @ConfigurationProperties("agent.llm")
 public record AnthropicProperties(
@@ -32,7 +37,8 @@ public record AnthropicProperties(
         int maxOutputTokens,
         Duration timeout,
         int maxRetries,
-        Duration retryBackoff) {
+        Duration retryBackoff,
+        Map<String, LlmPricing> pricing) {
 
     private static final String DEFAULT_BASE_URL = "https://api.anthropic.com";
     private static final String DEFAULT_MODEL = "claude-sonnet-5";
@@ -50,6 +56,11 @@ public record AnthropicProperties(
         maxOutputTokens = maxOutputTokens <= 0 ? DEFAULT_MAX_OUTPUT_TOKENS : maxOutputTokens;
         timeout = timeout == null ? DEFAULT_TIMEOUT : timeout;
         retryBackoff = retryBackoff == null ? DEFAULT_RETRY_BACKOFF : retryBackoff;
+        // 🔴 기본값이 「빈 표」다. 여기에 기본 단가를 채우지 않는다 —
+        //    모델은 환경변수로 바뀌는데 단가는 시점·계약에 따라 다르다 (LlmPricing javadoc)
+        // ⚠ Map.copyOf 는 값이 null 이면 맨 NPE 로 죽는다. 기동 실패는 맞지만 메시지가
+        //   「어느 키가 비었는지」를 말해 주지 않는다 — 설정 오류는 읽을 수 있어야 고친다
+        pricing = normalizePricing(pricing);
         if (maxRetries < 0 || maxRetries > MAX_ALLOWED_RETRIES) {
             // 상한을 두는 이유 — 파이프라인 재시도(3)와 곱해진다. 전송 5 면 후보 1건당
             // 대외 호출 18회다. 「조용히 돈을 태우는」 경로를 설정으로도 만들 수 없게 한다 (S-6)
@@ -68,11 +79,45 @@ public record AnthropicProperties(
     /** 기본값으로만 채운 설정. 테스트와 기본 조립에서 쓴다. */
     public static AnthropicProperties defaults() {
         return new AnthropicProperties(null, null, null, DEFAULT_MAX_OUTPUT_TOKENS, null,
-                DEFAULT_MAX_RETRIES, null);
+                DEFAULT_MAX_RETRIES, null, null);
     }
 
     public boolean hasApiKey() {
         return !apiKey.isBlank();
+    }
+
+    /**
+     * 지금 쓰는 모델의 단가. <b>없으면 비어 있다</b> — 호출자는 비용 미터를 만들지 않는다.
+     *
+     * <p>⚠️ <b>대소문자를 무시해 찾는다.</b> 설정 바인딩이 키를 어떻게 정규화하든 같은
+     * 결과가 나와야 하고, 무엇보다 <b>키 오타의 증상이 「비용이 조용히 안 찍힌다」</b>라서
+     * 알아차리기 어렵다. 그래서 {@code LanguageModelConfig} 가 기동 시 단가표 키를
+     * 함께 남긴다 — 「표는 있는데 이 모델이 없다」가 눈에 보이게.
+     */
+    public Optional<LlmPricing> pricingForModel() {
+        String wanted = normalize(model);
+        return pricing.entrySet().stream()
+                .filter(entry -> normalize(entry.getKey()).equals(wanted))
+                .map(Map.Entry::getValue)
+                .findFirst();
+    }
+
+    private static Map<String, LlmPricing> normalizePricing(Map<String, LlmPricing> pricing) {
+        if (pricing == null) {
+            return Map.of();
+        }
+        pricing.forEach((model, rates) -> {
+            if (rates == null) {
+                throw new IllegalArgumentException(
+                        "agent.llm.pricing.%s 가 비어 있다 — 단가를 적거나 줄을 지운다"
+                                .formatted(model));
+            }
+        });
+        return Map.copyOf(pricing);
+    }
+
+    private static String normalize(String modelId) {
+        return modelId == null ? "" : modelId.trim().toLowerCase(Locale.ROOT);
     }
 
     /**
@@ -81,9 +126,10 @@ public record AnthropicProperties(
      */
     @Override
     public String toString() {
-        return "AnthropicProperties[baseUrl=%s, apiKey=%s, model=%s, maxOutputTokens=%d, timeout=%s, maxRetries=%d, retryBackoff=%s]"
+        return ("AnthropicProperties[baseUrl=%s, apiKey=%s, model=%s, maxOutputTokens=%d, "
+                + "timeout=%s, maxRetries=%d, retryBackoff=%s, pricedModels=%s]")
                 .formatted(baseUrl, TokenRedactor.mask(apiKey), model, maxOutputTokens, timeout,
-                        maxRetries, retryBackoff);
+                        maxRetries, retryBackoff, pricing.keySet());
     }
 
     private static String blankToDefault(String value, String fallback) {

@@ -10,8 +10,10 @@ import com.ossagent.agent.adapter.out.llm.RecordingLanguageModel;
 import com.ossagent.agent.adapter.out.llm.TokenRedactingPromptScrubber;
 import com.ossagent.agent.domain.AgentRunRecorder;
 import com.ossagent.agent.domain.LanguageModel;
+import com.ossagent.agent.domain.LlmPricing;
 import com.ossagent.agent.domain.PromptScrubber;
 import com.ossagent.support.ExternalAdapter;
+import com.ossagent.support.observability.MetricNames;
 import com.ossagent.support.observability.PipelineMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -75,6 +77,32 @@ public class LanguageModelConfig {
             // safety-ok: 환경변수 이름만 담은 상수 문자열이다. 값 보간이 없고, 애초에 키가 「없는」 경우다
             log.warn("ANTHROPIC_API_KEY 가 비어 있다 — LLM 호출은 실패한다");
         }
-        return new RecordingLanguageModel(delegate, recorder, metrics);
+        LlmPricing pricing = properties.pricingForModel().orElse(null);
+        logPricing(properties, pricing);
+        return new RecordingLanguageModel(delegate, recorder, metrics, pricing);
+    }
+
+    /**
+     * 🔴 <b>단가 오설정을 알아차릴 유일한 수단</b> — 이슈 #71.
+     *
+     * <p>단가가 틀렸을 때의 증상이 「비용이 조용히 안 찍힌다」라서, 계측을 보고 있어도
+     * 알아차리지 못한다. 그래서 기동 시 <b>모델과 단가를 함께</b> 한 번 남긴다 —
+     * 표는 있는데 키가 어긋난 경우를 가르려고 <b>설정된 키 목록</b>까지 찍는다.
+     *
+     * <p>⚠️ 찍는 값은 단가(숫자)와 모델 ID(우리 설정 문자열)뿐이다. 키·프롬프트·응답이
+     * 섞일 자리가 없다 — S-4.
+     */
+    private static void logPricing(AnthropicProperties properties, LlmPricing pricing) {
+        if (pricing == null) {
+            log.warn("LLM 단가가 없다 model={} 단가표={} — {} 를 만들지 않는다. "
+                            + "토큰은 그대로 세므로 나중에 곱할 수 있다",
+                    properties.model(), properties.pricing().keySet(), MetricNames.LLM_COST);
+            return;
+        }
+        // ⚠ 메시지에 영어 token 을 쓰지 않는다 — safety-boundary-check.sh 의 S-4 패턴에
+        //   걸린다. 여기 찍는 것은 단가(숫자)와 모델 ID(우리 설정)뿐이라 오탐이지만,
+        //   예외 표시를 남기느니 문구를 고치는 쪽이 맞다 (게이트를 넓히지 않는다)
+        log.info("LLM 단가 model={} input={} output={} ({} / 100만 토큰)",
+                properties.model(), pricing.input(), pricing.output(), MetricNames.CURRENCY);
     }
 }

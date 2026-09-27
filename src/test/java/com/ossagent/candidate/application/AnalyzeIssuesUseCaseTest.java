@@ -328,7 +328,7 @@ class AnalyzeIssuesUseCaseTest {
         languageModel.reset().respondWith(analysisJson(), 1200, 300);
 
         new LlmIssueAnalyst(new RecordingLanguageModel(languageModel, recorder,
-                        PipelineMetricsFixtures.discarding()),
+                        PipelineMetricsFixtures.discarding(), null),
                 IssueAnalysisProperties.defaults(), objectMapper)
                 .analyze(candidate.getId(), analyzableIssue());
 

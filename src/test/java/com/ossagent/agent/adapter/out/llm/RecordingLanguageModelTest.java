@@ -3,6 +3,8 @@ package com.ossagent.agent.adapter.out.llm;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ossagent.support.observability.MetricNames;
+import com.ossagent.support.observability.PipelineMetrics;
 import com.ossagent.support.observability.PipelineMetricsFixtures;
 import com.ossagent.agent.domain.AgentRunContext;
 import com.ossagent.agent.domain.FakeLanguageModel;
@@ -10,10 +12,14 @@ import com.ossagent.agent.domain.LlmCallSite;
 import com.ossagent.agent.domain.LlmException;
 import com.ossagent.agent.domain.LlmFailureReason;
 import com.ossagent.agent.domain.LlmPermanentException;
+import com.ossagent.agent.domain.LlmPricing;
 import com.ossagent.agent.domain.LlmRequest;
 import com.ossagent.agent.domain.LlmTransientException;
 import com.ossagent.agent.domain.LlmUsage;
 import com.ossagent.agent.domain.RecordingAgentRunRecorder;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.math.BigDecimal;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
 import org.junit.jupiter.api.Test;
@@ -45,7 +51,7 @@ class RecordingLanguageModelTest {
         MDC.put("candidateId", "7");
 
         new RecordingLanguageModel(new FakeLanguageModel().respondWith("응답", 1, 1),
-                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding())
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding(), null)
                 .complete(CTX, REQUEST);
 
         assertThat(MDC.get("stage"))
@@ -62,7 +68,7 @@ class RecordingLanguageModelTest {
         // ⚠ 풀 스레드는 재사용된다. 「없었으면 지운다」를 빠뜨리면 다음 실행의 로그에
         //   앞 실행의 값이 찍혀, 이어붙이려고 넣은 것이 잘못 이어붙이게 만든다
         new RecordingLanguageModel(new FakeLanguageModel().respondWith("응답", 1, 1),
-                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding())
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding(), null)
                 .complete(CTX, REQUEST);
 
         assertThat(MDC.get("stage")).isNull();
@@ -77,7 +83,7 @@ class RecordingLanguageModelTest {
         assertThatThrownBy(() -> new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding())
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding(), null)
                 .complete(CTX, REQUEST))
                 .isInstanceOf(LlmException.class);
 
@@ -90,7 +96,8 @@ class RecordingLanguageModelTest {
     void 성공하면_토큰이_장부에_남는다() {
         var recorder = new RecordingAgentRunRecorder();
         var model = new RecordingLanguageModel(
-                new FakeLanguageModel().respondWith("응답", 13, 17), recorder, PipelineMetricsFixtures.discarding());
+                new FakeLanguageModel().respondWith("응답", 13, 17), recorder,
+                PipelineMetricsFixtures.discarding(), null);
 
         model.complete(CTX, REQUEST);
 
@@ -105,7 +112,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                recorder, PipelineMetricsFixtures.discarding());
+                recorder, PipelineMetricsFixtures.discarding(), null);
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST))
                 .isInstanceOf(LlmTransientException.class);
@@ -121,7 +128,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(new LlmPermanentException(
                         LlmFailureReason.TRUNCATED, LlmCallSite.CODE, new LlmUsage(8, 4096))),
-                recorder, PipelineMetricsFixtures.discarding());
+                recorder, PipelineMetricsFixtures.discarding(), null);
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST))
                 .isInstanceOf(LlmPermanentException.class);
@@ -137,7 +144,7 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                recorder, PipelineMetricsFixtures.discarding());
+                recorder, PipelineMetricsFixtures.discarding(), null);
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST)).isInstanceOf(LlmException.class);
 
@@ -149,7 +156,8 @@ class RecordingLanguageModelTest {
     @Test
     void MDC_를_호출_후에_반드시_비운다() {
         var model = new RecordingLanguageModel(
-                new FakeLanguageModel(), new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding());
+                new FakeLanguageModel(), new RecordingAgentRunRecorder(),
+                PipelineMetricsFixtures.discarding(), null);
 
         model.complete(CTX, REQUEST);
 
@@ -165,10 +173,45 @@ class RecordingLanguageModelTest {
         var model = new RecordingLanguageModel(
                 new FakeLanguageModel().failWith(
                         new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE)),
-                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding());
+                new RecordingAgentRunRecorder(), PipelineMetricsFixtures.discarding(), null);
 
         assertThatThrownBy(() -> model.complete(CTX, REQUEST)).isInstanceOf(LlmException.class);
 
         assertThat(MDC.get("candidateId")).isNull();
+    }
+
+    @Test
+    @DisplayName("🔴 비용도 이 길목에서 센다 — 단가가 있으면 금액이 남는다 (#71)")
+    void 비용이_같은_길목에서_기록된다() {
+        var registry = new SimpleMeterRegistry();
+        var model = new RecordingLanguageModel(
+                new FakeLanguageModel().respondWith("응답", 1_000_000, 0),
+                new RecordingAgentRunRecorder(), new PipelineMetrics(registry),
+                new LlmPricing(new BigDecimal("3.00"), new BigDecimal("15.00")));
+
+        model.complete(CTX, REQUEST);
+
+        assertThat(registry.find(MetricNames.LLM_COST).counter())
+                .as("토큰을 여기서 세는 이유가 그대로 금액에도 적용된다 — 데코레이터가 "
+                        + "유일한 길목이므로 비용을 건너뛸 경로가 없다")
+                .isNotNull()
+                .extracting(counter -> counter.count())
+                .isEqualTo(3.0);
+    }
+
+    @Test
+    @DisplayName("단가 없이 조립하면 비용이 없다 — 0 으로 꾸미지 않는다 (#71)")
+    void 단가가_없으면_비용이_기록되지_않는다() {
+        var registry = new SimpleMeterRegistry();
+        var model = new RecordingLanguageModel(
+                new FakeLanguageModel().respondWith("응답", 13, 17),
+                new RecordingAgentRunRecorder(), new PipelineMetrics(registry), null);
+
+        model.complete(CTX, REQUEST);
+
+        assertThat(registry.find(MetricNames.LLM_COST).counter()).isNull();
+        assertThat(registry.find(MetricNames.LLM_TOKENS).counters())
+                .as("단가가 없어도 토큰은 센다 — 나중에 곱할 수 있어야 한다")
+                .isNotEmpty();
     }
 }

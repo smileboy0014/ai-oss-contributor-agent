@@ -55,7 +55,7 @@ class AnthropicLanguageModelTest {
 
     private static AnthropicProperties props(int maxRetries) {
         return new AnthropicProperties(null, "test-key-not-a-real-secret", null, 16000,
-                Duration.ofSeconds(5), maxRetries, Duration.ofMillis(1));
+                Duration.ofSeconds(5), maxRetries, Duration.ofMillis(1), null);
     }
 
     @Test

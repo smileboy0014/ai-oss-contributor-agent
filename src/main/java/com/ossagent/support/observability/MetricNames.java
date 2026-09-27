@@ -24,11 +24,31 @@ public final class MetricNames {
     /**
      * LLM 토큰 누적. 태그: {@code call.site} · {@code direction}
      *
-     * <p>🔴 <b>금액이 아니라 토큰이다.</b> 단가가 코드·설정 어디에도 없고 모델은
-     * 환경변수로 바뀐다 — 박아 넣으면 <b>틀린 숫자를 자신 있게 보여준다.</b>
-     * 환산은 후속 이슈다 (PLAN-25 A-1).
+     * <p>🔴 <b>금액이 아니라 토큰이다.</b> 금액은 {@link #LLM_COST} 가 따로 센다 —
+     * 단가가 설정돼 있을 때만이다. <b>토큰은 언제나 세므로 단가를 나중에 알게 돼도
+     * 소급해 곱할 수 있다.</b> 이 미터가 금액에 종속되지 않는 것이 그 이유다.
      */
     public static final String LLM_TOKENS = "ossagent.llm.tokens";
+
+    /**
+     * LLM 비용 누적({@link #CURRENCY}). 태그: {@code call.site} — 이슈 #71.
+     *
+     * <p>🔴 <b>단가가 없으면 이 미터가 아예 없다.</b> 0 으로 두면 「공짜」로 읽히고,
+     * 그것은 「모른다」와 전혀 다른 말이다. 단가는 설정
+     * ({@code agent.llm.pricing.<model>.input}/{@code .output})에서만 온다 —
+     * 코드에 박으면 <b>틀린 숫자를 자신 있게 보여준다.</b>
+     *
+     * <p>🔴 <b>모델을 태그로 달지 않는다.</b> 모델 ID 는 설정 문자열이라 우리가 통제하는
+     * 어휘가 아니고, {@code PipelineMetrics} 가 「시그니처가 enum 만 받는다」로 지키는
+     * 성질이 그 태그 하나로 무너진다. 어느 모델의 값인지는 <b>기동 로그</b>가 답한다.
+     *
+     * <p>⚠️ <b>메트릭이 사라져도 비용은 다시 셀 수 있다.</b> {@code agent_run} 에
+     * 호출마다 입·출력 토큰이 남으므로, 단가를 곱하면 누적 비용이 나온다
+     * ({@code SUM(input_tokens)} · {@code SUM(output_tokens)}).
+     * ⚠️ 다만 그 행에는 <b>모델이 남지 않는다</b> — 중간에 모델을 바꿨다면 그 집계는
+     * 구간을 갈라 계산해야 한다.
+     */
+    public static final String LLM_COST = "ossagent.llm.cost";
 
     /**
      * LLM 호출의 시도 번호 분포. 태그: {@code call.site}
@@ -87,6 +107,14 @@ public final class MetricNames {
             "issueId", "issue.id",
             "repositoryId", "repository.id",
             "url", "uri", "title", "body", "message", "error");
+
+    /**
+     * 금액 미터의 단위 — Micrometer {@code baseUnit} 으로 싣는다.
+     *
+     * <p>🔴 <b>태그가 아니다.</b> 통화를 태그로 두면 값이 하나뿐인 태그가 모든 시계열에
+     * 붙고, 「통화를 바꿀 수 있다」는 인상까지 준다. 단가는 USD 로만 적는다.
+     */
+    public static final String CURRENCY = "USD";
 
     /** 우리가 만드는 미터의 이름 접두사 — 가드 테스트가 범위를 좁히는 데 쓴다. */
     public static final String PREFIX = "ossagent.";

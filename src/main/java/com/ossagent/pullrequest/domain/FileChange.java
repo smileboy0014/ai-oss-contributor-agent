@@ -1,5 +1,7 @@
 package com.ossagent.pullrequest.domain;
 
+import com.ossagent.support.ExternalText;
+
 /**
  * Fork 에 올릴 파일 1건의 변경.
  *
@@ -27,7 +29,9 @@ package com.ossagent.pullrequest.domain;
  *                   {@code gradlew} 를 고치면서 {@code false} 로 보내면 실행 권한이 사라지고,
  *                   증상은 대상 저장소 CI 에서야 나타난다
  */
-public record FileChange(String path, String content, boolean deleted, boolean executable) {
+public record FileChange(String path,
+                         @ExternalText(ExternalText.Source.TARGET_REPOSITORY) String content,
+                         boolean deleted, boolean executable) {
 
     /** git tree 항목의 mode. */
     public static final String MODE_FILE = "100644";

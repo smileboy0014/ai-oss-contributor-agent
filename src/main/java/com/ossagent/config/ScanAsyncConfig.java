@@ -1,7 +1,9 @@
 package com.ossagent.config;
 
 import com.ossagent.repository.application.ScanExecutor;
+import com.ossagent.repository.application.ScanInstanceId;
 import com.ossagent.repository.application.ScanProperties;
+import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadPoolExecutor;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -50,5 +52,18 @@ public class ScanAsyncConfig {
         executor.setAwaitTerminationSeconds(properties.shutdownGraceSeconds());
         executor.initialize();
         return executor;
+    }
+
+    /**
+     * 이 인스턴스의 식별자 — 스캔 자리를 <b>누가</b> 잡았는지 실행 행에 남긴다 (#26).
+     *
+     * <p>🔴 <b>진단용이다.</b> 자리 잡기 판정은 {@code ownerToken} 이 아니라 <b>리스 만료</b>로
+     * 한다 — 토큰으로 판정하면 죽은 인스턴스의 행을 아무도 놓지 못한다.
+     *
+     * <p>⚠️ 재기동하면 값이 바뀐다. 그래도 되는 이유가 위와 같다 — 판정에 쓰지 않는다.
+     */
+    @Bean
+    public ScanInstanceId scanInstanceId() {
+        return new ScanInstanceId(UUID.randomUUID().toString());
     }
 }

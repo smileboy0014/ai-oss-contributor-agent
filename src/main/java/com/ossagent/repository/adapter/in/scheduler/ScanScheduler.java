@@ -2,8 +2,11 @@ package com.ossagent.repository.adapter.in.scheduler;
 
 import com.ossagent.repository.application.LaunchScanUseCase;
 import com.ossagent.repository.application.RegisterRepositoryUseCase;
+import com.ossagent.repository.application.ScanProperties;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.ScanAlreadyRunningException;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,11 +44,17 @@ public class ScanScheduler {
 
     private final RegisterRepositoryUseCase repositories;
     private final LaunchScanUseCase launchScan;
+    private final ScanProperties properties;
+    private final Clock clock;
 
-    public ScanScheduler(RegisterRepositoryUseCase repositories, LaunchScanUseCase launchScan) {
+    public ScanScheduler(RegisterRepositoryUseCase repositories, LaunchScanUseCase launchScan,
+            ScanProperties properties, Clock clock) {
         this.repositories = repositories;
         this.launchScan = launchScan;
-        log.info("정기 스캔 스케줄러가 활성화됐다 — GitHub·LLM 을 주기적으로 호출한다");
+        this.properties = properties;
+        this.clock = clock;
+        log.info("정기 스캔 스케줄러가 활성화됐다 — GitHub·LLM 을 주기적으로 호출한다 "
+                + "(기본 주기={})", properties.defaultInterval());
     }
 
     /**
@@ -54,20 +63,33 @@ public class ScanScheduler {
      * <p>🔴 <b>한 저장소의 실패가 순회를 멈추지 않는다</b> (NFR-3). 고장난 저장소 하나가
      * 나머지 전부의 스캔을 인질로 잡으면 안 된다.
      *
+     * <p>⚠️ <b>주기가 된 저장소만 기동한다</b> (#26 FR-2). {@code fixedDelay} 는 「얼마나
+     * 자주 <b>훑는가</b>」이고 저장소 주기는 「얼마나 자주 <b>도는가</b>」다 — 둘을 겹쳐
+     * 쓰면 저장소별 주기(FR-1)를 표현할 자리가 없다. 훑는 주기는 저장소 주기보다
+     * 촘촘해야 한다. 성기면 「주기가 됐는데 아무도 안 훑어서」 늦어진다.
+     *
      * <p>{@code fixedDelay} 다({@code fixedRate} 가 아니다) — 이전 실행이 끝난 뒤부터 센다.
      * 스캔이 주기보다 오래 걸릴 수 있고, {@code fixedRate} 면 그때 실행이 겹쳐 쌓인다.
      */
     @Scheduled(fixedDelayString = "${scan.schedule.fixed-delay}",
             initialDelayString = "${scan.schedule.initial-delay}")
     public void scanAll() {
+        Instant now = Instant.now(clock);
         List<OssRepository> targets = repositories.findAll();
-        log.info("정기 스캔 시작 대상={}건", targets.size());
 
         int launched = 0;
         int skipped = 0;
+        int notDue = 0;
         for (OssRepository repository : targets) {
             if (!repository.isEnabled()) {
                 skipped++;
+                continue;
+            }
+            // 🔴 주기가 안 된 저장소는 건너뛴다 (FR-1·FR-2) — 전역 주기 하나로 돌리면
+            //    활발한 저장소는 늦고 조용한 저장소는 레이트리밋을 태운다.
+            //    판정은 엔티티가 한다(자기 데이터만으로 답한다 — architecture §3 Q1)
+            if (!repository.isDueForScan(now, properties.defaultInterval())) {
+                notDue++;
                 continue;
             }
             try {
@@ -84,6 +106,9 @@ public class ScanScheduler {
                 skipped++;
             }
         }
-        log.info("정기 스캔 기동 완료 launched={} skipped={}", launched, skipped);
+        // 🔴 대상 수를 남긴다. 주기 필터가 **모든** 저장소를 걸러도 증상이 「아무 일도
+        //    안 일어남」이라, 이 줄이 없으면 조용한 정지를 알아챌 수단이 없다
+        log.info("정기 스캔 기동 완료 대상={}건 launched={} notDue={} skipped={}",
+                targets.size(), launched, notDue, skipped);
     }
 }

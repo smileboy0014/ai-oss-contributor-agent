@@ -3,6 +3,7 @@ package com.ossagent.repository.application;
 import com.ossagent.candidate.application.AnalysisResult;
 import com.ossagent.issue.application.FilterResult;
 import com.ossagent.issue.application.ScanResult;
+import com.ossagent.repository.domain.ScanSkipReason;
 import java.time.Instant;
 
 /**
@@ -26,7 +27,7 @@ public record ScanPipelineResult(
         int candidatesSkipped,
         boolean hasMore,
         Instant delayedUntil,
-        ScanTarget.SkipReason skipReason) {
+        ScanSkipReason skipReason) {
 
     /** 세 단계를 다 돈 경우. */
     public static ScanPipelineResult of(ScanResult scan, FilterResult filter,
@@ -45,7 +46,7 @@ public record ScanPipelineResult(
     }
 
     /** 수집 전에 끊었다 — 규약이 막았거나 읽지 못했다. */
-    public static ScanPipelineResult skipped(ScanTarget.SkipReason reason) {
+    public static ScanPipelineResult skipped(ScanSkipReason reason) {
         return new ScanPipelineResult(0, 0, 0, 0, 0, 0, false, null, reason);
     }
 

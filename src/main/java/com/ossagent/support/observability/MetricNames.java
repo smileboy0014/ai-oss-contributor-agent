@@ -83,6 +83,18 @@ public final class MetricNames {
      */
     public static final String POLICY_DOCUMENTS = "ossagent.policy.documents";
 
+    /**
+     * 새 후보 알림 건수 — 이슈 #26 완료조건 2. 태그 없음.
+     *
+     * <p>🔴 <b>이 값이 0 에 붙어 있으면 「알림 경로가 이름만 있다」는 뜻이다.</b>
+     * 완료조건이 「알림 경로」인데 로그만 두면 그것이 실제로 발화하는지 아무도 모른다 —
+     * 대시보드가 먼저 말해 줘야 하는 종류의 고장이다.
+     *
+     * <p>⚠️ {@link #ANALYSIS_OUTCOME}({@code outcome=ANALYZED})과 값이 <b>같아야 한다.</b>
+     * 갈리면 알림이 빠진 경로가 있다는 뜻이고, 그 차이가 유일한 증거다.
+     */
+    public static final String CANDIDATE_NOTIFIED = "ossagent.candidate.notified";
+
     /** 후보 상태 분포 — 누적이 아니라 <b>현재 값</b>이다. 태그: {@code status} */
     public static final String CANDIDATE_COUNT = "ossagent.candidate.count";
 

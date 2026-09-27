@@ -5,23 +5,25 @@ import com.ossagent.repository.adapter.out.persistence.OssRepositoryRepository;
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
 import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
+import com.ossagent.repository.domain.ContributionRuleInterpreter;
+import com.ossagent.repository.domain.OssRepository;
+import com.ossagent.repository.domain.PolicyClearance;
+import com.ossagent.repository.domain.PolicyClearance;
+import com.ossagent.repository.domain.PolicyDocumentFingerprints;
+import com.ossagent.repository.domain.PolicyDocumentPath;
+import com.ossagent.repository.domain.PolicyDocumentSource;
+import com.ossagent.repository.domain.RepositoryCoordinates;
+import com.ossagent.repository.domain.RepositoryDocuments;
+import com.ossagent.repository.domain.RepositoryFile;
+import com.ossagent.repository.domain.RepositoryNotFoundException;
+import com.ossagent.repository.domain.RepositoryPolicy;
+import com.ossagent.repository.domain.RepositorySource;
+import com.ossagent.repository.domain.RuleReading;
+import com.ossagent.repository.domain.ScanSkipReason;
 import com.ossagent.support.observability.GateOutcome;
 import com.ossagent.support.observability.PipelineMetrics;
 import com.ossagent.support.observability.PolicyChangeOutcome;
 import com.ossagent.support.observability.SafetyClause;
-import com.ossagent.repository.domain.ContributionRuleInterpreter;
-import com.ossagent.repository.domain.OssRepository;
-import com.ossagent.repository.domain.PolicyDocumentPath;
-import com.ossagent.repository.domain.PolicyDocumentFingerprints;
-import com.ossagent.repository.domain.PolicyDocumentSource;
-import com.ossagent.repository.domain.RepositoryCoordinates;
-import com.ossagent.repository.domain.RepositoryDocuments;
-import com.ossagent.repository.domain.RepositoryNotFoundException;
-import com.ossagent.repository.domain.PolicyClearance;
-import com.ossagent.repository.domain.RepositoryFile;
-import com.ossagent.repository.domain.RepositoryPolicy;
-import com.ossagent.repository.domain.RepositorySource;
-import com.ossagent.repository.domain.RuleReading;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -264,15 +266,15 @@ public class AnalyzeRepositoryPolicyUseCase {
         if (policy == null) {
             // 일시적 실패 — 그리고 보관된 저장소도 여기로 온다. 가를 수단이 없다
             return ScanTarget.skip(repositoryId, coordinates,
-                    ScanTarget.SkipReason.POLICY_UNAVAILABLE);
+                    ScanSkipReason.POLICY_UNAVAILABLE);
         }
         if (policy.isAiContributionUndetermined()) {
             return ScanTarget.skip(repositoryId, coordinates,
-                    ScanTarget.SkipReason.POLICY_UNDETERMINED);
+                    ScanSkipReason.POLICY_UNDETERMINED);
         }
         if (policy.isAiContributionForbidden()) {
             return ScanTarget.skip(repositoryId, coordinates,
-                    ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN);
+                    ScanSkipReason.CONTRIBUTION_FORBIDDEN);
         }
         return ScanTarget.allowed(repositoryId, coordinates);
     }

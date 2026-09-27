@@ -72,8 +72,10 @@ curl -X POST http://localhost:8080/api/repositories \
     │   ├── github/            GitHub 읽기 클라이언트 — 토큰 · 레이트리밋 예산(읽기·쓰기 공유) · 403 구분
     │   └── secret/            토큰 마스킹 (S-4)
     ├── repository/            대상 저장소 등록 · 메타데이터/파일 조회 · 기여 규약 분석
+    │                           · 스캔 실행 상태/분산 락 ✅ · 저장소별 주기 ✅ (#26)
     ├── issue/                 이슈 증분 수집 ✅ · 규칙 필터 ✅ (트리거 없음)
     ├── candidate/             기여 후보 · 상태 전이
+    │   └── adapter/out/notification/  새 후보 알림 — 🔴 로그·메트릭뿐이다 (외부 전송 아님)
     ├── agent/                 LLM 능력·어댑터 ✅ · Docker 샌드박스 ✅
     │                          · 워크스페이스(JGit) ✅ · 워밍→씨딩→실행 ✅
     └── pullrequest/           Fork 확보 · commit · push ✅ (호출자 없음 — 배선은 #23)

@@ -1,4 +1,5 @@
 package com.ossagent.repository.application;
+import com.ossagent.repository.domain.ScanStage;
 
 /**
  * 파이프라인의 <b>어느 단계</b>가 실패했는지를 실어 나른다.
@@ -15,10 +16,10 @@ package com.ossagent.repository.application;
  */
 public class ScanStageFailedException extends RuntimeException {
 
-    private final transient ScanExecutionState.Stage stage;
+    private final transient ScanStage stage;
     private final transient ScanPipelineResult partial;
 
-    private ScanStageFailedException(ScanExecutionState.Stage stage, Long repositoryId,
+    private ScanStageFailedException(ScanStage stage, Long repositoryId,
             Throwable cause, ScanPipelineResult partial) {
         super("스캔 파이프라인 단계 실패: stage=%s repositoryId=%d type=%s"
                 .formatted(stage, repositoryId, cause.getClass().getSimpleName()), cause);
@@ -26,17 +27,17 @@ public class ScanStageFailedException extends RuntimeException {
         this.partial = partial;
     }
 
-    public static ScanStageFailedException at(ScanExecutionState.Stage stage, Long repositoryId,
+    public static ScanStageFailedException at(ScanStage stage, Long repositoryId,
             Throwable cause) {
         return new ScanStageFailedException(stage, repositoryId, cause, null);
     }
 
-    public static ScanStageFailedException at(ScanExecutionState.Stage stage, Long repositoryId,
+    public static ScanStageFailedException at(ScanStage stage, Long repositoryId,
             Throwable cause, ScanPipelineResult partial) {
         return new ScanStageFailedException(stage, repositoryId, cause, partial);
     }
 
-    public ScanExecutionState.Stage stage() {
+    public ScanStage stage() {
         return stage;
     }
 

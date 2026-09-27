@@ -106,6 +106,7 @@ com.ossagent.{도메인}
 | Docker — 3단계 순서 | — (조율자) | `SandboxPipeline`(`agent/application`, #18) | `agent` | ✅ **존재** — 워밍 → 씨딩 → 실행. 🔴 **저장소당 워밍 1회**(프로세스 내 락). `CodeSandbox` 는 한 번에 한 명령이라 **순서를 아는 것이 없었다** |
 | Docker — 변경 검증 (2층) | `ChangeVerifier` | `SandboxChangeVerifier` | **`candidate`** | ✅ **존재** (#19) — 컴파일 → 테스트 → diff 를 돌리고 **첫 실패에서 멈춘다**.<br>🔴 **캐시를 채우는 단계를 부르지 않는다** — 워밍·씨딩 없이 `ExecuteCommand` 만 돈다. 빈 캐시로 오프라인 실행하면 의존성 해석 실패가 **「테스트 실패」로 오분류**된다 (Q-4) |
 | 대상 저장소 워크스페이스 | `TargetWorkspaceSource` | `JGitWorkspaceSource` | `agent` | ✅ **존재** (#18) — 익명 clone · **push 슬롯이 없다**(S-1) |
+| **알림 — 새 후보** | `CandidateNotifier` | `LoggingCandidateNotifier` (`adapter/out/notification`) | **`candidate`** | ✅ **존재** (#26) — 🔴 **관찰이지 행위가 아니다.** 승인 게이트를 부르는 경로를 만들지 않는다(S-6) — `ApprovalGateArchitectureTest` 규칙 ①이 **허용목록**이라 새 패키지도 고치지 않고 덮인다(#73).<br>🔴 **지금 나가는 곳은 로그와 메트릭뿐이다** — Slack·Webhook 이 아니다. 외부 전송이 필요해지면 어댑터 한 장을 더한다.<br>⚠️ `@ExternalAdapter` 가 **아니다** — 대외 시스템을 타지 않으므로 통합 테스트에서 빠지면 배선을 아무도 확인하지 않게 된다 |
 | PostgreSQL | Spring Data 인터페이스 (완화 ②로 직접 주입) | `adapter/out/persistence` | 각 도메인 | 부분 |
 
 ### GitHub 접근의 읽기/쓰기 분리 — S-1 을 구조로 지킨다

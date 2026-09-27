@@ -1,16 +1,18 @@
 package com.ossagent.repository.application;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
+import com.ossagent.repository.domain.ScanPhase;
+import com.ossagent.repository.domain.ScanSkipReason;
+import com.ossagent.repository.domain.ScanStage;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * 실행부의 <b>마감 보장</b>.
@@ -27,7 +29,7 @@ class ScanExecutorTest {
     private static final Long REPO = 1L;
 
     private final ScanPipelineUseCase pipeline = mock(ScanPipelineUseCase.class);
-    private final ScanExecutionRegistry registry = new InMemoryScanExecutionRegistry(
+    private final ScanExecutionRegistry registry = new FakeScanExecutionRegistry(
             Clock.fixed(Instant.parse("2026-09-26T10:00:00Z"), ZoneOffset.UTC));
     private final ScanExecutor executor = new ScanExecutor(pipeline, registry);
 
@@ -41,7 +43,7 @@ class ScanExecutorTest {
         executor.execute(REPO);
 
         assertThat(registry.stateOf(REPO).orElseThrow().phase())
-                .isEqualTo(ScanExecutionState.Phase.SUCCEEDED);
+                .isEqualTo(ScanPhase.SUCCEEDED);
     }
 
     @Test
@@ -49,27 +51,27 @@ class ScanExecutorTest {
     void 건너뛴_실행은_SKIPPED_다() {
         registry.tryStart(REPO);
         when(pipeline.run(REPO)).thenReturn(
-                ScanPipelineResult.skipped(ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN));
+                ScanPipelineResult.skipped(ScanSkipReason.CONTRIBUTION_FORBIDDEN));
 
         executor.execute(REPO);
 
         assertThat(registry.stateOf(REPO).orElseThrow().phase())
-                .isEqualTo(ScanExecutionState.Phase.SKIPPED);
+                .isEqualTo(ScanPhase.SKIPPED);
     }
 
     @Test
     @DisplayName("단계 실패는 단계와 타입을 남긴다 — 예외 원문은 아니다 S4")
     void 단계_실패는_타입만_남긴다_S4() {
         registry.tryStart(REPO);
-        doThrow(ScanStageFailedException.at(ScanExecutionState.Stage.SCAN, REPO,
+        doThrow(ScanStageFailedException.at(ScanStage.SCAN, REPO,
                 new IllegalStateException("토큰이 섞인 메시지")))
                 .when(pipeline).run(REPO);
 
         executor.execute(REPO);
 
         ScanExecutionState state = registry.stateOf(REPO).orElseThrow();
-        assertThat(state.phase()).isEqualTo(ScanExecutionState.Phase.FAILED);
-        assertThat(state.failureStage()).isEqualTo(ScanExecutionState.Stage.SCAN);
+        assertThat(state.phase()).isEqualTo(ScanPhase.FAILED);
+        assertThat(state.failureStage()).isEqualTo(ScanStage.SCAN);
         assertThat(state.failureType()).isEqualTo("IllegalStateException");
     }
 
@@ -108,7 +110,7 @@ class ScanExecutorTest {
     void 마감_기록이_실패해도_자리를_비운다() {
         ScanExecutionRegistry flaky = mock(ScanExecutionRegistry.class);
         when(flaky.stateOf(REPO)).thenReturn(java.util.Optional.of(
-                new ScanExecutionState(REPO, ScanExecutionState.Phase.RUNNING,
+                new ScanExecutionState(REPO, ScanPhase.RUNNING,
                         Instant.now(), null, null, null, null)));
         doThrow(new IllegalStateException("기록 실패"))
                 .when(flaky).markSucceeded(any(), any());

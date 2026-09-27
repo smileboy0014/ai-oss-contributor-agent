@@ -7,6 +7,8 @@ import com.ossagent.issue.application.FilterResult;
 import com.ossagent.issue.application.ScanIssuesUseCase;
 import com.ossagent.issue.application.ScanResult;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
+import com.ossagent.repository.domain.ScanSkipReason;
+import com.ossagent.repository.domain.ScanStage;
 import com.ossagent.support.github.GitHubRateLimitException;
 import com.ossagent.support.observability.PipelineMetrics;
 import com.ossagent.support.observability.PipelineStage;
@@ -111,7 +113,7 @@ public class ScanPipelineUseCase {
             //    fetchMetadata 에서 난 리밋은 맨몸으로 여기까지 올라온다
             log.info("규약 분석이 레이트리밋에 걸렸다 repositoryId={} — 다음 주기가 이어받는다",
                     repositoryId);
-            return ScanPipelineResult.skipped(ScanTarget.SkipReason.RATE_LIMITED);
+            return ScanPipelineResult.skipped(ScanSkipReason.RATE_LIMITED);
         } catch (RuntimeException e) {
             stageDone(PipelineStage.POLICY, StageOutcome.FAILED, policyStart);
             throw e;
@@ -135,7 +137,7 @@ public class ScanPipelineUseCase {
             scan = scanIssues.scan(repositoryId, target.coordinates());
         } catch (RuntimeException e) {
             stageDone(PipelineStage.SCAN, StageOutcome.FAILED, scanStart);
-            throw ScanStageFailedException.at(ScanExecutionState.Stage.SCAN, repositoryId, e);
+            throw ScanStageFailedException.at(ScanStage.SCAN, repositoryId, e);
         }
         stageDone(PipelineStage.SCAN, StageOutcome.SUCCEEDED, scanStart);
 
@@ -148,7 +150,7 @@ public class ScanPipelineUseCase {
         } catch (RuntimeException e) {
             stageDone(PipelineStage.FILTER, StageOutcome.FAILED, filterStart);
             // 수집분은 이미 DB 에 있다. 버리지 않는다 (NFR-4)
-            throw ScanStageFailedException.at(ScanExecutionState.Stage.FILTER, repositoryId, e,
+            throw ScanStageFailedException.at(ScanStage.FILTER, repositoryId, e,
                     ScanPipelineResult.partial(scan, null));
         }
         stageDone(PipelineStage.FILTER, StageOutcome.SUCCEEDED, filterStart);
@@ -168,7 +170,7 @@ public class ScanPipelineUseCase {
             return ScanPipelineResult.partial(scan, filter);
         } catch (RuntimeException e) {
             stageDone(PipelineStage.ANALYZE, StageOutcome.FAILED, analyzeStart);
-            throw ScanStageFailedException.at(ScanExecutionState.Stage.ANALYZE, repositoryId, e,
+            throw ScanStageFailedException.at(ScanStage.ANALYZE, repositoryId, e,
                     ScanPipelineResult.partial(scan, filter));
         }
         stageDone(PipelineStage.ANALYZE, StageOutcome.SUCCEEDED, analyzeStart);

@@ -264,21 +264,27 @@ class ApprovalGateArchitectureTest {
      * <p>🕳 <b>남는 구멍</b>은 ①b 와 같다 — 리플렉션은 못 보고, 나중에 이 메서드를
      * 인터페이스로 추출하면 그 타입으로 부르는 경로가 빠져나간다.
      */
-    private static ArchRule PR_생성_전이를_부르는_곳이_없다() {
+    /**
+     * 🔴 <b>{@code CandidatePrWriter} 가 package-private</b> 이라 클래스 리터럴로 쓸 수 없다.
+     * FQN 문자열로 지목하므로 <b>이름을 바꾸면 규칙이 조용히 넓어진다</b> —
+     * 그때는 아래 운영 판정이 빨개져 드러난다(그 클래스가 허용 목록 밖이 되므로).
+     */
+    private static final String PR_생성_허용_호출자 =
+            "com.ossagent.candidate.application.CandidatePrWriter";
+
+    private static ArchRule PR_생성_전이는_PR_UseCase_만_부른다() {
         return noClasses()
+                .that().doNotHaveFullyQualifiedName(PR_생성_허용_호출자)
                 .should(PR_생성_전이를_부른다())
                 .as("READY_FOR_PR → PR_CREATED 는 세 번째 승인 게이트다 — "
-                        + "자동화가 스스로 밟지 않는다 (S-2). 여는 주체는 #23 이고, "
-                        + "그때 이 규칙에 허용 호출자를 명시한다")
-                // 🔴 true 로 두지 않는다 — 0건 통과가 바로 이 규칙이 경계하는 상태다.
-                //    다만 ArchUnit 은 「대상이 0개」일 때만 이것을 보므로, 실제 방어는
-                //    아래 양성 대조가 한다
+                        + "재시도 루프가 스스로 밟지 않는다 (S-2). 허용 호출자를 늘리려면 "
+                        + "이 목록에 적어야 하고 그 한 줄이 리뷰에 보인다")
                 .allowEmptyShould(true);
     }
 
     @Test
     void 루프는_PR_생성_전이를_부르지_않는다_S2() {
-        PR_생성_전이를_부르는_곳이_없다().check(PRODUCTION);
+        PR_생성_전이는_PR_UseCase_만_부른다().check(PRODUCTION);
     }
 
     /**
@@ -289,7 +295,7 @@ class ApprovalGateArchitectureTest {
      */
     @Test
     void 그_규칙이_실제로_무는지_확인한다_양성_대조_S2() {
-        assertThatThrownBy(() -> PR_생성_전이를_부르는_곳이_없다().check(PROBES))
+        assertThatThrownBy(() -> PR_생성_전이는_PR_UseCase_만_부른다().check(PROBES))
                 .as("미끼(AutoPrCreateProbe)를 놓치면 규칙이 아무것도 막지 않는 것이다 — "
                         + "운영 코드에 호출자가 0개라 그 사실이 초록에 가려진다")
                 .isInstanceOf(AssertionError.class)

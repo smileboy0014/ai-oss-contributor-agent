@@ -301,15 +301,47 @@ public class ContributionCandidate {
      * 조회하기만 하면 어긋날 수 없다. 배선은 #18.
      */
     public StatusTransition startImplementing(PolicyClearance clearance, int maxAttempts, Clock clock) {
+        assertCanStartImplementing(clearance, maxAttempts);
+        StatusTransition transition = transitionTo(CandidateStatus.IMPLEMENTING, clock);
+        this.attempt = 1;
+        return transition;
+    }
+
+    /**
+     * 🔴 <b>판정만 한다 — 상태를 바꾸지 않는다</b> (#18).
+     *
+     * <h2>왜 이것이 필요한가</h2>
+     *
+     * <p>호출자가 <b>전이 전에</b> 다른 선행 조건(예: 실행기 배선)을 확인해야 할 때,
+     * 이것이 없으면 <b>전이한 뒤 예외를 던져 롤백에 기대는</b> 구조가 된다.
+     *
+     * <p>⚠️ 그 구조는 <b>작동하지만 비용이 있다</b> — 그 구간에 들어오는 모든 부작용이
+     * <b>트랜잭션을 알아야 한다</b>는 제약이 생기는데, 코드가 그 제약을 말해주지 않는다.
+     * 메트릭·이벤트 발행·{@code REQUIRES_NEW} 쓰기는 롤백되지 않는다.
+     *
+     * <p>🔴 <b>「판정과 전이가 한 메서드에 묶여 있어 어쩔 수 없다」는 사실이 아니었다.</b>
+     * {@link #startImplementing} 의 앞 두 줄이 이미 <b>부작용 없는 순수 판정</b>이고,
+     * {@code transitionTo} 의 전이표 검사도 상태를 바꾸기 전에 던진다. 꺼내 놓기만 하면 됐다.
+     *
+     * <p>⚠️ {@code startImplementing} 이 같은 가드를 <b>다시</b> 부른다. 중복이지만 무해하다 —
+     * 전부 순수 판정이고, <b>같은 private 가드를 재사용</b>하는 것이지 로직을 복제한 것이 아니다.
+     * 호출자가 이것을 빠뜨려도 {@code startImplementing} 이 그대로 막는다.
+     *
+     * @throws IllegalArgumentException      통행증이 없다 (S-5) · 재시도 상한이 범위 밖이다
+     * @throws CandidateTransitionException  사람이 고르지 않았다 · 전이표에 없는 전이다 (S-6)
+     */
+    public void assertCanStartImplementing(PolicyClearance clearance, int maxAttempts) {
         if (clearance == null) {
             throw new IllegalArgumentException(
                     "정책 통행증 없이 구현 단계로 넘어갈 수 없다 — RepositoryPolicy 를 먼저 확인한다 (S-5)");
         }
         guardAttemptBudget(maxAttempts);
         guardHumanSelection();
-        StatusTransition transition = transitionTo(CandidateStatus.IMPLEMENTING, clock);
-        this.attempt = 1;
-        return transition;
+        if (!this.status.canTransitionTo(CandidateStatus.IMPLEMENTING)) {
+            throw new CandidateTransitionException(
+                    "허용되지 않은 상태 전이입니다 candidateId=" + id
+                            + " " + this.status + " → " + CandidateStatus.IMPLEMENTING);
+        }
     }
 
     /** {@code IMPLEMENTING → TESTING} — 같은 바퀴 안이라 {@code attempt} 를 올리지 않는다 */

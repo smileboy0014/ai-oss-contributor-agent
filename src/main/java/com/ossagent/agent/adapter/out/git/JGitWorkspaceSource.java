@@ -123,17 +123,53 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
     }
 
     /**
-     * 🔴 가져온 저장소가 <b>우리 워크스페이스 안에서</b> 무엇도 실행하지 못하게 한다.
+     * 이후 JGit 작업이 <b>워크스페이스의 훅</b>을 보지 않게 한다.
      *
-     * <p>「clone 은 실행이 아니라 읽기」는 <b>부분적으로만 참</b>이다 —
-     * {@code .gitattributes} 의 clean/smudge 필터는 <b>체크아웃 중 실행되는 명령</b>이고,
-     * {@code core.hooksPath} 는 이후 JGit 작업이 훅을 보게 만든다.
+     * <h2>🔴 필터를 여기서 막지 <b>않는다</b> — 막을 수 없기 때문이다</h2>
+     *
+     * <p>초안은 {@code [filter] required = false} 를 쓰고 「필터를 껐다」고 적어 뒀다.
+     * <b>그 줄은 아무것도 막지 못했다.</b> 두 가지가 동시에 틀렸다.
+     *
+     * <ol>
+     *   <li>🔴 <b>JGit 이 읽지 않는 키다.</b> {@code TreeWalk} 바이트코드를 뜯어 확인했다 —
+     *       조회하는 것은 {@code filter.<b>&lt;드라이버명&gt;</b>.smudge} 와
+     *       {@code filter.<b>&lt;드라이버명&gt;</b>.useJGitBuiltin} 뿐이고,
+     *       <b>서브섹션이 {@code .gitattributes} 가 지정한 드라이버 이름</b>이다.
+     *       서브섹션 없이 쓴 값은 어떤 조회에도 매치되지 않는다.
+     *       덧붙여 git 의 {@code required} 는 「실패 시 중단할 것인가」이지
+     *       <b>「실행할 것인가」가 아니다</b> — {@code false} 여도 필터는 돈다</li>
+     *   <li>🔴 <b>순서도 늦다.</b> 이 메서드는 {@code cloneRepository().call()} 이
+     *       초기 체크아웃까지 끝낸 <b>뒤에</b> 불린다</li>
+     * </ol>
+     *
+     * <h2>그래서 필터를 실제로 막는 것은 {@link JGitSystemConfig}다</h2>
+     *
+     * <p>⚠️ JGit 은 smudge 필터를 <b>정말로 셸로 실행한다</b> — {@code DirCacheCheckout} 이
+     * {@code FS.runInShell} 로 {@code sh -c "<명령>"} 을 띄운다(바이트코드 확인).
+     * 그러나 <b>그 명령 문자열은 {@code .gitattributes} 가 아니라 git config 에서 온다.</b>
+     *
+     * <table border="1">
+     *   <caption>필터 명령이 올 수 있는 곳</caption>
+     *   <tr><th>출처</th><th>상태</th></tr>
+     *   <tr><td>{@code ~/.gitconfig} · 시스템 · {@code ~/.config/jgit/config}</td>
+     *       <td>✅ {@link JGitSystemConfig} 가 <b>빈 설정</b>으로 만든다. 생성자에서 걸므로
+     *           <b>clone 보다 먼저</b>다</td></tr>
+     *   <tr><td>저장소 {@code .git/config}</td>
+     *       <td>✅ 우리가 clone 으로 만든 것이다 — <b>원격은 config 를 보내지 못한다</b></td></tr>
+     * </table>
+     *
+     * <p>🕳 <b>그러므로 이 방어는 억제 하나에 걸려 있다.</b> 누가 {@code suppressNativeGitLookup}
+     * 을 걷어내면 <b>그 순간 실제로 뚫린다</b> — 여기 필터 관련 코드가 없는 것이
+     * 「안 막는다」가 아니라 <b>「다른 곳에서 막는다」</b>임을 이 주석이 전한다.
+     *
+     * <h2>훅은 여기서 막아도 늦지 않다</h2>
+     *
+     * <p>JGit 의 훅 목록은 {@code PreCommit}·{@code CommitMsg}·{@code PostCommit}·{@code PrePush}
+     * 넷뿐이고 <b>{@code post-checkout} 이 없다.</b> 체크아웃 중 훅이 돌 자리가 없으므로
+     * clone 뒤에 고정해도 실질 손실이 없다.
      */
     private static void hardenRepositoryConfig(Git git) throws IOException {
         StoredConfig config = git.getRepository().getConfig();
-        // 필터를 끈다 — 체크아웃 중 임의 명령 실행 경로
-        config.setBoolean("filter", null, "required", false);
-        // 훅을 없는 경로로 고정한다
         config.setString("core", null, "hooksPath", "/dev/null");
         config.save();
     }

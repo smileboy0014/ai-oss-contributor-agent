@@ -106,32 +106,36 @@ class CandidateImplementationWriter {
             throw e;
         }
 
-        StatusTransition transition;
+        // 🔴 **판정을 먼저, 전이는 나중에.** 순서가 셋 다 중요하다.
+        //
+        //   ① 통행증 → 이 판정. 반대면 정책이 막았어야 할 요청이 아래 503 에 가려져
+        //      S-5 게이트가 한 번도 돌지 않는다.
+        //   ② 이 판정 → 실행기 검사. 반대면 「고르지 않은 후보」(409)가 503 에 가려진다 —
+        //      요청이 틀린 것을 우리 사정으로 덮는 셈이다.
+        //   ③ 실행기 검사 → 전이. 🔴 **전이를 하지 않으므로 롤백에 기대지 않는다.**
+        //
+        //   ⚠ 초안은 전이한 뒤 던져 롤백에 맡겼다. 작동은 했지만(부분 커밋 경로 없음을 확인)
+        //     그 구간에 들어오는 **모든 부작용이 트랜잭션을 알아야 한다**는 제약이 생기고,
+        //     코드가 그 제약을 말해주지 않는다 — 메트릭·이벤트는 롤백되지 않는다.
+        //     「판정과 전이가 한 메서드에 묶여 어쩔 수 없다」는 **사실이 아니었다.**
         try {
-            transition = candidate.startImplementing(clearance, properties.maxRetries(), clock);
+            candidate.assertCanStartImplementing(clearance, properties.maxRetries());
         } catch (RuntimeException e) {
+            // 🔴 거부는 여기서 남긴다 — afterCommit 은 롤백 경로에서 돌지 않으므로
+            //    거기 두면 「막았다」는 기록이 영영 남지 않는다
             log.warn("승인 게이트 거부 gate=착수 candidateId={} status={} reason={}",
                     candidateId, candidate.getStatus(), e.getMessage());
             throw e;
         }
 
-        // 🔴 실행기가 없으면 여기서 던진다 — **트랜잭션이 롤백되어 전이가 사라진다.**
-        //
-        //   순서가 이래야 하는 이유 둘:
-        //   ① 전이 **앞**에서 막으면 「고르지 않은 후보」(409)가 503 에 가려진다 —
-        //      요청이 틀린 것을 우리 사정으로 덮는 셈이다. startImplementing 이
-        //      selectedAt·전이표를 먼저 봐야 그 판정이 드러난다.
-        //   ② 롤백에 맡기면 후보는 **SELECTED 그대로** 남는다. IMPLEMENTING 에서 나갈 길이
-        //      TESTING·FAILED 뿐이고 FAILED 는 종단이라, 커밋됐다면 사람이 버튼 한 번으로
-        //      후보를 영구히 죽이게 된다.
-        //
-        //   ⚠ logAfterCommit 은 아직 등록 전이다. 등록했더라도 롤백 경로에서는 afterCommit 이
-        //     돌지 않으므로 「통과했다」가 잘못 남지 않는다
         if (!executorReady) {
-            log.warn("착수 중단 — 실행기 미배선 candidateId={} (전이를 롤백한다)", candidateId);
+            log.warn("착수 중단 — 실행기 미배선 candidateId={} (전이하지 않는다)", candidateId);
             throw new ImplementationNotReadyException(
                     "코딩 에이전트와 산출 경로가 아직 배선되지 않았다 (#18 의 C·D)");
         }
+
+        StatusTransition transition =
+                candidate.startImplementing(clearance, properties.maxRetries(), clock);
 
         logAfterCommit(candidateId, transition);
         return new ImplementationStart(candidateId, issue.repositoryId(),

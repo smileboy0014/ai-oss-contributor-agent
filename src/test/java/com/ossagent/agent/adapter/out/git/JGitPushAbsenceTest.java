@@ -56,6 +56,34 @@ class JGitPushAbsenceTest {
     }
 
     /**
+     * 🔴 <b>익명 clone 을 강제한다</b> — S-4.
+     *
+     * <p>자격증명을 URL·프로바이더로 실으면 <b>토큰이 {@code .git/config} 에 파일로 앉고</b>,
+     * 그 워크스페이스를 샌드박스가 <b>RW 로 바인드</b>해 신뢰할 수 없는 빌드 스크립트가 읽는다.
+     *
+     * <p>⚠️ <b>가드 없이는 한 줄로 뚫린다.</b> {@code .setCredentialsProvider(...)} 를 더하면
+     * 기존 가드가 <b>전부 초록으로 통과</b>한다 —
+     * {@code safety-boundary-check.sh} 는 clone 자격증명을 보지 않고,
+     * 위 push 규칙은 {@code push} 라는 이름만 본다.
+     *
+     * <p>S-1 이 「좁은 표면은 의도 표기이지 강제력이 아니다」를 못 박은 것과 같은 구조다.
+     * javadoc 이 「🔴 익명」이라고 단언하고 있으므로 <b>그 단언을 강제로 만든다.</b>
+     *
+     * <p>🕳 <b>한계</b> — 타입 의존을 보므로 리플렉션은 못 본다. 그리고 URL 에
+     * {@code user:pass@} 를 문자열로 박는 경로는 <b>이 규칙이 아니라</b>
+     * 「워크스페이스에 시크릿이 없다」 쪽 검사가 봐야 한다(D 에서 넣는다).
+     */
+    @Test
+    @DisplayName("운영 코드가 JGit 자격증명 프로바이더를 쓰지 않는다 — S-4")
+    void 운영_코드가_JGit_자격증명_프로바이더를_쓰지_않는다_S4() {
+        noClasses()
+                .should().dependOnClassesThat()
+                .areAssignableTo(org.eclipse.jgit.transport.CredentialsProvider.class)
+                .as("clone 은 익명이어야 한다 — 토큰이 .git/config 에 앉으면 샌드박스가 읽는다 (S-4)")
+                .check(PRODUCTION);
+    }
+
+    /**
      * ⚠️ <b>0건 검사로 통과하지 않게 한다.</b>
      *
      * <p>임포트 경로가 틀려 <b>아무 클래스도 못 읽으면</b> 위 규칙은 항상 초록이다 —

@@ -116,6 +116,30 @@ for f in $files; do
     "원본 저장소로의 push 경로로 의심됩니다." \
     "Fork 좌표(fork.getPushUrl())만 사용하고, owner 일치 어설션을 두세요."
 
+  # 🔴 #22 이후 쓰기 경로는 JGit 이 아니라 REST 다. 위 두 패턴은 setRemote·push() 라는
+  #    **JGit 모양만** 보므로 Git Data API 경로를 전혀 보지 못한다. 그 공백을 메운다.
+  #
+  # 🕳 한계를 먼저 적는다 — 새는 방향부터.
+  #    ① 변수명이 upstream 이 아니면 안 걸린다. **거부목록**이고,
+  #       testing-philosophy.md 가 「거부목록으로 방어하지 않는다」고 적은 그 방식이다
+  #    ② 이 스크립트는 src/**/*.java 의 **문자열만** 본다. 실제 위험 표면은 호출 그래프라
+  #       파일 범위와 무관하게 안 잡힌다
+  #    실질 방어는 ⓐ GitHubWriteClient 의 런타임 owner 어설션과
+  #    ⓑ ForkPublishArchitectureTest 의 여집합 ArchUnit 이다. 이 패턴은 **보조**다 —
+  #    방어로 세면 거짓 안전감이 된다.
+  #
+  # ⚠ `\.` 로 메서드 호출 형태를 요구한다. 앵커가 없으면 input( · softDelete( 같은
+  #   평범한 이름이 put( · delete( 를 품어 무고하게 빨개진다.
+  #
+  # ⚠ **첫 인자**만 본다. 인자 전체를 훑으면 `post(fork, "merge-upstream", …)` 이 걸리는데
+  #   그것은 GitHub 엔드포인트 **이름**이고 쓰기 대상은 Fork 다 — 실측으로 걸렸고,
+  #   safety-ok 로 덮는 대신 패턴을 좁혔다. 위험한 모양은 **쓰기 대상이 upstream 인 것**이고
+  #   그것은 첫 인자 자리에 온다. 덮어서 통과시키면 다음 사람이 그 waiver 를 근거로 삼는다.
+  check "$f" "S-1" \
+    '\.(post|patch|put|delete)\([[:space:]]*(upstream|Upstream|UPSTREAM)' \
+    "원본(upstream) 좌표로 REST 쓰기를 보내는 경로로 의심됩니다. 남의 저장소 히스토리는 되돌릴 수 없습니다." \
+    "쓰기 대상은 ForkRef 로만 만드세요. GitHubWriteClient 가 경로 대신 (owner, name, subPath) 를 받아 매 호출 직전 owner 를 단언합니다."
+
   # ── S-2. Draft 고정 · 자동 머지 금지 ─────────────────────────
   check "$f" "S-2" \
     '(setDraft\([[:space:]]*false|draft\([[:space:]]*false|"draft"[[:space:]]*:[[:space:]]*false)' \

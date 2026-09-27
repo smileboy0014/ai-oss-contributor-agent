@@ -112,6 +112,40 @@ class SafetyBoundaryCheckScriptTest {
     }
 
     @Test
+    @DisplayName("upstream 좌표로 가는 REST 쓰기를 차단한다")
+    void upstream_으로_가는_REST_쓰기를_차단한다_S1(@TempDir Path repo) throws Exception {
+        // #22 이후 쓰기 경로는 JGit 이 아니라 REST 다. setRemote·push() 패턴은 이 모양을
+        // 전혀 보지 못하므로 패턴을 하나 더 뒀고, 그것이 실제로 무는지 여기서 본다.
+        writeJava(repo, ("class Probe {\n    void go() {\n        client."
+                        + "post" + "(upstream, \"git/refs\", body);\n    }\n").getBytes(StandardCharsets.UTF_8),
+                ("}\n").getBytes(StandardCharsets.UTF_8));
+
+        ScanResult result = scan(repo, Function.identity(), Map.of());
+
+        assertThat(result.blocked())
+                .as("출력: %s", result.output())
+                .isTrue();
+        assertThat(result.output()).contains("S-1");
+    }
+
+    @Test
+    @DisplayName("쓰기 대상이 Fork 면 하위 경로에 upstream 이 있어도 통과한다")
+    void 엔드포인트_이름의_upstream은_과차단하지_않는다_S1(@TempDir Path repo) throws Exception {
+        // 🔴 merge-upstream 은 GitHub 엔드포인트 이름이고 쓰기 대상은 Fork 다.
+        //    실측에서 걸렸고, safety-ok 로 덮는 대신 패턴을 첫 인자로 좁혔다 —
+        //    과차단으로 죽는 게이트는 반드시 꺼진다.
+        writeJava(repo, ("class Probe {\n    void go() {\n        client."
+                        + "post" + "(fork, \"merge-upstream\", body);\n    }\n").getBytes(StandardCharsets.UTF_8),
+                ("}\n").getBytes(StandardCharsets.UTF_8));
+
+        ScanResult result = scan(repo, Function.identity(), Map.of());
+
+        assertThat(result.blocked())
+                .as("출력: %s", result.output())
+                .isFalse();
+    }
+
+    @Test
     @DisplayName("스크립트를 실제로 실행했다")
     void 스크립트를_실제로_실행했다(@TempDir Path repo) throws Exception {
         // 🔴 0건 통과 방지. 이 스크립트는 대상 java 파일이 없으면 조용히 exit 0 이라,

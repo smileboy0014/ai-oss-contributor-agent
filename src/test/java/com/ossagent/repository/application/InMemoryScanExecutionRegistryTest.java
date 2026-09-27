@@ -1,6 +1,7 @@
 package com.ossagent.repository.application;
 
 import com.ossagent.repository.domain.ScanPhase;
+import com.ossagent.repository.domain.ScanSkipReason;
 import com.ossagent.repository.domain.ScanStage;
 import java.time.Clock;
 import java.time.Instant;
@@ -79,7 +80,7 @@ class InMemoryScanExecutionRegistryTest {
         registry.tryStart(REPO);
         registry.markRunning(REPO);
         registry.markSucceeded(REPO, ScanPipelineResult.skipped(
-                ScanTarget.SkipReason.POLICY_UNAVAILABLE));
+                ScanSkipReason.POLICY_UNAVAILABLE));
 
         assertThat(registry.stateOf(REPO).orElseThrow().isActive()).isFalse();
         assertThat(registry.tryStart(REPO)).isTrue();

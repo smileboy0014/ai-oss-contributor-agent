@@ -16,6 +16,7 @@ import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryMetadata;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RuleReading;
+import com.ossagent.repository.domain.ScanSkipReason;
 import com.ossagent.repository.domain.ScanStage;
 import com.ossagent.repository.domain.ScrubbedRules;
 import com.ossagent.support.testing.AgentIntegrationTest;
@@ -141,7 +142,7 @@ class ScanPipelineUseCaseTest {
         ScanPipelineResult result = pipeline.run(repositoryId);
 
         assertThat(result.skipReason())
-                .isEqualTo(ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN);
+                .isEqualTo(ScanSkipReason.CONTRIBUTION_FORBIDDEN);
         assertThat(issueSource.callCount())
                 .as("반영할 수 없는 판정에 레이트리밋을 쓰지 않는다 — #7 이 세운 원칙")
                 .isZero();
@@ -157,7 +158,7 @@ class ScanPipelineUseCaseTest {
         ScanPipelineResult result = pipeline.run(repositoryId);
 
         assertThat(result.skipReason())
-                .isEqualTo(ScanTarget.SkipReason.POLICY_UNDETERMINED);
+                .isEqualTo(ScanSkipReason.POLICY_UNDETERMINED);
         assertThat(issueSource.callCount()).isZero();
     }
 

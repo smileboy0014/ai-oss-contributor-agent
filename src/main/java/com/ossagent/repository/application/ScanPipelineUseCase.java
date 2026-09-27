@@ -7,6 +7,7 @@ import com.ossagent.issue.application.FilterResult;
 import com.ossagent.issue.application.ScanIssuesUseCase;
 import com.ossagent.issue.application.ScanResult;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
+import com.ossagent.repository.domain.ScanSkipReason;
 import com.ossagent.repository.domain.ScanStage;
 import com.ossagent.support.github.GitHubRateLimitException;
 import com.ossagent.support.observability.PipelineMetrics;
@@ -112,7 +113,7 @@ public class ScanPipelineUseCase {
             //    fetchMetadata 에서 난 리밋은 맨몸으로 여기까지 올라온다
             log.info("규약 분석이 레이트리밋에 걸렸다 repositoryId={} — 다음 주기가 이어받는다",
                     repositoryId);
-            return ScanPipelineResult.skipped(ScanTarget.SkipReason.RATE_LIMITED);
+            return ScanPipelineResult.skipped(ScanSkipReason.RATE_LIMITED);
         } catch (RuntimeException e) {
             stageDone(PipelineStage.POLICY, StageOutcome.FAILED, policyStart);
             throw e;

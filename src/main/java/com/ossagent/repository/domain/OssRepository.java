@@ -8,6 +8,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
+import java.time.Duration;
 import java.time.Instant;
 
 /**
@@ -38,6 +39,18 @@ public class OssRepository {
     private boolean enabled = true;
 
     private Instant lastScannedAt;
+
+    /**
+     * 이 저장소의 스캔 주기(분). 🔴 <b>{@code null} 이면 전역 기본값</b>을 쓴다 — 완료조건 1.
+     *
+     * <p>저장소마다 이슈가 쌓이는 속도가 다른데 전역 주기 하나면 활발한 저장소는 늦고
+     * 조용한 저장소는 레이트리밋을 태운다.
+     *
+     * <p>⚠️ {@code 0} 을 「무제한」으로 읽지 않는다 — {@link #isDueForScan} 이 <b>양의 값만</b>
+     * 받아들이고 나머지는 기본값으로 떨어뜨린다. {@code 0} 이 통과하면 주기가 사라져
+     * 스케줄러가 <b>매 주기마다</b> 그 저장소를 돌린다.
+     */
+    private Integer scanIntervalMinutes;
 
     /**
      * 이슈 증분 수집 커서 — 「데이터를 어디까지 봤나」 (#8).
@@ -113,6 +126,57 @@ public class OssRepository {
 
     public void markScanned(Instant scannedAt) {
         this.lastScannedAt = scannedAt;
+    }
+
+    /** {@code null} 이면 전역 기본값을 쓴다는 뜻이다 — 값 자체가 없는 것이 정상 상태다. */
+    public Integer getScanIntervalMinutes() {
+        return scanIntervalMinutes;
+    }
+
+    /**
+     * 스캔 주기를 바꾼다. {@code null} 을 주면 <b>전역 기본값으로 되돌린다</b>.
+     *
+     * <p>⚠️ 이 값을 <b>바꾸는 API 는 아직 없다</b> (#26 범위 밖). 지금 이 메서드의 소비자는
+     * 테스트뿐이고, 운영에서는 DB 기본값({@code NULL} = 전역 기본)으로만 쓰인다.
+     * 그 사실을 적어 두지 않으면 다음 사람이 「설정할 수 있다」고 읽는다.
+     */
+    public void updateScanInterval(Integer minutes) {
+        this.scanIntervalMinutes = minutes;
+    }
+
+    /**
+     * 지금 스캔할 차례인가 — 정기 스케줄러가 <b>누구를 부를지</b> 고르는 판정 (FR-2).
+     *
+     * <p>자기 애그리거트 데이터({@link #lastScannedAt}·{@link #scanIntervalMinutes})만으로
+     * 답할 수 있으므로 엔티티에 둔다 — {@code architecture.md} §3 결정 트리 Q1.
+     *
+     * <h2>🔴 한 번도 안 돌았으면 <b>즉시 대상</b>이다</h2>
+     *
+     * <p>{@code lastScannedAt} 이 {@code null} 일 때 「모르니 건너뛴다」로 두면 새로 등록한
+     * 저장소가 <b>영원히 스캔되지 않는다.</b> 주기 필터가 모든 저장소를 걸러 스캔이 영영
+     * 안 도는 것이 이 기능의 가장 조용한 고장 모드다.
+     *
+     * <h2>⚠️ {@code lastScannedAt} 은 「요청 시각」이라 실패해도 전진한다</h2>
+     *
+     * <p>즉 <b>실패한 스캔도 주기를 소모한다.</b> 결함이 아니라 의도다 — 계속 실패하는
+     * 저장소가 매 주기마다 GitHub·LLM 을 태우는 쪽이 더 나쁘다. 「조용히 스캔 안 됨」은
+     * {@code scan_execution.phase = FAILED} 와 메트릭에 드러난다.
+     *
+     * @param defaultInterval {@link #scanIntervalMinutes} 가 없을 때 쓸 전역 기본값
+     */
+    public boolean isDueForScan(Instant now, Duration defaultInterval) {
+        if (now == null || defaultInterval == null) {
+            throw new IllegalArgumentException("현재 시각과 기본 주기는 필수다");
+        }
+        if (lastScannedAt == null) {
+            return true;
+        }
+        Duration interval = scanIntervalMinutes != null && scanIntervalMinutes > 0
+                ? Duration.ofMinutes(scanIntervalMinutes)
+                : defaultInterval;
+        // 🔴 경계는 포함이다. 배타로 잡으면 고정 주기 스케줄러에서 「정확히 주기만큼 지난」
+        //    순간이 매번 한 박자씩 밀려 실질 주기가 두 배가 된다
+        return !now.isBefore(lastScannedAt.plus(interval));
     }
 
     public Instant getIssueCursorUpdatedAt() {

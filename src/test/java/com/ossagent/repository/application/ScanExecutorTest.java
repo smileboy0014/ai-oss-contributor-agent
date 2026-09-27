@@ -1,6 +1,7 @@
 package com.ossagent.repository.application;
 
 import com.ossagent.repository.domain.ScanPhase;
+import com.ossagent.repository.domain.ScanSkipReason;
 import com.ossagent.repository.domain.ScanStage;
 import java.time.Clock;
 import java.time.Instant;
@@ -50,7 +51,7 @@ class ScanExecutorTest {
     void 건너뛴_실행은_SKIPPED_다() {
         registry.tryStart(REPO);
         when(pipeline.run(REPO)).thenReturn(
-                ScanPipelineResult.skipped(ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN));
+                ScanPipelineResult.skipped(ScanSkipReason.CONTRIBUTION_FORBIDDEN));
 
         executor.execute(REPO);
 

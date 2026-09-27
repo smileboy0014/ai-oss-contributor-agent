@@ -9,6 +9,7 @@ import com.ossagent.repository.application.ScanTarget;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RuleReading;
+import com.ossagent.repository.domain.ScanSkipReason;
 import com.ossagent.repository.domain.ScanStage;
 import com.ossagent.repository.domain.ScrubbedRules;
 import com.ossagent.support.testing.AgentIntegrationTest;
@@ -126,7 +127,7 @@ class ScanTriggerIntegrationTest {
     void 건너뛴_실행은_SKIPPED_다() throws Exception {
         registry.tryStart(repositoryId);
         registry.markSkipped(repositoryId,
-                ScanPipelineResult.skipped(ScanTarget.SkipReason.CONTRIBUTION_FORBIDDEN));
+                ScanPipelineResult.skipped(ScanSkipReason.CONTRIBUTION_FORBIDDEN));
 
         mockMvc.perform(get("/api/repositories/{id}/scan", repositoryId))
                 .andExpect(status().isOk())

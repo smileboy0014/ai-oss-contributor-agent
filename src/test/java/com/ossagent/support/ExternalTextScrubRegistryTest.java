@@ -186,6 +186,16 @@ class ExternalTextScrubRegistryTest {
                             + " 루프가 실패 사유를 모델에 되먹인다). 빌드 스크립트가 환경변수를"
                             + " 찍는 것이 흔하다 (#19)")),
 
+            // ── #21 재시도 루프 — 실패 사유가 다음 바퀴 프롬프트로 되돌아간다 ────────
+            // 🔴 여기 실리는 것은 DB 가 아니라 **LLM 프롬프트**로 나간다. 출처가 둘뿐이고
+            //    양쪽 다 이미 생성자에서 스크럽이 강제되므로 여기서 두 벌을 두지 않는다 —
+            //    ⚠ 그 전제가 깨지면(String 을 그대로 받는 생성 경로가 생기면) 여기가 유출구다
+            Map.entry("CodingFeedback.points", new Decision(Mechanism.VALUE_TYPE,
+                    "출처가 StageResult.summary(#19) 와 DiffReview.findings(#20) 뿐이고"
+                            + " 둘 다 compact 생성자가 redact 를 강제한다. CodingFeedback 은"
+                            + " 그 값만 담는 팩토리 둘(of(StageResult)·of(DiffReview))로만"
+                            + " 만들어진다. 송신 직전 PromptScrubber 가 한 번 더 돈다 (#21)")),
+
             Map.entry("SelectedFile.content", new Decision(Mechanism.VALUE_TYPE,
                     "SelectedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"
                             + " 경로가 없다. ⚠ SecretFilePolicy 가 이것을 대신하지 않는다 —"

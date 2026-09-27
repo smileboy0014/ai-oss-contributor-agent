@@ -165,36 +165,6 @@ class CandidateImplementationWriter {
         return change.getId();
     }
 
-    /**
-     * 🔴 후보를 {@code FAILED} 로 떨어뜨린다 — <b>종단이고, 그 자체가 사람에게 넘기는 신호</b>다 (S-6).
-     *
-     * <p>별도 트랜잭션인 이유 — 실패는 <b>트랜잭션 밖에서 일어난 일</b>(샌드박스·LLM)에
-     * 대한 기록이다. 원래 트랜잭션은 이미 커밋됐다.
-     *
-     * <h2>🔴 사유가 <b>로그에만</b> 남는다 — 알고 남긴 잔여다 (#18 리뷰)</h2>
-     *
-     * <p>{@code FAILED} 는 종단이라 되돌릴 수 없는데, 사람이 API·DB 로 볼 수 있는 것은
-     * <b>상태뿐</b>이고 왜 실패했는지는 로그를 뒤져야 안다. 「그 자체가 사람에게 넘기는
-     * 신호」라면서 <b>신호에 내용이 없는</b> 상태다.
-     *
-     * <p>지금 고치지 않는 이유 — 사유를 실을 자리는 {@code AgentRun.errorMessage} 인데
-     * ({@code safety-boundaries.md} S-4 의 강제 지점 표) 그 적재는 <b>후보 단위</b>이고
-     * {@code AgentRunRecorder} 는 <b>LLM 호출 1건</b>을 세는 다른 축이다
-     * ({@code started}/{@code succeeded}/{@code failed} 가 전부 {@code LlmUsage} 를 받는다).
-     * 후보 단위 실패 기록은 재시도 루프와 함께 서야 한다 — <b>#21</b> 이 그 자리다.
-     *
-     * <p>⚠ 그때도 사유를 그대로 싣지 않는다. 이 값은 이미 우리 어휘로 좁혀져 있지만
-     * {@code AgentRun.fail(...)} 의 스크럽을 거치는 것이 계약이다.
-     */
-    @Transactional
-    void fail(Long candidateId, String reason) {
-        ContributionCandidate candidate = candidates.findById(candidateId)
-                .orElseThrow(() -> new CandidateNotFoundException(candidateId));
-        candidate.fail(clock);
-        // ⚠ 사유는 우리 어휘로만 남긴다. 대상 저장소 텍스트·빌드 출력을 그대로 넣으면
-        //   S-4 대상이 되고 로그 인젝션 경로가 된다
-        log.warn("후보 실패 candidateId={} reason={}", candidateId, reason);
-    }
 
     /** 🔴 커밋 확정 후에만 게이트 통과를 남긴다 — {@code logging.md} 「통과한 것도 남긴다」. */
     private void logAfterCommit(Long candidateId, StatusTransition transition) {

@@ -52,13 +52,42 @@ class SandboxChangeVerifierTest {
 
     private Path workspace;
     private FakeCodeSandbox sandbox;
+    private com.ossagent.agent.domain.FakeDependencyCache dependencyCache;
     private SandboxChangeVerifier verifier;
 
     @BeforeEach
     void setUp() throws IOException {
         workspace = Files.createDirectories(root.resolve("candidate-1"));
         sandbox = new FakeCodeSandbox();
-        verifier = new SandboxChangeVerifier(sandbox, properties(root));
+        dependencyCache = new com.ossagent.agent.domain.FakeDependencyCache();
+        verifier = new SandboxChangeVerifier(sandbox, dependencyCache, properties(root));
+    }
+
+    // ── 의존성 캐시 (#18 배선) ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("🔴 실행 전에 의존성 캐시를 준비한다 — 빈 캐시로 돌리면 「테스트 실패」로 오분류된다")
+    void 실행_전에_캐시를_준비한다() {
+        verifier.verify(request(constraints("./gradlew compileJava", "./gradlew test")));
+
+        assertThat(dependencyCache.prepared())
+                .as("🔴 준비 없이 network=none 으로 돌리면 의존성 해석 실패가 빌드 실패로 보고된다")
+                .isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("🔴 캐시 준비가 실패하면 대상 저장소 명령을 돌리지 않는다")
+    void 캐시_준비가_실패하면_실행하지_않는다() {
+        dependencyCache.thenFailWith(
+                new com.ossagent.agent.domain.SandboxPermanentException("워밍 실패"));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        verifier.verify(request(constraints("./gradlew compileJava", null))))
+                .isInstanceOf(com.ossagent.agent.domain.SandboxException.class);
+
+        assertThat(sandbox.commands())
+                .as("🔴 준비가 실패했는데 실행하면 그 결과가 후보의 코드 탓으로 기록된다")
+                .isEmpty();
     }
 
     // ── S-3 ────────────────────────────────────────────────────────────────

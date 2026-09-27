@@ -6,6 +6,7 @@ import com.ossagent.candidate.adapter.in.web.dto.PageResponse;
 import com.ossagent.candidate.adapter.in.web.dto.SelectionResponse;
 import com.ossagent.candidate.application.CandidateQuery;
 import com.ossagent.candidate.application.FindCandidatesUseCase;
+import com.ossagent.candidate.application.ImplementCandidateUseCase;
 import com.ossagent.candidate.application.SelectCandidateUseCase;
 import com.ossagent.candidate.domain.CandidateStatus;
 import jakarta.validation.constraints.Max;
@@ -29,11 +30,13 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>#24 가 {@code select} 와 {@code reject}(선택 취소)를 열었다. 둘 다 사람이 부르는 문이고,
  * <b>상태만 바꾸고 끝난다</b> — 여기서 다음 단계로 흘려보내지 않는다.
  *
- * <p>⚠️ <b>{@code implement}·{@code pull-request} 는 아직 없다.</b> 「나중에 추가」가 아니라
- * <b>지금 만들면 후보가 빠져나올 수 없는 상태에 갇히기 때문</b>이다 —
- * {@code implement} 는 {@code IMPLEMENTING} 에서 나갈 트리거가 없고,
- * {@code pull-request} 는 <b>PR 없이 종단 {@code PR_CREATED}</b> 를 만든다.
- * 실행기와 함께 열린다 — #18 · #23.
+ * <p>#18 이 {@code implement}(착수)를 열었다. 🔴 <b>실행기와 함께</b> 열었다는 것이 요점이다 —
+ * {@code IMPLEMENTING} 에서 나갈 트리거가 없으면 후보가 갇히고, 그래서 #24 는 이 문을
+ * 열지 않았다. 검증기가 아직 배선되지 않았더라도 후보는 <b>{@code FAILED} 로 떨어진다</b>
+ * (종단이고, 그 자체가 사람에게 넘기는 신호다 — S-6).
+ *
+ * <p>⚠️ <b>{@code pull-request} 는 아직 없다.</b> 「나중에 추가」가 아니라 지금 만들면
+ * <b>PR 없이 종단 {@code PR_CREATED}</b> 가 만들어지기 때문이다 — #23 이 실행기와 함께 연다.
  */
 @RestController
 @RequestMapping("/api/candidates")
@@ -41,11 +44,14 @@ public class CandidateController {
 
     private final FindCandidatesUseCase findCandidates;
     private final SelectCandidateUseCase selectCandidate;
+    private final ImplementCandidateUseCase implementCandidate;
 
     public CandidateController(FindCandidatesUseCase findCandidates,
-            SelectCandidateUseCase selectCandidate) {
+            SelectCandidateUseCase selectCandidate,
+            ImplementCandidateUseCase implementCandidate) {
         this.findCandidates = findCandidates;
         this.selectCandidate = selectCandidate;
+        this.implementCandidate = implementCandidate;
     }
 
     /**
@@ -109,5 +115,34 @@ public class CandidateController {
     @PostMapping("/{id}/reject")
     public SelectionResponse reject(@PathVariable Long id) {
         return SelectionResponse.from(id, selectCandidate.reject(id));
+    }
+
+    /**
+     * 🔴 <b>사람이 착수를 지시한다</b> — {@code SELECTED → IMPLEMENTING}. S-6 <b>두 번째 게이트</b>.
+     *
+     * <p>선정(트리아지)과 다르다 — 이 호출은 <b>LLM + 샌드박스 최대 30분</b>을 태운다.
+     * Q-5 가 둘을 가른 이유이고, 「관심 있다」가 곧바로 30분짜리 실행이 되면 고를 수가 없다.
+     *
+     * <h2>🔴 여기서 PR 까지 가지 않는다</h2>
+     *
+     * <p>PRD §24 시퀀스는 이 호출 하나가 <b>Draft PR 생성까지</b> 하는 것으로 그려져 있으나
+     * <b>그 다이어그램이 틀렸다</b>(#30). 그대로 구현하면 <b>세 번째 게이트가 사라지고
+     * S-2 까지 뚫린다.</b> PR 생성은 {@code POST /{id}/pull-request} 로 #23 이 연다.
+     *
+     * <h2>🔴 {@code PolicyClearance} 를 받지 않는다</h2>
+     *
+     * <p>파라미터·요청 바디로 받으면 <b>외부가 통행증을 주입</b>할 수 있고 게이트가 껍데기가 된다.
+     * 통행증은 {@code AnalyzeRepositoryPolicyUseCase.clearanceFor} 가 <b>후보의 저장소로</b>
+     * 발급하는 것만 유효하다 — {@code ApprovalGateArchitectureTest} 가 그 사실을 고정한다.
+     *
+     * <p>⚠️ 보류·금지 저장소면 <b>403</b> 이다 (S-5). 보류는 시간이나 재시도로 풀리지 않고
+     * {@code POST /api/repositories/{id}/policy/resolution} 으로 <b>사람이 해소</b>한다 (Q-8).
+     *
+     * <p>⚠️ <b>멱등이 아니다.</b> 두 번째 호출은 409 다 — {@code select} 와 같은 이유로,
+     * 승인은 「몇 번 눌러도 같은 결과」가 아니라 <b>한 번 일어난 사건</b>이어야 한다.
+     */
+    @PostMapping("/{id}/implement")
+    public SelectionResponse implement(@PathVariable Long id) {
+        return SelectionResponse.from(id, implementCandidate.implement(id));
     }
 }

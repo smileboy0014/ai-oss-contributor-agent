@@ -414,6 +414,36 @@ public class AnalyzeRepositoryPolicyUseCase {
     }
 
     /**
+     * 🔴 대상 저장소 <b>좌표</b>를 값으로 돌려준다 — #18.
+     *
+     * <h2>왜 이 메서드가 필요한가</h2>
+     *
+     * <p>{@code repositoryId} 만으로는 <b>clone 도 캐시 볼륨도 만들 수 없다.</b>
+     * clone URL 에 {@code owner/name} 이 필요하고 {@code SandboxCacheVolume.forRepository}
+     * 도 좌표를 받는다.
+     *
+     * <p>⚠️ 그리고 {@code candidate} 는 규율 ④ 때문에 {@code OssRepository} 엔티티를
+     * <b>직접 읽을 수 없다.</b> 이 경로가 없으면 구현 중 <b>「그냥 import 하자」</b>가 나온다 —
+     * PLAN-18 D-5 가 그렇게 예언한 자리다.
+     *
+     * <p>{@link #constraintsOf} 와 같은 이유로 여기 둔다 — 정책과 좌표를 같은 빈에서
+     * 받으면 호출자가 <b>두 도메인을 알 필요가 없다.</b>
+     *
+     * @throws RepositoryNotFoundException 등록되지 않은 저장소다. 🔴 <b>「좌표를 모른다」를
+     *         빈 값으로 돌려주지 않는다</b> — 그러면 호출자가 빈 좌표로 clone 을 시도한다
+     */
+    @Transactional(readOnly = true)
+    public RepositoryCoordinates coordinatesOf(Long repositoryId) {
+        if (repositoryId == null) {
+            throw new IllegalArgumentException("저장소 식별자는 필수다");
+        }
+        return repositories.findById(repositoryId)
+                .map(repository -> new RepositoryCoordinates(
+                        repository.getOwner(), repository.getName()))
+                .orElseThrow(() -> new RepositoryNotFoundException(repositoryId));
+    }
+
+    /**
      * ⚠️ <b>{@code @Transactional} 을 붙이지 않는다 — 붙여도 적용되지 않는다.</b>
      *
      * <p>{@code analyze}·{@code ensurePolicy} 가 {@code this} 로 부르는 self-invocation

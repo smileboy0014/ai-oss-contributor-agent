@@ -22,10 +22,14 @@ import org.springframework.test.web.servlet.MockMvc;
  * <b>상태 코드</b>와 <b>열려 있지 않은 문</b>이다. 업무 규칙은 그쪽이 본다.
  *
  * <p>픽스처: 101·102 = {@code ANALYZED} · 103 = {@code SELECTED} · 104 = {@code DISCOVERED}.
+ *
+ * <p>🔴 #18 분은 <b>별도 파일</b>이다({@code candidate-implement-fixtures.sql}) — 공유 픽스처에
+ * 후보를 더했더니 {@code CandidateQueryIntegrationTest} 의 개수·페이지 경계 단언이 깨졌다.
+ * 조회 테스트는 「전체가 몇 건인가」를, 이쪽은 「게이트가 막는가」를 본다.
  */
 @AgentIntegrationTest
 @AutoConfigureMockMvc
-@Sql("/sql/candidate-fixtures.sql")
+@Sql({"/sql/candidate-fixtures.sql", "/sql/candidate-implement-fixtures.sql"})
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class CandidateApprovalApiTest {
 
@@ -71,15 +75,70 @@ class CandidateApprovalApiTest {
     }
 
     @Test
-    @DisplayName("착수·PR 생성 엔드포인트는 존재하지 않는다 — S-6 · S-2")
-    void 착수와_PR생성_엔드포인트는_없다_S6() throws Exception {
-        // 🔴 「아직 안 만들었다」를 테스트로 고정한다. 둘 다 지금 열면 후보가 빠져나올 수 없는
-        //    상태에 갇히고(IMPLEMENTING 탈출 트리거 없음 · PR 없는 종단 PR_CREATED),
-        //    pull-request 는 S-2 까지 닿는다. 실행기와 함께 연다 — #18 · #23
-        mockMvc.perform(post("/api/candidates/103/implement"))
-                .andExpect(status().isNotFound());
+    @DisplayName("PR 생성 엔드포인트는 아직 존재하지 않는다 — S-2 · S-6")
+    void PR생성_엔드포인트는_없다_S6() throws Exception {
+        // 🔴 「아직 안 만들었다」를 테스트로 고정한다. 지금 열면 **PR 없이 종단
+        //    PR_CREATED** 가 만들어지고 S-2 까지 닿는다. 실행기와 함께 연다 — #23.
+        //
+        //    ⚠ 착수(implement)는 #18 이 **실행기와 함께** 열었으므로 여기서 빠졌다.
+        //    테스트를 지운 것이 아니라 **대상이 하나 줄어든 것**이다 —
+        //    지우면 pull-request 까지 함께 열려도 아무것도 빨개지지 않는다
         mockMvc.perform(post("/api/candidates/103/pull-request"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("실행기가 없으면 착수를 시작하지 않는다 — 503 · 후보가 살아남는다")
+    void 실행기가_없으면_착수를_시작하지_않는다_S6() throws Exception {
+        // 🔴 이 PR 은 C(코딩)·D(산출)가 미완이다. 그때 「일단 전이하고 FAILED 로
+        //    떨어뜨린다」를 택하면 **사람이 버튼 한 번으로 후보를 영구히 죽인다** —
+        //    IMPLEMENTING 에서 나갈 길이 TESTING·FAILED 뿐이고 FAILED 는 종단이다.
+        //
+        //    그래서 전이 **전에** 막는다. 503 은 「요청이 틀렸다」가 아니라
+        //    「지금 할 수 없다」이고, 배선 뒤에는 같은 요청이 성공한다.
+        mockMvc.perform(post("/api/candidates/103/implement"))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    @DisplayName("🔴 막힌 뒤에도 후보는 그대로 고른 상태다 — 아무것도 태우지 않았다")
+    void 막힌_뒤에도_후보는_그대로_고른_상태다_S6() throws Exception {
+        mockMvc.perform(post("/api/candidates/103/implement"))
+                .andExpect(status().isServiceUnavailable());
+
+        // 🔴 이것이 이 설계의 전부다. 상태가 바뀌었다면 되돌릴 수 없는 일이 일어난 것이다.
+        //    「503 을 받았다」만 보고 통과시키면 그 사실이 검증되지 않는다
+        mockMvc.perform(post("/api/candidates/103/reject"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.from").value("SELECTED"));
+    }
+
+    @Test
+    @DisplayName("고르지 않은 후보는 착수할 수 없다 — S-6")
+    void 고르지_않은_후보는_착수할_수_없다_S6() throws Exception {
+        // 🔴 사람이 고른 적 없는 후보가 구현 단계로 가면 첫 번째 게이트가 무의미해진다.
+        //    102 는 ANALYZED 라 selectedAt 이 비어 있다
+        mockMvc.perform(post("/api/candidates/102/implement"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("보류 저장소의 후보는 착수할 수 없다 — 403 · S-5")
+    void 보류_저장소의_후보는_착수할_수_없다_S5() throws Exception {
+        // 🔴 105 는 **사람이 골랐다**(SELECTED). 그래도 막혀야 한다 —
+        //    「사람이 골랐으니 통과」가 되면 S-5 가 S-6 에 먹힌다.
+        //
+        //    보류는 NULL 이고 「허용」이 아니다. 시간·재시도로 풀리지 않고
+        //    POST /api/repositories/{id}/policy/resolution 으로 사람이 해소한다 (Q-8)
+        mockMvc.perform(post("/api/candidates/105/implement"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("AI 기여를 금지한 저장소의 후보는 착수할 수 없다 — 403 · S-5")
+    void 금지_저장소의_후보는_착수할_수_없다_S5() throws Exception {
+        mockMvc.perform(post("/api/candidates/106/implement"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

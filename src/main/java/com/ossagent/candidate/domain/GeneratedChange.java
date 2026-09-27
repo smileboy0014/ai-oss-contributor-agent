@@ -64,4 +64,49 @@ public class GeneratedChange {
 
     @Column(nullable = false)
     private Instant createdAt;
+
+    /**
+     * 🔴 <b>유일한 생성 경로</b> — 여기서 {@code diff} 를 스크럽한다 (S-4 · #18).
+     *
+     * <h2>왜 팩토리 하나만 두나</h2>
+     *
+     * <p>{@code ExternalTextScrubRegistryTest} 가 이 필드를 <b>「쓰는 코드가 아직 없다」</b>로
+     * 두고 담당을 #18 로 지목해 뒀다. 그 「쓰는 코드」가 이것이다.
+     *
+     * <p>경로가 하나뿐이면 <b>스크럽을 건너뛸 수 없다.</b> Q-7 이 {@code @Builder} 를 금지한
+     * 근거와 같다 — 「생성 경로가 늘면 불법 상태를 만들 수 있다」.
+     *
+     * <p>⚠️ <b>{@code diff} 를 받는 setter·{@code with…} 를 만들지 않는다.</b> 하나만 생겨도
+     * 이 보증이 우회되고 <b>기존 테스트는 그대로 초록</b>이다 — 그 테스트는 우회 경로를 모른다.
+     *
+     * <h2>여기서 채우지 <b>않는</b> 것</h2>
+     *
+     * <p>{@code testResult} 는 <b>#19</b>, {@code reviewResult} 는 <b>#20</b> 이 채운다.
+     * 생성 시점에는 아직 검증 전이므로 <b>담을 값이 없다</b> — 빈 문자열로 채우면
+     * 「검증했는데 출력이 없다」와 구분되지 않는다.
+     *
+     * @param candidateId 다른 애그리거트로의 ID 참조
+     * @param branchName  PRD §14 의 {@code oss-agent/issue-{번호}-{설명}}
+     * @param diff        🔴 <b>스크럽 전 원문</b>. 이 메서드가 스크럽한다
+     */
+    public static GeneratedChange record(Long candidateId, String branchName, String diff,
+            java.time.Clock clock) {
+        if (candidateId == null) {
+            throw new IllegalArgumentException("후보 식별자는 필수다");
+        }
+        if (branchName == null || branchName.isBlank()) {
+            throw new IllegalArgumentException("브랜치 이름은 필수다 — PRD §14");
+        }
+        if (diff == null) {
+            // 🔴 빈 문자열과 null 을 가른다. 빈 diff 는 「바뀐 것이 없다」이고
+            //    null 은 「못 만들었다」다 — 뭉개면 전자로 읽혀 조용히 지나간다
+            throw new IllegalArgumentException("diff 는 필수다 — 변경이 없으면 빈 문자열이다");
+        }
+        GeneratedChange change = new GeneratedChange();
+        change.candidateId = candidateId;
+        change.branchName = branchName;
+        change.diff = com.ossagent.support.secret.TokenRedactor.redact(diff);
+        change.createdAt = java.time.Instant.now(clock);
+        return change;
+    }
 }

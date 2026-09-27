@@ -76,7 +76,8 @@ curl -X POST http://localhost:8080/api/repositories \
     ├── issue/                 이슈 증분 수집 ✅ · 규칙 필터 ✅ (트리거 없음)
     ├── candidate/             기여 후보 · 상태 전이
     │   └── adapter/out/notification/  새 후보 알림 — 🔴 로그·메트릭뿐이다 (외부 전송 아님)
-    ├── agent/                 LLM 능력·어댑터 ✅ · Docker 샌드박스 ✅ (호출자 없음)
+    ├── agent/                 LLM 능력·어댑터 ✅ · Docker 샌드박스 ✅
+    │                          · 워크스페이스(JGit) ✅ · 워밍→씨딩→실행 ✅
     └── pullrequest/           Fork 확보 · commit · push ✅ (호출자 없음 — 배선은 #23)
                                Draft PR ⬜ #23
 ```

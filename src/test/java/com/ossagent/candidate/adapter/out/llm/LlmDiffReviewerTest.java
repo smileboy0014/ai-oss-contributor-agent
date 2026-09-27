@@ -121,6 +121,49 @@ class LlmDiffReviewerTest {
         assertThat(runs.succeeded).isEqualTo(1);
     }
 
+    @Test
+    void 자바_버전만_아는_것은_규약을_아는_것이_아니다_S5() {
+        // 🔴 javaVersion 은 **빌드 대상**이지 기여 관습이 아니다. 이것 하나로 「규약을 안다」가
+        //    되면 sign-off·이슈 참조·테스트 동반을 하나도 모르는데 모델의 true 를 믿게 된다
+        LlmDiffReviewer reviewer = reviewer((ctx, req) -> new LlmResponse(body("PASS"), usage()),
+                DiffReviewProperties.defaults());
+
+        DiffReview review = reviewer.review(CONTEXT, new DiffReviewRequest("diff", issue(),
+                new ContributionConstraints("21", null, null, false, false, false)));
+
+        assertThat(review.followsConventions())
+                .as("모델은 true 로 답했다. 관습에 대해 아는 것이 없으면 믿을 수 없다")
+                .isNull();
+    }
+
+    @Test
+    void 관습_필드가_하나라도_있으면_규약을_아는_것이다_S5() {
+        // 반대 방향도 고정한다 — 이 판정이 항상 null 을 내면 관습 축이 영영 죽는다
+        LlmDiffReviewer reviewer = reviewer((ctx, req) -> new LlmResponse(body("PASS"), usage()),
+                DiffReviewProperties.defaults());
+
+        DiffReview review = reviewer.review(CONTEXT, new DiffReviewRequest("diff", issue(),
+                new ContributionConstraints(null, null, null, false, false, true)));
+
+        assertThat(review.followsConventions())
+                .as("sign-off 필수를 안다 — 관습을 판정할 근거가 있다")
+                .isTrue();
+    }
+
+    @Test
+    void 문자열이_아닌_지적_원소는_사유를_정확히_말하며_거부한다() {
+        LlmDiffReviewer reviewer = reviewer((ctx, req) -> new LlmResponse("""
+                {"verdict":"CHANGES_REQUESTED","satisfiesIssue":false,"withinScope":true,
+                 "followsConventions":true,"testsAdequate":true,
+                 "summary":"고칠 것","findings":[{"note":"객체다"}]}""", usage()),
+                DiffReviewProperties.defaults());
+
+        assertThatThrownBy(() -> reviewer.review(CONTEXT, request("diff")))
+                .as("막는 것과 「왜 막혔는지 정확히 말하는 것」은 다른 일이다")
+                .isInstanceOf(DiffReviewRejectedException.class)
+                .hasMessageContaining("findings 원소");
+    }
+
     // ─────────────────────── 도우미 ───────────────────────
 
     private static LlmDiffReviewer reviewer(LanguageModel model, DiffReviewProperties properties) {

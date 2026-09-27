@@ -209,7 +209,17 @@ public class LlmDiffReviewer implements DiffReviewer {
                     "findings 가 배열이 아닙니다: " + node.getNodeType());
         }
         List<String> findings = new ArrayList<>(node.size());
-        node.forEach(element -> findings.add(element.asText()));
+        node.forEach(element -> {
+            // ⚠ asText() 로 뭉뚱그리면 객체·배열 원소가 ""가 되고, 그것을 DiffReview 가
+            //   「빈 지적」으로 거부한다 — 막히기는 하지만 사유가 오도된다.
+            //   막는 것과 「왜 막혔는지 정확히 말하는 것」은 다른 일이다
+            if (!element.isTextual()) {
+                throw new DiffReviewRejectedException(
+                        DiffReviewRejectedException.Reason.SCHEMA,
+                        "findings 원소가 문자열이 아닙니다: " + element.getNodeType());
+            }
+            findings.add(element.textValue());
+        });
         return findings;
     }
 

@@ -124,6 +124,20 @@ tasks.withType<Test>().configureEach {
             .withPropertyName("harnessScripts")
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // 🔴 #23 이 위 「남는 구멍」을 한 자리에서 닫는다.
+    //   ForkPublishArchitectureTest.쓰기_엔드포인트가_화이트리스트_안이다_S2 가 이 디렉터리의
+    //   소스를 **텍스트로** 읽는다. 그 가드가 보는 것은 subPath **문자열 리터럴**이라
+    //   바이트코드를 바꾸지 않는 변경(주석 안의 코드 예시 · 문자열 상수 재배치)으로도
+    //   판정이 달라진다 — 위 PromptBoundaryTest 와 사정이 다르다.
+    //
+    //   ⚠ 범위가 디렉터리 하나라 전 스위트 재실행 비용이 작다. 그것이 여기만 선언하고
+    //     src/main 전체를 선언하지 않는 이유다.
+    inputs.files(fileTree("$rootDir/src/main/java/com/ossagent/pullrequest/adapter/out/github") {
+        include("**/*.java")
+    })
+            .withPropertyName("writeAdapterSources")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // Testcontainers 가 물고 오는 docker-java 는 API 버전을 협상하지 않고 기본값(v1.32)으로
     // 요청하는데, 최신 Docker 엔진이 이를 400 으로 거부한다. 증상이
     // 「Could not find a valid Docker environment」라 Docker 가 안 떠 있는 것처럼 보이지만

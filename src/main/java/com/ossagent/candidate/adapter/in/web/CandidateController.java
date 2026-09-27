@@ -2,9 +2,11 @@ package com.ossagent.candidate.adapter.in.web;
 
 import com.ossagent.candidate.adapter.in.web.dto.CandidateDetail;
 import com.ossagent.candidate.adapter.in.web.dto.CandidateSummary;
+import com.ossagent.candidate.adapter.in.web.dto.DraftPrResponse;
 import com.ossagent.candidate.adapter.in.web.dto.PageResponse;
 import com.ossagent.candidate.adapter.in.web.dto.SelectionResponse;
 import com.ossagent.candidate.application.CandidateQuery;
+import com.ossagent.candidate.application.CreateDraftPrUseCase;
 import com.ossagent.candidate.application.FindCandidatesUseCase;
 import com.ossagent.candidate.application.ImplementCandidateUseCase;
 import com.ossagent.candidate.application.SelectCandidateUseCase;
@@ -35,8 +37,9 @@ import org.springframework.web.bind.annotation.RestController;
  * 열지 않았다. 검증기가 아직 배선되지 않았더라도 후보는 <b>{@code FAILED} 로 떨어진다</b>
  * (종단이고, 그 자체가 사람에게 넘기는 신호다 — S-6).
  *
- * <p>⚠️ <b>{@code pull-request} 는 아직 없다.</b> 「나중에 추가」가 아니라 지금 만들면
- * <b>PR 없이 종단 {@code PR_CREATED}</b> 가 만들어지기 때문이다 — #23 이 실행기와 함께 연다.
+ * <p>#23 이 {@code pull-request} 를 열어 <b>승인 지점 셋이 전부 열렸다.</b> 여기도 같은 강제를
+ * 지켰다 — PR 생성기와 <b>같은 PR 에서</b> 열었다. 먼저 열었다면 <b>PR 없이 종단
+ * {@code PR_CREATED}</b> 가 만들어졌을 것이고, 종단이라 빠져나올 수도 없다.
  */
 @RestController
 @RequestMapping("/api/candidates")
@@ -45,13 +48,16 @@ public class CandidateController {
     private final FindCandidatesUseCase findCandidates;
     private final SelectCandidateUseCase selectCandidate;
     private final ImplementCandidateUseCase implementCandidate;
+    private final CreateDraftPrUseCase createDraftPr;
 
     public CandidateController(FindCandidatesUseCase findCandidates,
             SelectCandidateUseCase selectCandidate,
-            ImplementCandidateUseCase implementCandidate) {
+            ImplementCandidateUseCase implementCandidate,
+            CreateDraftPrUseCase createDraftPr) {
         this.findCandidates = findCandidates;
         this.selectCandidate = selectCandidate;
         this.implementCandidate = implementCandidate;
+        this.createDraftPr = createDraftPr;
     }
 
     /**
@@ -144,5 +150,36 @@ public class CandidateController {
     @PostMapping("/{id}/implement")
     public SelectionResponse implement(@PathVariable Long id) {
         return SelectionResponse.from(id, implementCandidate.implement(id));
+    }
+
+    /**
+     * 🔴 <b>사람이 Draft PR 을 내보낸다</b> — {@code READY_FOR_PR → PR_CREATED}.
+     * S-6 <b>세 번째</b>이자 마지막 게이트이고, <b>여기서 자동화가 끝난다.</b>
+     *
+     * <p>#24 가 이 문을 열지 않은 이유는 일정이 아니라 <b>지금 열면 PR 없이 종단
+     * {@code PR_CREATED} 가 되기 때문</b>이었다. #23 이 PR 생성기와 <b>같은 PR 에서</b>
+     * 열므로 그 조건이 해소됐다 — {@code CandidateApprovalApiTest} 의 404 회귀를
+     * 함께 고치는 것이 그 강제였다.
+     *
+     * <p>⚠️ <b>셋이 열렸다고 하나로 합치지 않는다.</b> #18 이 {@code implement} 를 열어
+     * 게이트 셋이 모두 서 있지만, 「{@code implement} 가 PR 까지 흘려보내면 반려」는 그대로다
+     * (S-6). PRD §24 시퀀스가 그렇게 그려져 있었고 <b>그 다이어그램이 틀렸다</b>(#30).
+     *
+     * <p>⚠️ <b>요청 바디가 없다.</b> {@code select} 와 같은 이유다 — 제목·본문을 받기
+     * 시작하면 게이트가 파라미터화되고, 그러면 외부가 대상 저장소에 나가는 텍스트를
+     * 직접 주입할 수 있게 된다(S-4).
+     *
+     * <p>⚠️ <b>멱등이 아니다.</b> 두 번째 호출은 409 다 — {@code PR_CREATED} 는 종단이라
+     * 나가는 전이가 없다. 「승인을 몇 번 눌러도 같다」가 되면 「사람이 한 번 승인했다」를
+     * 사후에 셀 수 없다.
+     *
+     * <p>🔵 다만 <b>upstream 에 이미 열린 PR 이 있는 경우</b>는 다르다 — 후보가 아직
+     * {@code READY_FOR_PR} 이고 PR 만 앞서 만들어진 복구 상황이라, 새로 만들지 않고
+     * 그것을 붙이고 200 을 준다({@code reusedExisting=true}). 남의 저장소에 두 번째 PR 을
+     * 열지 않는 것이 S-2 다.
+     */
+    @PostMapping("/{id}/pull-request")
+    public DraftPrResponse createPullRequest(@PathVariable Long id) {
+        return DraftPrResponse.from(createDraftPr.create(id));
     }
 }

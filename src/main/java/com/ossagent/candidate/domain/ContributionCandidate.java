@@ -401,23 +401,48 @@ public class ContributionCandidate {
     }
 
     /**
-     * {@code READY_FOR_PR → PR_CREATED} (종단).
+     * {@code READY_FOR_PR → PR_CREATED} (종단) — <b>PR 을 함께 받는다</b>.
      *
-     * <p>⚠️ <b>「{@code PR_CREATED} 인데 PR 행이 없다」를 여기서 막지 않는다.</b>
-     * (불변식 ③ 의 본체인 「PR 은 항상 draft」와 다른 이야기다 — 그쪽은 아래에서 다룬다.)
-     * 막으려 했으나 <b>지금은 작동할 수 없다</b> — {@link #pullRequest} 는 {@code mappedBy}
-     * 역방향이라 PR 을 만든 <b>같은 트랜잭션 안에서는 항상 {@code null}</b> 이다(소유 측이
-     * {@code PullRequest} 다). 가드를 넣으면 정상 경로가 100% 막힌다.
+     * <h2>🔴 「{@code PR_CREATED} 인데 PR 행이 없다」를 여기서 막는다 — 불변식 ③</h2>
      *
-     * <p>제대로 막으려면 애그리거트가 <b>양방향을 함께 채우는 attach 연산</b>을 가져야 하고,
-     * 그것은 {@code PullRequest} 생성 경로와 같은 곳에 있어야 한다 — <b>#23 이 만든다.</b>
-     * 그때 이 메서드가 {@code PullRequest} 를 인자로 받는 형태로 바뀐다.
+     * <p>#12 는 이것을 막지 못했다. {@link #pullRequest} 가 {@code mappedBy} 역방향이라
+     * PR 을 만든 <b>같은 트랜잭션 안에서는 항상 {@code null}</b> 이고(소유 측이
+     * {@code PullRequest} 다), 그 상태로 가드를 넣으면 정상 경로가 100% 막힌다.
+     * 그래서 「#23 이 <b>양방향을 함께 채우는 attach 연산</b>을 만든다」고 예약해 뒀다 —
+     * <b>이 메서드가 그것이다.</b>
      *
-     * <p>draft 고정 자체는 {@link PullRequest.Status} 단일값 + DB {@code CHECK} 가 이미
-     * 보장하므로 이 PR 에서 비는 것은 「PR 행 존재 여부」 하나다.
+     * <p>인자로 받으니 {@code null} 검사 한 줄이 곧 불변식이 된다. 역방향을 여기서 채우므로
+     * 같은 트랜잭션 안에서도 애그리거트가 자기 PR 을 본다.
+     *
+     * <p>🔴 <b>전이가 먼저다.</b> 상태가 틀리면({@code READY_FOR_PR} 이 아니면) 필드를
+     * 하나도 건드리지 않고 나간다 — 거부된 호출이 애그리거트를 반쯤 바꿔 놓지 않는다.
+     *
+     * <p>⚠️ <b>이 메서드는 GitHub 을 부르지 않는다.</b> 호출자가 <b>PR 이 실제로 만들어진
+     * 뒤에</b> 부르고, 그 순서가 「PR 없는 종단 {@code PR_CREATED}」를 막는 나머지 절반이다.
+     * 종단이라 되돌릴 수 없으므로 순서를 뒤집지 않는다.
+     *
+     * <p>draft 고정은 {@link PullRequest#draftFor} 단일 생성 경로 + {@link PullRequest.Status}
+     * 단일값 + DB {@code CHECK} 가 받친다 — S-2.
+     *
+     * @param pullRequest 방금 만들어진 Draft PR. {@code null} 이면 전이하지 않는다
+     * @throws IllegalArgumentException      PR 이 없다 · 남의 후보의 PR 이다
+     * @throws CandidateTransitionException  {@code READY_FOR_PR} 이 아니다
      */
-    public StatusTransition markPrCreated(Clock clock) {
-        return transitionTo(CandidateStatus.PR_CREATED, clock);
+    public StatusTransition markPrCreated(PullRequest pullRequest, Clock clock) {
+        if (pullRequest == null) {
+            throw new IllegalArgumentException(
+                    "PR 없이 PR_CREATED 로 갈 수 없습니다 candidateId=" + id
+                            + " — 종단이라 「PR 이 있다고 기록됐는데 없는」 후보는 빠져나올 수 없다 (S-2)");
+        }
+        if (pullRequest.getCandidate() != this) {
+            // 🔴 다른 후보의 PR 을 붙이면 UNIQUE(candidate_id) 로도 안 잡힌다 —
+            //    행은 하나씩이고 소유만 어긋나기 때문이다
+            throw new IllegalArgumentException(
+                    "다른 후보의 PR 을 붙일 수 없습니다 candidateId=" + id);
+        }
+        StatusTransition transition = transitionTo(CandidateStatus.PR_CREATED, clock);
+        this.pullRequest = pullRequest;
+        return transition;
     }
 
     /** 구현 루프에서 {@code FAILED} (종단). 재시도 상한 소진 또는 복구 불가 오류 */

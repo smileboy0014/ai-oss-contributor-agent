@@ -100,4 +100,67 @@ final class GitDataPayloads {
     /** {@code POST /merge-upstream} */
     record MergeUpstreamRequest(String branch) {
     }
+
+    /**
+     * {@code POST /repos/{upstream}/pulls} 의 본문 — 🔴 <b>S-2 의 실행체</b>.
+     *
+     * <h2>🔴 {@code draft} 가 필드가 아니다</h2>
+     *
+     * <p>{@code boolean draft} 를 컴포넌트로 두면 {@code false} 를 담은 인스턴스가
+     * <b>표현 가능</b>해진다. {@code safety-boundaries.md} 가 「플래그를 두면 언젠가 켜진다」고
+     * 못 박은 그것이다. 여기서는 <b>상수를 돌려주는 접근자</b>라 담을 자리가 없다 —
+     * {@code PullRequest.Status} 가 {@code DRAFT} 하나뿐인 것과 같은 수법이다.
+     *
+     * <p>⚠️ <b>record 가 아니라 클래스인 것이 의도다.</b> record 로 두면 Jackson 이
+     * 컴포넌트를 기준으로 직렬화하므로 「컴포넌트가 아닌 접근자」가 포함되는지가
+     * <b>애노테이션 동작에 달린다.</b> 그 불확실성이 S-2 에 걸리는 것을 두지 않는다 —
+     * 일반 클래스의 getter 는 조건 없이 직렬화된다. {@code GitHubWriteClientTest} 가
+     * <b>직렬화 결과 문자열</b>을 단언해 이것을 회귀로 고정한다.
+     *
+     * <p>⚠️ 필드를 더할 때 {@code reviewers}·{@code assignees}·{@code labels} 를 넣지 않는다 —
+     * 리뷰어 지정은 <b>존재 자체가 반려</b>다 (S-2).
+     */
+    static final class DraftPullRequestRequest {
+
+        private final String title;
+        private final String head;
+        private final String base;
+        private final String body;
+
+        DraftPullRequestRequest(String title, String head, String base, String body) {
+            this.title = title;
+            this.head = head;
+            this.base = base;
+            this.body = body;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        /** {@code owner:branch} — 교차 저장소 PR 의 head 표기. */
+        public String getHead() {
+            return head;
+        }
+
+        public String getBase() {
+            return base;
+        }
+
+        public String getBody() {
+            return body;
+        }
+
+        /** 🔴 <b>리터럴이다.</b> 필드도 파라미터도 설정도 아니다 — S-2. */
+        public boolean isDraft() {
+            return true;
+        }
+
+        /** 🔴 제목·본문을 노출하지 않는다 (S-4). */
+        @Override
+        public String toString() {
+            return "DraftPullRequestRequest[head=%s, base=%s, draft=true, body=%d자]"
+                    .formatted(head, base, body == null ? 0 : body.length());
+        }
+    }
 }

@@ -2,6 +2,7 @@ package com.ossagent.agent.domain;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 
 /**
@@ -28,10 +29,21 @@ import java.nio.file.Path;
  *
  * <h2>⚠ 이 타입이 막지 <b>못하는</b> 것</h2>
  *
- * <p><b>워크스페이스 <i>안</i>의 심볼릭 링크는 문제가 아니다.</b> 바인드 안의 링크는
- * <b>컨테이너의 마운트 네임스페이스</b>에서 해석된다 — {@code foo -> /etc/passwd} 는
- * 컨테이너의 {@code /etc/passwd} 이지 호스트 것이 아니다. {@code ..} 로 올라가도 컨테이너
- * 루트다. 막아야 할 것은 <b>마운트 소스 자체</b>이고, 그것이 아래 검증이다.
+ * <p>🔴 <b>워크스페이스 안의 심볼릭 링크는 축에 따라 답이 다르다</b> (2026-09-27 개정 · #18).
+ * 여기 원래 「문제가 아니다」라고만 적혀 있었고, <b>그 문장이 참인 축은 하나뿐</b>이었다.
+ *
+ * <table border="1">
+ *   <caption>같은 링크, 다른 결론</caption>
+ *   <tr><th>축</th><th>누가 따라가나</th><th>결론</th></tr>
+ *   <tr><td><b>컨테이너 실행</b> (#17)</td><td>컨테이너 프로세스</td>
+ *       <td>✅ 문제 아님 — <b>컨테이너의 마운트 네임스페이스</b>에서 해석된다.
+ *           {@code foo -> /etc/passwd} 는 컨테이너의 것이지 호스트 것이 아니다</td></tr>
+ *   <tr><td>🔴 <b>호스트 쓰기</b> (#18)</td><td><b>우리 JVM</b></td>
+ *       <td>🔴 <b>그대로 호스트 파일을 덮는다.</b> {@link #resolveInside} 가 막는다</td></tr>
+ * </table>
+ *
+ * <p>「이미 판단된 것」으로 읽히면 다음 사람이 두 번째 줄을 다시 보지 않는다.
+ * 마운트 <b>소스</b>를 막는 것({@link #under})과 <b>쓰기 대상</b>을 막는 것은 다른 일이다.
  *
  * <p>⚠ <b>TOCTOU</b> — 검증 시점과 컨테이너 생성 시점 사이에 경로가 심링크로 교체될 수 있다.
  * 워크스페이스 루트를 우리가 소유하므로 실위험은 낮고, {@link #path()} 가 <b>해석된
@@ -65,7 +77,26 @@ public record SandboxWorkspace(Path path) {
      * <p>⚠️ {@code normalize()} 로 {@code ..} 를 접은 <b>뒤에</b> 본다. 접기 전에 보면
      * {@code a/../../b} 같은 것이 문자열로는 하위처럼 보인다.
      *
-     * @throws SandboxPermanentException 워크스페이스 밖을 가리킨다
+     * <h2>🔴 문자열 검사만으로는 새는 것이 있었다 — 심볼릭 링크 (2026-09-27 · #18 리뷰)</h2>
+     *
+     * <p>{@code normalize() + startsWith} 는 <b>링크를 모른다.</b> 대상 저장소가 심링크를
+     * 커밋해 두면 JGit 이 그것을 <b>실제 심링크로 체크아웃</b>하고, 계획은 그 경로를
+     * 「실재하는 파일」로 본다. 그 뒤 {@code Files.writeString} 이 링크를 따라가
+     * <b>호스트의 임의 파일을 LLM 생성 내용으로 덮는다.</b>
+     *
+     * <p>⚠️ 이 클래스 상단의 「워크스페이스 안의 심링크는 문제가 아니다」는
+     * <b>컨테이너 실행 축에만 참</b>이다 — 그쪽은 컨테이너의 마운트 네임스페이스에서
+     * 해석된다. #18 이 연 <b>호스트 쓰기 축</b>에는 성립하지 않는다.
+     *
+     * <p>실측으로 확인했다 — 링크를 걸어 두면 문자열 검사는 {@code true} 를 돌려주고
+     * 바깥 파일이 덮였다. 회귀는 {@code SandboxWorkspaceResolveTest} 의 심링크 표본 2건이다
+     * (최종 구성요소 · <b>중간 디렉토리</b>. 마지막만 보면 두 번째가 샌다).
+     *
+     * <p>⚠️ <b>TOCTOU 는 여전히 남는다.</b> 검사와 쓰기 사이에 링크가 끼어들 수 있다.
+     * 워크스페이스를 우리가 만들고 그 안을 도는 것이 clone 과 우리 쓰기뿐이라 창이 좁을 뿐,
+     * 닫힌 것이 아니다.
+     *
+     * @throws SandboxPermanentException 워크스페이스 밖을 가리킨다 · 경로에 심링크가 있다
      */
     public Path resolveInside(String relativePath) {
         if (relativePath == null || relativePath.isBlank()) {
@@ -73,11 +104,41 @@ public record SandboxWorkspace(Path path) {
         }
         Path resolved = path.resolve(relativePath).normalize();
         if (!resolved.startsWith(path)) {
-            // ⚠ 메시지에 해석된 절대경로를 넣지 않는다 — 호스트 구조가 로그로 나간다
+            // ⚠ 메시지에 해석된 절대경로를 넣지 않는다 — 호스트 구조가 로그로 나간다.
+            //   ⚠ 입력 원문도 넣지 않는다 — 모델 출력이고 로그 인젝션 경로다
             throw new SandboxPermanentException(
-                    "워크스페이스 밖을 가리킨다 — 상위 참조가 있다 (S-3): " + relativePath);
+                    "워크스페이스 밖을 가리킨다 — 상위 참조가 있다 (S-3)");
         }
+        requireNoSymlink(resolved);
         return resolved;
+    }
+
+    /**
+     * 🔴 경로에 심링크가 없음을 <b>실경로로</b> 확인한다.
+     *
+     * <p>아직 없는 파일을 만드는 것은 정상이므로 <b>존재하는 가장 깊은 조상</b>까지만
+     * 해석한다. 「없으면 통과」가 아니라 <b>「있는 데까지 해석해서 안쪽인가」</b>다 —
+     * 존재하지 않는 꼬리는 그 조상 아래에만 생길 수 있다.
+     *
+     * <p>⚠ 마지막 구성요소가 <b>워크스페이스 안을 가리키는</b> 심링크여도 거부한다.
+     * 링크를 통해 쓰면 계획에 없는 파일이 바뀌고, 그 사실이 경로 이름에 드러나지 않는다.
+     */
+    private void requireNoSymlink(Path resolved) {
+        if (Files.isSymbolicLink(resolved)) {
+            throw new SandboxPermanentException("쓰기 대상이 심볼릭 링크다 (S-3)");
+        }
+        Path existing = resolved;
+        while (!Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
+            existing = existing.getParent();
+            if (existing == null) {
+                throw new SandboxPermanentException("경로를 해석할 수 없다 (S-3)");
+            }
+        }
+        Path realAncestor = realPathOf(existing);
+        if (!realAncestor.startsWith(realPathOf(path))) {
+            throw new SandboxPermanentException(
+                    "경로가 심볼릭 링크로 워크스페이스를 벗어난다 (S-3)");
+        }
     }
 
     /**

@@ -92,7 +92,10 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
             deleteRecursively(target);
             Files.createDirectories(target);
         } catch (IOException e) {
-            throw new WorkspaceException("워크스페이스를 만들지 못했다: " + target, e);
+            // ⚠ 호스트 절대경로를 메시지에 싣지 않는다 — 이 예외는 상위 catch 에서
+            //   스택트레이스째 로그로 나가고, 그러면 호스트 구조가 함께 나간다
+            throw new WorkspaceException("워크스페이스를 만들지 못했다 repo=%s/%s".formatted(
+                    coordinates.owner(), coordinates.name()), e);
         }
 
         // 🔴 검증된 타입으로 만든다 — 루트 밖이면 여기서 막힌다 (S-3)

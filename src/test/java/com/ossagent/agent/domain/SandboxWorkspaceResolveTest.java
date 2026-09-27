@@ -62,6 +62,50 @@ class SandboxWorkspaceResolveTest {
     }
 
     @Test
+    @DisplayName("🔴 워크스페이스 안의 심링크를 따라 호스트 파일을 덮지 않는다 — S-3")
+    void 심링크로_밖을_가리키면_거부한다_S3(@TempDir Path root) throws Exception {
+        // 🔴 이 심링크의 출처는 **대상 저장소**다. 우리가 clone 한 트리에 심링크가 커밋돼
+        //    있으면 JGit 이 실제 심링크로 체크아웃하고, 계획은 그것을 「실재하는 파일」로 본다.
+        //    문자열 검사(normalize + startsWith)는 링크를 모른다 —
+        //    그리고 이 쓰기는 **컨테이너가 아니라 호스트 JVM** 에서 일어난다.
+        Path real = root.toRealPath();
+        Path victim = real.resolve("victim.txt");
+        Files.writeString(victim, "ORIGINAL-HOST-CONTENT");
+
+        SandboxWorkspace workspace = workspaceUnder(root);
+        Path linkDir = workspace.path().resolve("src/main/java");
+        Files.createDirectories(linkDir);
+        Files.createSymbolicLink(linkDir.resolve("A.java"), victim);
+
+        assertThatThrownBy(() -> workspace.resolveInside("src/main/java/A.java"))
+                .isInstanceOf(SandboxPermanentException.class);
+    }
+
+    @Test
+    @DisplayName("🔴 중간 디렉토리가 심링크여도 거부한다 — 마지막 구성요소만 보면 샌다")
+    void 중간_디렉토리가_심링크여도_거부한다_S3(@TempDir Path root) throws Exception {
+        Path real = root.toRealPath();
+        Path outside = real.resolve("outside");
+        Files.createDirectories(outside);
+
+        SandboxWorkspace workspace = workspaceUnder(root);
+        Files.createSymbolicLink(workspace.path().resolve("src"), outside);
+
+        assertThatThrownBy(() -> workspace.resolveInside("src/new-file.java"))
+                .isInstanceOf(SandboxPermanentException.class);
+    }
+
+    @Test
+    @DisplayName("아직 없는 파일도 조상이 워크스페이스 안이면 통과한다 — 과차단하지 않는다")
+    void 아직_없는_파일은_통과한다(@TempDir Path root) throws Exception {
+        SandboxWorkspace workspace = workspaceUnder(root);
+
+        Path resolved = workspace.resolveInside("src/main/java/New.java");
+
+        assertThat(resolved.toString()).startsWith(workspace.path().toString());
+    }
+
+    @Test
     @DisplayName("빈 경로는 거부한다")
     void 빈_경로는_거부한다(@TempDir Path root) throws Exception {
         SandboxWorkspace workspace = workspaceUnder(root);

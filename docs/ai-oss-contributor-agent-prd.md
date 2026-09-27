@@ -1,7 +1,7 @@
 # AI OSS Contributor Agent
 ## Product Requirements Document
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Status:** Draft
 
 > AI가 Java/Spring 오픈소스의 GitHub Issue를 탐색하고, 기여 가능성을 분석한 뒤 코드 구현·테스트·검증을 수행하고 Draft Pull Request까지 생성하는 개발자용 OSS Contribution Agent.
@@ -623,8 +623,8 @@ GET    /api/candidates
 GET    /api/candidates/{id}
 POST   /api/candidates/{id}/select              # 게이트 1 — 사람이 고른다
 POST   /api/candidates/{id}/reject              # 선택 취소 (사람 행위로만)
-POST   /api/candidates/{id}/implement           # 게이트 2 — 아직 없다
-POST   /api/candidates/{id}/pull-request        # 게이트 3 — 아직 없다
+POST   /api/candidates/{id}/implement           # 게이트 2 — 계획 → 코딩 → 검증 → 리뷰 (최대 3바퀴) · READY_FOR_PR 에서 끝난다
+POST   /api/candidates/{id}/pull-request        # 게이트 3 — Fork 동기화 · push · Draft PR
 #      /api/candidates/{id}/verify            ← 🔴 열지 않는다 (아래)
 ```
 
@@ -641,9 +641,11 @@ S-6이 세는 승인 지점은 셋(선정·착수·PR 생성)이고 verify는 �
 ⚠️ **재검증이 필요하면 착수를 다시 건다.** 검증만 따로 돌리는 경로는 「코드는 그대로인데
 판정만 바꾼다」를 가능하게 하고, 그것이 정확히 게이트를 우회하는 모양이다.
 
-> **게이트 2·3이 아직 없는 것은 일정 문제가 아니다.** 실행기 없이 열면 후보가 각각
-> `IMPLEMENTING`(탈출 트리거 없음)과 **PR 없는 종단 `PR_CREATED`**에 갇힌다.
-> 실행기와 같은 변경에서 함께 연다.
+> **게이트 2·3은 실행기·생성기와 같은 변경에서 열렸다**(#18 · #23). 미뤘던 이유는 일정이 아니라
+> 실행기 없이 열면 후보가 각각 `IMPLEMENTING`(탈출 트리거 없음)과 **PR 없는 종단 `PR_CREATED`**에
+> 갇히기 때문이었다. 게이트 2 는 실행기가 배선되지 않으면 전이 전에 503 으로 거부하고,
+> 게이트 3 은 대외 호출이 성공한 뒤에만 전이를 커밋한다. 게이트 2 의 계획·clone 은 전이 **앞**에서
+> 돌아, 그 구간의 GitHub 레이트리밋은 실패가 아니라 503 + `Retry-After` 지연이다.
 
 ## 24. API Workflow
 
@@ -945,6 +947,7 @@ AI는 Issue 탐색부터 Draft PR 생성까지의 반복적인 개발 workflow�
 
 | 버전 | 일자 | 변경 내용 |
 |---|---|---|
+| 1.4 | 2026-09-28 | **§23 을 구현과 맞춤** — 게이트 2·3 「아직 없다」 삭제(#18 · #23 으로 열림). 게이트 3 뒤의 Fork push 가 #22~#23 사이 배선되지 않았던 사실과 2026-09-28 배선을 기록. 게이트 2 의 대외 읽기가 전이 앞임을 명시 |
 | 1.3 | 2026-09-27 | **§23 `verify` 보류 해소** — 「열지 말지 아직 정하지 않았다」를 **「열지 않는다」**로 확정. 검증은 착수 흐름 안에서 불리고, 별도 엔드포인트는 「검증을 사람이 건너뛸 수 있는가」라는 질문을 만든다 (S-6 · #19) |
 | 1.2 | 2026-09-27 | **§25 Security Architecture 개정** — GitHub App · 「최소 권한」 전제가 성립하지 않음을 반영하고(Q-1 · #2), 원본 저장소에 대한 방어를 **코드 어설션**으로 정정. **§24 API Workflow 정정** — `implement` 하나가 Draft PR까지 흘려보내던 시퀀스를 승인 지점 셋으로 가름. **§23 API** 를 실제 엔드포인트와 맞춤(`select`·`reject`·`policy/resolution` 추가, `analyze` 삭제, `verify` 보류). **§29** 에 다중 사용자 인증 경로 추가 (#30) |
 | 1.1 | — | 초안 |

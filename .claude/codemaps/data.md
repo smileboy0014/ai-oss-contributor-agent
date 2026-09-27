@@ -1,11 +1,12 @@
 # 데이터 모델 코드맵
 
 > 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §22 Database ERD (v1.2 Draft).
-> ✅ **7테이블 전부 실재한다** (Flyway `V1`·`V2` · 엔티티 7개 매핑 · 2026-09-22 · #5).
-> ⚠️ 다만 **읽고 쓰는 코드는 없다** — Spring Data 인터페이스·UseCase 는 각 기능 이슈(#7·#8·#11…) 소관이다.
-> 「스키마가 있다」와 「기능이 있다」를 혼동하지 않는다.
+> ✅ **7테이블 전부 실재하고**(Flyway `V1`~`V9` · 엔티티 7개 매핑) **읽고 쓰는 코드도 전부 있다**(2026-09-28 기준).
+> 마지막까지 비어 있던 것은 `generated_change.commit_sha`·`test_result`·`review_result` 였다 — 컬럼은 V2 부터 있었지만
+> 대입하는 코드가 어느 이슈에도 없었고(#18·#19·#20 이 서로에게 넘겼다), 2026-09-28 에 채웠다.
+> 「스키마가 있다」와 「기능이 있다」를 혼동하지 않는다 — 실제로 혼동돼 있었다.
 >
-> 아래 표의 ❌ 표시는 **설계만 있던 시점의 것**이며 더는 유효하지 않다. 컬럼 정본은 마이그레이션 SQL 이다.
+> 컬럼 정본은 마이그레이션 SQL 이다.
 
 ## 스키마는 마이그레이션이 정본이다 (2026-09-21 · Q-2 확정)
 
@@ -20,7 +21,8 @@ src/main/resources/db/migration/
 ├── V5__policy_pending_reason_and_repository_scoped_run.sql
 ├── V6__add_issue_scan_cursor.sql
 ├── V7__add_issue_filter_columns.sql
-└── V8__policy_resolution.sql
+├── V8__policy_resolution.sql
+└── V9__policy_document_fingerprints.sql
 ```
 
 | 규칙 | 이유 |
@@ -335,13 +337,15 @@ stage enum 문자열에 묶이기 때문이다.
 |---|---|---|
 | `id` | BIGINT PK | |
 | `candidate_id` | BIGINT FK | |
-| `branch_name` | VARCHAR | `oss-agent/issue-{n}-{slug}` |
-| `commit_sha` | VARCHAR | |
-| `diff` | TEXT/LONGTEXT | **가장 큰 컬럼 · 스크럽 대상.** 목록 조회에서 반드시 제외 |
-| `test_result` · `review_result` | TEXT | **대용량** |
-| `created_at` | TIMESTAMP | 재시도 이력이 쌓이므로 정렬 기준 필요 |
+| `branch_name` | VARCHAR(512) | `oss-agent/issue-{n}-{slug}` — `record(...)` 에서 |
+| `commit_sha` | VARCHAR(64) | **Fork 에 올라간 커밋(관측값).** `markPublished` 가 PR 게이트 뒤 push 성공 후 채운다. NULL = 아직 push 안 함 — PR 생성기가 이 값으로 「새 브랜치 생성 / 우리 브랜치 갱신」을 가른다 (#23) |
+| `diff` | TEXT | **가장 큰 컬럼 · 스크럽 대상.** `record(...)` 유일 경로. 목록 조회에서 반드시 제외. 🔴 **Fork 에 올릴 파일의 정본** — PR 시점에 upstream 을 재clone 해 이것을 입힌다 |
+| `test_result` | TEXT | 단계별 `StageResult.summary` 를 이은 것. `recordVerification` 유일 경로 (#19) |
+| `review_result` | TEXT | `DiffReview` 판정·요약·지적. `recordReview` 유일 경로 (#20) |
+| `created_at` | TIMESTAMP | 재시도 이력이 쌓이므로 정렬 기준 필요. ⚠️ 이 테이블만 `updated_at` 이 **없다** — 「모든 테이블에 둔다」의 예외이고, 행이 바퀴 안에서만 갱신되므로 안고 간다 |
 
 후보당 N 행이다. 재시도할 때마다 새 행을 남기고 **덮어쓰지 않는다** — 무엇이 어떻게 바뀌었는지 추적이 사라진다.
+`commit_sha`·`test_result`·`review_result` 는 **같은 행 안에서 뒤늦게 채워지는 것**이고, 행을 새로 만들지 않는다.
 
 ### `pull_request` ✅ 실재 (V2)
 
@@ -353,8 +357,8 @@ stage enum 문자열에 묶이기 때문이다.
 | `branch_name` | VARCHAR | |
 | `github_pr_number` | INT | |
 | `pr_url` | VARCHAR | |
-| `status` | VARCHAR | `DRAFT` 로 생성. **`draft` 아닌 상태로 만드는 경로를 두지 않는다** — S-2 |
-| `created_at` | TIMESTAMP | |
+| `status` | VARCHAR | `DRAFT` 로 생성. **`draft` 아닌 상태로 만드는 경로를 두지 않는다** — S-2. DB `CHECK (status = 'DRAFT')` 가 마지막 방어 |
+| `created_at` · `updated_at` | TIMESTAMP | |
 
 멱등키 — **`UNIQUE(candidate_id)`** · 보조로 `UNIQUE(fork_url, branch_name)`.
 없으면 재시도 시 같은 후보로 PR 이 두 개 열린다. **남의 저장소에 중복 PR 을 여는 것은 스팸으로 취급된다.**
@@ -388,6 +392,7 @@ stage enum 문자열에 묶이기 때문이다.
 
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
+| 2026-09-28 | gt.park | 머리말의 「읽고 쓰는 코드는 없다」 삭제 · 트리에 V9 · `generated_change` 세 컬럼의 대입 경로(`markPublished`·`recordVerification`·`recordReview`) 명시 · `pull_request.updated_at` |
 | 2026-09-26 | smileboy0014 | `repository_policy` 에 보류 해소 2컬럼 (V8 · #24) |
 | 2026-09-27 | smileboy0014 | `repository_policy` 에 문서 지문·확인시각 2컬럼 (V9 · #68) |
 | 2026-09-26 | smileboy0014 | `issue` 에 필터 4컬럼 (V7 · #9) · `filter_reason` 을 TEXT 에서 VARCHAR 로 |

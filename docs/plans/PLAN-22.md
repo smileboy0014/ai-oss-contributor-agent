@@ -686,3 +686,19 @@ Map.entry("FileChange.content", new Decision(Mechanism.PENDING,
 | 2026-09-27 | smileboy0014 | 초안 — push 수단을 Git Data API 로 확정(Q-11 재도출) · 이슈 완료조건 FR-8 폐기 근거 · 어설션 두 겹 설계 |
 | 2026-09-27 | smileboy0014 | rev.3 — 재검토 반영 9건. 🔴 **`SyncedFork` 통행증 신설**(「switch 가 드러낸다」가 반환값 무시를 못 잡는다는 지적 — `PolicyClearance` 선례) · ArchUnit ③에 **모수 단언 + 판정 축 확대**(`NETWORK_CLIENTS` 공유) · NFR-1 을 `SAFE`/`UNSAFE` 로 **다시 계산(≈42)** · `merge-upstream` 판정을 **상태코드에서 `merge_type` 으로** · fork 이름 충돌을 **응답 `full_name`** 으로 해소 · 위험 7 인계를 **`ExternalTextScrubRegistry` 등록**으로 · GC 주장 제거 + **커밋 날짜 고정** · `@Bean` 조립임을 명시 · 잔재 2곳 |
 | 2026-09-27 | smileboy0014 | rev.2 — 격리 검토 반영 9건. **D-4a**(fork 재사용 판정) · **D-4b**(동기화 설계) · **D-4d**(비멱등 쓰기 재시도) 신설 · 테스트 8 ③을 **여집합**으로 · `@ExternalAdapter` 누락 · `fork-owner` 바인딩 부재 · `sha:null` 직렬화 함정 · S-4 잔여 위험 명시 · D-1 근거 순서를 **문서 의존 없는 것부터**로 |
+
+---
+
+## 사후 기록 (2026-09-28)
+
+🔴 **§2 S-6 행의 「`publish()` 에 호출자가 없다 — 배선은 #23 이 게이트 뒤에 놓는다」가 실행되지 않았다.**
+PLAN-23 은 이 문장을 「#22 가 push 까지 끝내 sha 를 준다」로 읽었고(PLAN-23 12행), 그 결과 #22·#23 이 모두
+머지된 뒤에도 `ForkPublisher.publish`·`syncWithUpstream` 의 운영 호출자가 0 개였다. `GeneratedChange.commitSha`
+는 영영 NULL 이었고 `POST /api/candidates/{id}/pull-request` 는 항상 「push 기록 없음」으로 실패했다.
+
+2026-09-28 에 `CreateDraftPrUseCase` 가 게이트 뒤에서 동기화 → upstream 재clone + 저장 diff 적용 → push →
+sha 기록 → Draft PR 순서로 부르도록 배선했다. 아울러 D-2 의 「내용 검사는 #18 이 한다」도 이 경로에는 닿지
+않아(PR 시점에 워크스페이스를 다시 읽는다) `FileChange` 생성자에 경로 배제·스크럽을 붙였다.
+
+교훈 — **두 계획서가 같은 일을 서로에게 넘기면 아무도 하지 않는다.** 인계는 받는 쪽 계획서에 「받았다」가
+적혀야 성립한다.

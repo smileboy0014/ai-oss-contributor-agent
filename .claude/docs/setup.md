@@ -39,9 +39,10 @@ cp .env.example .env
 | 변수 | 없으면 |
 |---|---|
 | `DATABASE_URL` · `DATABASE_USERNAME` · `DATABASE_PASSWORD` | **H2 in-memory 로 기동한다** (`application.yml` 기본값) |
-| `GITHUB_TOKEN` · `GITHUB_FORK_OWNER` | GitHub 연동 불가 (아직 미구현이라 기동은 된다) |
-| `ANTHROPIC_API_KEY` | LLM 호출 불가 (아직 미구현) |
-| `SANDBOX_*` | 샌드박스 실행 불가 (아직 미구현) |
+| `GITHUB_TOKEN` · `GITHUB_FORK_OWNER` | 기동은 되지만 스캔·PR 생성이 401/설정 오류로 실패한다. `GITHUB_FORK_OWNER` 가 비면 Fork 확보에서 끊긴다 (S-1) |
+| `GITHUB_COMMIT_AUTHOR_NAME` · `GITHUB_COMMIT_AUTHOR_EMAIL` | 커밋 author 가 비고, sign-off 를 요구하는 규약에서 push 가 거부된다 (S-5). ⚠️ 커밋된 `.env.example` 에 이 둘이 빠져 있다 |
+| `ANTHROPIC_API_KEY` | 기동은 된다(`DisabledLanguageModel`). 분석·계획·코딩·리뷰 호출이 즉시 실패한다 |
+| `SANDBOX_*` | 기본값으로 기동한다. Docker 데몬이 없으면 착수(`implement`)가 실행기 미배선 503 이 아니라 샌드박스 예외로 실패한다 |
 
 ⚠️ `GITHUB_TOKEN` 은 **classic PAT · 스코프 `public_repo`** 다 (Q-1 확정).
 
@@ -179,11 +180,10 @@ curl -s -X POST localhost:8080/api/repositories \
 curl -s localhost:8080/api/repositories
 ```
 
-`GET /api/candidates` 는 **동작한다** — 필터(상태·난이도·최소 신뢰도)와 페이지네이션,
-그리고 `GET /api/candidates/{id}` 상세까지 있다. 다만 **후보를 만드는 경로(#11)가 아직 없어
-결과가 비어 있다.** `POST /api/repositories/{id}/scan` 은 여전히 **요청 사실만 기록**한다.
-아직 구현이 없는 것이지 고장난 것이 아니다 —
-[`project-overview.md`](../rules/context/project-overview.md) 「지금 어디까지 와 있나」.
+`POST /api/repositories/{id}/scan` 이 `202` 를 돌려주면 규약 → 수집 → 필터 → 분석이 비동기로 돈다
+(`GET …/scan` 으로 진행 조회). 끝나면 `GET /api/candidates` 에 `ANALYZED` 후보가 보이고, 거기서부터는
+사람이 누른다 — `select` → `implement` → `pull-request`. 토큰이 없으면 첫 단계(규약 판정)에서 끊긴다.
+현황은 [`project-overview.md`](../rules/context/project-overview.md) 「지금 어디까지 와 있나」.
 
 ## 6. MCP (선택)
 

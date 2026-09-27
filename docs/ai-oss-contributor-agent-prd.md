@@ -1,7 +1,7 @@
 # AI OSS Contributor Agent
 ## Product Requirements Document
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Status:** Draft
 
 > AI가 Java/Spring 오픈소스의 GitHub Issue를 탐색하고, 기여 가능성을 분석한 뒤 코드 구현·테스트·검증을 수행하고 Draft Pull Request까지 생성하는 개발자용 OSS Contribution Agent.
@@ -625,15 +625,21 @@ POST   /api/candidates/{id}/select              # 게이트 1 — 사람이 고�
 POST   /api/candidates/{id}/reject              # 선택 취소 (사람 행위로만)
 POST   /api/candidates/{id}/implement           # 게이트 2 — 아직 없다
 POST   /api/candidates/{id}/pull-request        # 게이트 3 — 아직 없다
+#      /api/candidates/{id}/verify            ← 🔴 열지 않는다 (아래)
 ```
 
 **`POST /candidates/{id}/analyze`는 없앴다.** 분석은 스캔 파이프라인의 한 단계이지
 사람이 거는 호출이 아니다. 후보는 `ANALYZED` 상태로 만들어진 뒤 §24의 게이트를 기다린다.
 
-`POST /candidates/{id}/verify`는 **열지 말지를 아직 정하지 않았다.** S-6이 세는 승인 지점은
-셋(선정·착수·PR 생성)이고 verify는 그중에 없다. 여는 것은 게이트를 하나 늘리는 일이 아니라
-**「검증을 사람이 건너뛸 수 있는가」라는 질문을 만드는 일**이라, 검증 파이프라인을 만드는
-단계에서 판단한다.
+🔴 **`POST /candidates/{id}/verify`는 열지 않는다** — 검증 파이프라인(#19)에서 확정했다.
+
+S-6이 세는 승인 지점은 셋(선정·착수·PR 생성)이고 verify는 그중에 없다. 검증은 **착수 흐름
+안에서** 불린다(`ChangeVerifier`). 별도 엔드포인트를 두면 **네 번째 게이트처럼 보이는 것**이
+생기는데 승인 지점이 아니고, 더 나쁘게는 **「검증을 사람이 건너뛸 수 있는가」라는 질문**을
+만든다 — 이 제품의 정의가 「나쁜 결과를 걸러내는가」(§30)라 그 질문에 답이 생기면 안 된다.
+
+⚠️ **재검증이 필요하면 착수를 다시 건다.** 검증만 따로 돌리는 경로는 「코드는 그대로인데
+판정만 바꾼다」를 가능하게 하고, 그것이 정확히 게이트를 우회하는 모양이다.
 
 > **게이트 2·3이 아직 없는 것은 일정 문제가 아니다.** 실행기 없이 열면 후보가 각각
 > `IMPLEMENTING`(탈출 트리거 없음)과 **PR 없는 종단 `PR_CREATED`**에 갇힌다.
@@ -939,5 +945,6 @@ AI는 Issue 탐색부터 Draft PR 생성까지의 반복적인 개발 workflow�
 
 | 버전 | 일자 | 변경 내용 |
 |---|---|---|
+| 1.3 | 2026-09-27 | **§23 `verify` 보류 해소** — 「열지 말지 아직 정하지 않았다」를 **「열지 않는다」**로 확정. 검증은 착수 흐름 안에서 불리고, 별도 엔드포인트는 「검증을 사람이 건너뛸 수 있는가」라는 질문을 만든다 (S-6 · #19) |
 | 1.2 | 2026-09-27 | **§25 Security Architecture 개정** — GitHub App · 「최소 권한」 전제가 성립하지 않음을 반영하고(Q-1 · #2), 원본 저장소에 대한 방어를 **코드 어설션**으로 정정. **§24 API Workflow 정정** — `implement` 하나가 Draft PR까지 흘려보내던 시퀀스를 승인 지점 셋으로 가름. **§23 API** 를 실제 엔드포인트와 맞춤(`select`·`reject`·`policy/resolution` 추가, `analyze` 삭제, `verify` 보류). **§29** 에 다중 사용자 인증 경로 추가 (#30) |
 | 1.1 | — | 초안 |

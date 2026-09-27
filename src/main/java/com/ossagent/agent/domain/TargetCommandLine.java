@@ -24,6 +24,22 @@ import java.util.regex.Pattern;
  * 여기서는 <b>명령에 실제로 쓰이는 문자만 통과</b>시킨다. 새 메타문자가 생겨도
  * 화이트리스트 밖이라 <b>그대로 막힌다.</b>
  *
+ * <h2>🔴 막는 것은 <b>쉘</b>이지 <b>플래그</b>가 아니다 — 재사용 전에 읽는다</h2>
+ *
+ * <p>{@code --init-script=/workspace/x.gradle} · {@code -I} · {@code -b} · {@code -p} ·
+ * {@code -Dk=v} · {@code --gradle-user-home=…} 는 <b>전부 화이트리스트를 통과한다</b>
+ * ({@code - . / = :} 가 허용 문자다). 즉 이 타입은 <b>모델이 고른 Gradle 동작</b>을 막지 않는다.
+ *
+ * <p>지금 그것이 안전한 이유는 <b>하나뿐이다</b> — 이 argv 가 도는 곳이
+ * {@link ExecuteCommand} 뿐이고, 거기는 <b>네트워크가 없고 캐시가 RO</b> 이며 어차피
+ * 대상 저장소 자신의 {@code build.gradle} 이 실행된다. {@code --init-script} 가
+ * 공격자에게 새로 주는 것이 없다.
+ *
+ * <p>🔴 <b>그래서 이 값을 워밍 경로로 보내지 않는다.</b> {@link WarmCommand#argv()} 는
+ * 리터럴이고 {@code SandboxPipeline} 이 워밍에 이 argv 를 넘기지 않는다. 넘기는 순간
+ * <b>네트워크가 열린 채 {@code --init-script} 가 곧 임의 코드 실행</b>이 된다.
+ * 여기 적어 두는 것이 다음 사람의 재사용을 막는 유일한 수단이다.
+ *
  * <h2>⚠ 모르는 런처는 거부한다 — 「일단 돌려 본다」가 아니다</h2>
  *
  * <p>{@link BuildTool} 을 판정하지 못하면 {@code --offline} 을 붙일 자리도 알 수 없고

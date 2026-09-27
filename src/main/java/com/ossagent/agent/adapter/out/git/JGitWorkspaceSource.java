@@ -223,7 +223,9 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
                 try {
                     Files.delete(p);
                 } catch (IOException e) {
-                    throw new WorkspaceException("워크스페이스를 비우지 못했다: " + p, e);
+                    // ⚠ 호스트 절대경로를 싣지 않는다 — 이 예외는 상위 catch 에서
+                    //   스택트레이스째 로그로 나간다 (같은 커밋의 다른 자리와 같은 판단)
+                    throw new WorkspaceException("워크스페이스를 비우지 못했다", e);
                 }
             });
         }

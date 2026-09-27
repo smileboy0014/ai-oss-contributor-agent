@@ -122,6 +122,13 @@ public record SandboxWorkspace(Path path) {
      *
      * <p>⚠ 마지막 구성요소가 <b>워크스페이스 안을 가리키는</b> 심링크여도 거부한다.
      * 링크를 통해 쓰면 계획에 없는 파일이 바뀌고, 그 사실이 경로 이름에 드러나지 않는다.
+     *
+     * <p>🕳 <b>새는 쪽을 먼저 적는다</b> — <b>중간</b> 구성요소가 워크스페이스 <b>안</b>을
+     * 가리키는 링크면 <b>통과한다</b>({@code ws/link -> ws/real} 일 때 {@code link/foo}).
+     * 실제로 바뀌는 것은 {@code ws/real/foo} 이고 경로 이름에 드러나지 않는다 —
+     * 바로 위 문단의 논리가 그대로 성립하는데 검사는 최종 구성요소에만 건다.
+     * 워크스페이스를 벗어나지는 않으므로 하류의 <b>diff 경로 집합 게이트</b>가 잡는다
+     * (git 이 보고하는 것은 실경로다). <b>fail-closed 이지만 여기서는 아니다.</b>
      */
     private void requireNoSymlink(Path resolved) {
         if (Files.isSymbolicLink(resolved)) {

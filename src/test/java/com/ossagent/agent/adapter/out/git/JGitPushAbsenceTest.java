@@ -56,6 +56,41 @@ class JGitPushAbsenceTest {
     }
 
     /**
+     * 🔴 <b>{@code Git.push()} 만 막는 것으로는 좁다</b> — 우회 경로가 셋 더 있다.
+     *
+     * <p>위 규칙은 {@code Git} 타입의 {@code push} 라는 <b>이름</b>만 본다. 그런데 JGit 에는
+     * 같은 일을 하는 다른 문이 있다.
+     *
+     * <table border="1">
+     *   <caption>우회 경로</caption>
+     *   <tr><th>경로</th><th>위 규칙에</th></tr>
+     *   <tr><td>{@code new PushCommand(repo).call()}</td><td>❌ 걸리지 않는다 — {@code Git} 을 안 거친다</td></tr>
+     *   <tr><td>{@code Transport.open(...).push(...)}</td><td>❌ 소유 타입이 {@code Transport} 다</td></tr>
+     *   <tr><td>{@code PushConnection} 직접 사용</td><td>❌ 〃</td></tr>
+     * </table>
+     *
+     * <p>그래서 <b>타입 의존</b>으로 막는다 — 이름이 아니라 <b>그 타입을 쓰는가</b>를 본다.
+     * 위 규칙(호출 기준)과 함께 두 겹이다.
+     *
+     * <p>🕳 <b>한계</b> — 리플렉션은 여전히 못 본다. 그리고 {@code Transport} 는 fetch 에도
+     * 쓰이는 타입이라, 나중에 우리가 fetch 를 직접 다루게 되면 <b>이 규칙이 오탐을 낸다.</b>
+     * 그때는 규칙을 지우지 말고 <b>메서드 단위로 좁힌다</b> — 지우면 push 도 함께 열린다.
+     */
+    @Test
+    @DisplayName("운영 코드가 JGit push 계열 타입을 쓰지 않는다 — S-1 우회 차단")
+    void 운영_코드가_JGit_push_계열_타입을_쓰지_않는다_S1() {
+        // ⚠ 정규식은 **완전 일치**다. org.eclipse.jgit.transport.TransportException 같은
+        //   이웃 타입은 걸리지 않는다 — 넓히면 오탐이 나고, 오탐이 나면 규칙이 지워진다
+        noClasses()
+                .should().dependOnClassesThat()
+                .haveNameMatching(
+                        "org\\.eclipse\\.jgit\\.(api\\.PushCommand"
+                                + "|transport\\.Transport|transport\\.PushConnection)")
+                .as("Git.push() 를 우회하는 문이 셋 있다 — 타입 의존으로 함께 막는다 (S-1)")
+                .check(PRODUCTION);
+    }
+
+    /**
      * 🔴 <b>익명 clone 을 강제한다</b> — S-4.
      *
      * <p>자격증명을 URL·프로바이더로 실으면 <b>토큰이 {@code .git/config} 에 파일로 앉고</b>,

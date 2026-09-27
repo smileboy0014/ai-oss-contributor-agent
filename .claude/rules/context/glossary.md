@@ -64,6 +64,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
 | `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
 | `CodeSandbox` | `DockerCodeSandbox` | 대상 저장소 코드를 **격리 컨테이너 안에서만** 실행. S-3 의 실행체 |
+| `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 #23 이고 그 앞에 세 번째 승인 게이트가 있다 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
@@ -74,6 +75,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `RepositoryContext` | — | 저장소 분석의 산출물 — **고른 파일 + 왜 골랐나**. `repository` 가 소유하고 #16 이 받는다. 🔴 **영속화하지 않는다** |
 | `SelectedFile` | — | 컨텍스트에 실린 파일 1건. compact 생성자가 **스크럽을 강제**한다 (S-4) |
 | `IssueAnalysis` | — | 분석 결과 **값**. 생성자가 스키마와 **스크럽을 함께 강제**한다 (`ScrubbedRules` 와 같은 수법) |
+| `ForkRef` | — | **쓰기가 허용된** 저장소 좌표. 생성 시 owner 를 단언한다. ⚠️ **방어가 아니라 「일찍 드러내는 것」**이다 — 유일한 방어는 `GitHubWriteClient` 의 쓰기 직전 어설션이고, 둘 중 지워야 한다면 이쪽이다 (#22) |
+| `SyncedFork` | — | 「upstream 과 맞춰 보았고 결과가 이것이다」는 **통행증**. `PublishRequest` 가 인자로 요구해 **동기화를 보지 않고 publish 하는 것을 표현 불가능**하게 한다 — `PolicyClearance` 와 같은 수법.<br>⚠️ 강제하는 것은 **호출**이지 판단이 아니다 (#22) |
+| `FileChange` | — | Fork 에 올릴 파일 1건. 🔴 **내용 검사가 이 경로에 없다** — 워크스페이스를 읽는 #18 이 거른다. `@ExternalText` 등록표에 `PENDING #18` 로 남겨 그 사실이 계속 보이게 했다 (#22) |
 
 ## 증분 수집 — 「언제 돌렸나」와 「어디까지 봤나」는 다르다 (#8)
 

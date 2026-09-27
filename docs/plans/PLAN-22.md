@@ -61,10 +61,29 @@ upstream 에 push 된다.** 이 PR 의 어설션은 「있으면 좋은 것」�
 
 | # | 항목 | 기준 |
 |---|------|------|
-| NFR-1 | 레이트리밋 | publish 1회의 논리 호출 = `ref 조회 1` + `commit 조회 1` + `blob N` + `tree 1` + `commit 1` + `ref 갱신 1` = **N+5**. 계획 상한이 8파일(`max-planned-files`)이므로 **최대 13**. Fork 확보·동기화가 앞에 최대 3. 전송 재시도(`github.max-retries=2`)를 곱하면 **최대 48 논리 호출** |
+| NFR-1 | 레이트리밋 | 🔴 **곱이 걸리는 구간과 안 걸리는 구간을 갈라 센다** — D-4d. 아래 |
 | NFR-2 | 타임아웃 | 기존 `github.connect-timeout: 5s` · `read-timeout: 10s` 를 그대로 쓴다. ⚠️ **Fork 생성은 비동기다** — 아래 R-2 |
 | NFR-3 | 비용 | LLM 호출 **없음**. 이 단계는 GitHub API 만 탄다 |
 | NFR-4 | 트랜잭션 | 대외 호출이 전부 트랜잭션 **밖**이다 — 이 PR 은 트랜잭션을 열지 않는다(영속화 호출자 몫) |
+
+#### NFR-1 상세 — 후보 1건을 Fork 에 올리는 데 드는 논리 호출
+
+`max-planned-files: 8`(실측 — `application.yml:202`) 기준. 전송 재시도는 `github.max-retries: 2`
+이므로 **곱은 3**(첫 시도 + 재시도 2)이고, **D-4d 가 허용한 구간에만 걸린다.**
+
+| 구간 | 호출 | 곱 | 소계 |
+|---|---|---|---|
+| Fork 확보 조회 | `GET /repos/{fork}/{name}` 1 | ×3 | 3 |
+| publish 읽기 | `GET git/ref` 1 · `GET git/commits` 1 | ×3 | 6 |
+| publish 쓰기 (`SAFE`) | `POST git/blobs` 8 · `git/trees` 1 · `git/commits` 1 | ×3 | 30 |
+| 🔴 쓰기 (`UNSAFE`) | `POST/PATCH git/refs` 1 · `POST forks` 1 · `POST merge-upstream` 1 | **×1** | 3 |
+| **합계** | | | **≈ 42** |
+
+⚠️ Fork 를 처음 만들 때의 **준비 폴링**은 별도다 — `github.fork.ready-timeout` 이 상한이고
+그 안에서 `GET` 을 반복한다. 무한이 아니라는 것이 요점이고, 정확한 횟수는 간격 설정에 달렸다.
+
+🔴 **한 축만 보고 세지 않는다.** 이 42 앞에 #15 의 저장소 분석(최대 26 논리 호출 × 3)과
+#16 의 계획 LLM 호출(최대 6)이 붙는다 — `architecture.md` §4 의 「세 구간의 합」이다.
 
 ---
 
@@ -133,9 +152,12 @@ public interface ForkPublisher {
      * 🔴 실패를 <b>값으로</b> 돌려준다 — 「치명적이지 않아서」가 아니라 <b>진행 판단의 주체가
      * PR 을 만드는 쪽(#23)이기 때문</b>이다. 근거는 D-4b.
      */
-    SyncOutcome syncWithUpstream(ForkRef fork, String baseBranch);
+    SyncedFork syncWithUpstream(ForkRef fork, String baseBranch);
 
-    /** 🔴 commit + 브랜치 갱신. 쓰기 직전 owner 어설션이 여기 걸린다. */
+    /**
+     * 🔴 commit + 브랜치 갱신. 쓰기 직전 owner 어설션이 여기 걸린다.
+     * 요청이 {@code SyncedFork} 를 들고 있어 <b>동기화를 보지 않고 부르는 것이 불가능</b>하다 — D-4b.
+     */
     PublishedBranch publish(PublishRequest request);
 
     /** Fork 안의 브랜치를 지운다. 🔴 ForkRef 를 요구하므로 upstream 을 지목할 수 없다. */
@@ -170,7 +192,7 @@ Q-1 은 「GitHub 은 직접 구현」이라고 결론냈지만, **그 근거 3�
 | 안 | 판정 |
 |---|---|
 | 호스트 `ProcessBuilder("git","push")` | ❌ `safety-boundary-check.sh` S-3 이 막는다. S-1 실행체를 만들며 S-3 가드를 우회하는 것은 앞뒤가 맞지 않는다 |
-| **JGit push** | ❌ **채택하지 않는다** — 아래 3가지 |
+| **JGit push** | ❌ **채택하지 않는다** — 아래 근거 1개 + 가정 2개 |
 | **Git Data API (blob→tree→commit→ref)** | ✅ **채택** |
 
 **JGit 을 채택하지 않는 근거 — 순서에 의미가 있다. 1번만 이 저장소 안에서 검증된다.**
@@ -261,13 +283,23 @@ class GitHubWriteClient {
 ```
 1. GET /repos/{forkOwner}/{upstreamName}
    ├─ 404          → 2 로 (만든다)
-   ├─ 200 이고  fork == true  &&  parent.full_name == upstream.fullName()  → ✅ 재사용
-   └─ 200 인데 위 조건 불일치 → 🔴 ForkPublishException — 중단한다
+   ├─ 200 이고  fork == true  &&  parent.full_name ≡ upstream.fullName()  → ✅ 재사용
+   └─ 200 인데 위 조건 불일치 → 3 으로   (같은 이름의 무관한 내 저장소다)
 2. POST /repos/{upstreamOwner}/{upstreamName}/forks        ← 🔴 유일한 upstream 쓰기 (D-3 예외)
-3. 202 이므로 1 을 폴링 (github.fork.ready-timeout 상한)
+3. 🔴 응답 본문의 full_name 으로 ForkRef 를 만든다 — 이름을 우리가 조립하지 않는다
+4. 그 좌표로 준비될 때까지 폴링 (github.fork.ready-timeout 상한)
 ```
 
-🔴 **2번 분기(200 인데 fork 가 아님)를 빠뜨리면 owner 어설션이 원리적으로 못 잡는 구멍이 난다.**
+🔴 **3번이 「이름 충돌」을 닫는다.** GitHub 은 `forkOwner` 아래 같은 이름이 이미 있으면
+fork 를 **`{name}-1` 로 만든다.** 우리가 `{upstreamName}` 을 조립해 폴링하면 영원히 못 찾고,
+「200 인데 fork 아님 → 중단」으로 처리하면 **그 대상 저장소는 영구히 기여 불가**가 된다 —
+해소 수단이 「사용자가 자기 저장소 이름을 바꾼다」뿐인 막다른 길이다.
+`POST /forks` 응답이 실제 좌표를 주므로 **그것을 쓴다.**
+
+⚠️ 어설션은 그대로 선다 — `ForkRef.of` 는 **owner 만** 보고, 응답의 owner 는 `forkOwner` 다.
+이름이 `{name}-1` 이어도 S-1 은 영향받지 않는다.
+
+🔴 **1번의 세 번째 분기를 빠뜨리면 owner 어설션이 원리적으로 못 잡는 구멍이 난다.**
 사용자가 `spring-kafka` 라는 **무관한 자기 저장소**를 이미 갖고 있으면 그것을 Fork 로 오인해
 거기에 commit·ref 를 민다. **owner 어설션은 통과한다** — owner 가 실제로 우리이기 때문이다.
 S-1 위반은 아니지만 **남의 것이 아닌 내 것을 망가뜨리는** 경로이고, 드물지도 않다 —
@@ -285,20 +317,44 @@ POST /repos/{forkOwner}/{name}/merge-upstream   {"branch": "{baseBranch}"}   ←
 Fork 경로이므로 owner 어설션을 정상 통과한다. Git Data API 로 손수 맞추는 것(upstream ref 읽기 →
 Fork ref force 갱신)보다 **호출이 1회**이고, 충돌 시 GitHub 이 `409` 로 알려 준다.
 
-🔴 **`SyncOutcome` 을 값으로 돌려주되 「치명적이지 않다」고 적지 않는다.** 실패가 무엇을 뜻하는지 적는다.
+🔴 **판정은 상태코드가 아니라 응답 본문의 `merge_type` 이다.**
 
-| 결과 | 뜻 | 이 PR 의 처리 |
+| 응답 | `SyncOutcome` | 이 PR 의 처리 |
 |---|---|---|
-| `FAST_FORWARDED` | 맞춰졌다 | 진행 |
-| `ALREADY_UP_TO_DATE` (204) | 이미 같다 | 진행 |
-| `CONFLICT` (409) | Fork 가 **갈라졌다** — 과거 force push 잔재일 수 있다 | 🔴 **값으로 올린다. 진행 판단은 호출자(#23)가 한다** |
-| 전송 실패 | 모른다 | 〃 |
+| 200 · `merge_type: fast-forward` \| `merge` | `MERGED` | 진행 |
+| 200 · `merge_type: none` | `ALREADY_UP_TO_DATE` | 진행 |
+| 409 | `CONFLICT` — Fork 가 **갈라졌다**(과거 force push 잔재) | 🔴 값으로 올린다 |
+| 422 | `UNMERGEABLE` | 〃 |
 
-⚠️ **왜 여기서 막지 않는가** — Fork 가 낡은 것 자체는 PR 을 망가뜨리지 않는다. GitHub 의 PR diff 는
-**merge-base 기준**이라 base 가 뒤처져 있어도 우리 변경만 보인다. 문제가 되는 것은 **갈라졌을 때**
-(머지가 안 되는 PR)이고, 그 판단은 **PR 을 만드는 주체**가 할 일이다 — 이 PR 은 PR 을 만들지 않는다.
-그래서 **예외가 아니라 값**이다. 🔴 다만 **삼키지는 않는다** — 호출자가 무시하면 그것은 #23 의 결함이고,
-`SyncOutcome` 이 열거형이라 `switch` 가 누락을 드러낸다.
+⚠️ **초안은 「이미 최신 = 204」로 적었다가 고쳤다.** `merge-upstream` 은 성공 시 **200 + 본문**이고
+「이미 최신」은 별도 코드가 아니라 **`merge_type: none`** 이다. 상태코드로 판정하게 두면
+`MockRestServiceServer` 스텁이 **실제와 다른 응답을 흉내내 초록**이 되고, 어댑터 매핑 층이
+잡아야 할 오류를 **테스트가 같은 오류를 갖고 있어서** 못 잡는다.
+🔴 **이 PR 에서 응답 스키마를 새로 다루는 유일한 엔드포인트라, 구현 전에 REST 문서로 한 번 확인한다.**
+
+#### 🔴 「호출자가 알아서 본다」를 장치 없이 적지 않는다 — `SyncedFork` 통행증
+
+초안은 「`SyncOutcome` 이 열거형이라 `switch` 가 누락을 드러낸다」고 적었다. **그것은 거짓이다.**
+enum 의 exhaustive 검사는 **호출자가 `switch` 를 쓸 때만** 작동하고, 실제 위험은
+`publisher.syncWithUpstream(fork, base);` **한 줄로 반환값을 버리는 것**이다. 컴파일러도
+ArchUnit 도 그것을 보지 않는다. 그러면 `CONFLICT` 위에 커밋이 쌓이고 #23 이
+**머지 불가능한 PR 을 남의 저장소에 연다.**
+
+**이 저장소에 이미 선례가 있다** — `PolicyClearance` 를 `startImplementing` 이 **인자로 요구**해
+S-5 의무를 javadoc 에서 컴파일러로 옮긴 수법(#24). 같은 것을 쓴다.
+
+```java
+public record SyncedFork(ForkRef fork, SyncOutcome outcome) { … }   // 발급처는 sync 하나뿐
+
+SyncedFork syncWithUpstream(ForkRef fork, String baseBranch);
+PublishRequest(SyncedFork fork, …)     // 🔴 ForkRef 를 직접 받지 않는다
+```
+
+**「동기화를 보지 않고 publish 한다」가 표현 불가능해진다.**
+
+⚠️ **이것이 강제하는 것은 「호출」이지 「판단」이 아니다.** `CONFLICT` 여도 publish 는 가능하다 —
+진행 여부는 PR 을 만드는 주체가 정할 일이고, 이 PR 은 PR 을 만들지 않는다. 다만
+**보지 않고 지나가는 것은 불가능**해지고, 그 차이가 이 절의 전부다.
 
 ### D-4c. publish 절차 — Git Data API
 
@@ -337,7 +393,7 @@ Fork ref force 갱신)보다 **호출이 1회**이고, 충돌 시 GitHub 이 `40
 
 | 단계 | 재시도 | 왜 |
 |---|---|---|
-| `POST /git/blobs` · `/git/trees` · `/git/commits` | ✅ **안전** | **내용 주소(content-addressed)** 다. 같은 내용은 같은 sha 를 돌려주고 중복 객체는 **도달 불가능한 채 GC 된다.** 부작용이 없다 |
+| `POST /git/blobs` · `/git/trees` · `/git/commits` | ✅ **안전** | 🔴 근거를 **우리가 통제하는 사실**로 적는다 — **결과 sha 를 쓰는 것은 마지막 응답 하나뿐이고, 중간에 만들어진 객체는 어떤 ref 도 가리키지 않는다.** 즉 우리 쪽에 부작용이 없다 |
 | `POST` · `PATCH` `/git/refs` | 🔴 **하지 않는다** | ref 갱신은 **상태 변경**이다. 재시도가 첫 요청을 덮거나 422 를 만든다 |
 | `POST /repos/{upstream}/forks` | 🔴 **하지 않는다** | 중복 fork 요청. 게다가 **유일한 upstream 쓰기**라 재시도 대상으로 두지 않는다 |
 | `POST /merge-upstream` | 🔴 **하지 않는다** | 머지는 상태 변경이다 |
@@ -345,8 +401,14 @@ Fork ref force 갱신)보다 **호출이 1회**이고, 충돌 시 GitHub 이 `40
 `GitHubWriteClient` 가 **호출마다 재시도 허용 여부를 인자로 받는다**(`Idempotency.SAFE` / `UNSAFE`).
 기본값을 두지 않는다 — 기본값이 있으면 새 쓰기가 조용히 안전한 쪽으로 분류된다.
 
-⚠️ **NFR-1 의 「최대 48 논리 호출」은 이 구분 위에서만 참이다.** 곱셈이 걸리는 것은
-`SAFE` 단계(blob·tree·commit)뿐이고, `UNSAFE` 단계는 1회씩이다.
+⚠️ **NFR-1 의 계산은 이 구분 위에서 한 것이다.** 곱이 걸리는 것은 `SAFE` 구간뿐이고
+`UNSAFE` 는 1회씩이라 합계가 **≈ 42** 다 — 각주로 때우지 않고 §1 NFR-1 상세 표에서 다시 셌다.
+
+🔴 **「내용 주소라 재전송이 무해하다」는 commit 에 대해 조건부다.** commit 객체의 해시에는
+`author.date`·`committer.date` 가 들어가므로, 재시도마다 `clock.instant()` 를 다시 부르면
+**매번 다른 sha** 가 나온다. 최종 ref 가 마지막 것만 가리켜 실해는 없지만 「같은 내용 = 같은 sha」가
+깨진다. **커밋 날짜는 publish 진입 시 한 번 읽어 재시도 내내 재사용한다** — 그러면 commit 도
+진짜로 멱등이다.
 
 ### D-5. 커밋 메시지 — S-5
 
@@ -403,7 +465,8 @@ check "$f" "S-1" \
 | 7 | `pullrequest/domain/BranchName.java` | domain | 신규 | `oss-agent/issue-{n}-{slug}` · slug 정규화 (FR-3) |
 | 8 | `pullrequest/domain/CommitMessage.java` | domain | 신규 | S-5 조립 |
 | 9 | `pullrequest/domain/CommitIdentity.java` | domain | 신규 | sign-off 서명자 |
-| 10 | `pullrequest/domain/SyncOutcome.java` | domain | 신규 | 동기화 결과를 **값으로** |
+| 10 | `pullrequest/domain/SyncOutcome.java` | domain | 신규 | 동기화 결과 — `merge_type` 기반 (D-4b) |
+| 10b | `pullrequest/domain/SyncedFork.java` | domain | 신규 | 🔴 **통행증** — 발급처는 `syncWithUpstream` 하나. `PublishRequest` 가 인자로 요구 |
 | 11 | `pullrequest/domain/ForkPublishException.java` | domain | 신규 | 전송 외 실패 |
 | 12 | `pullrequest/adapter/out/github/GitHubForkPublisher.java` | adapter/out | 신규 | 🔴 **`@Component @ExternalAdapter`** · D-4a~d 절차 |
 | 13 | `pullrequest/adapter/out/github/GitDataPayloads.java` | adapter/out | 신규 | 요청·응답 DTO. 🔴 tree 항목은 **`@JsonInclude(ALWAYS)`** |
@@ -415,11 +478,20 @@ check "$f" "S-1" \
 | 19 | `.claude/scripts/safety-boundary-check.sh` | — | 수정 | D-6 패턴 |
 | 20 | `src/test/.../SafetyBoundaryCheckScriptTest.java` | test | 수정 | 🔴 D-6 패턴의 **위반 표본 + 통과 표본** — 물림 단언 |
 
-🔴 **14·16 에 `@ExternalAdapter` 가 왜 필요한가** — `ExternalAdapters` 의 **신호 2** 는
+🔴 **14·16 의 프로필 표기가 왜 필요한가** — `ExternalAdapters` 의 **신호 2** 는
 「필드로 네트워크 클라이언트를 전이적으로 보유」이고 `NETWORK_CLIENTS` 에 `RestClient` 가 있다.
 `GitHubWriteClient` 는 패키지가 `support/github` 여도 **대외 어댑터로 판정**되므로,
 표기가 없으면 `fakes` 프로필에서도 빈이 올라와 `ExternalAdapterIsolationTest` 가 **통합 테스트
-전부를 적색**으로 만든다. 기존 `GitHubClientConfig` 가 `@Configuration @ExternalAdapter` 인 것이 선례다.
+전부를 적색**으로 만든다.
+
+⚠️ **「클래스에 붙였으니 됐다」가 아니다.** `@ExternalAdapter` 는 `@Profile("!fakes")` 이므로
+**빈 정의에 붙어야** 효과가 있다. `GitHubWriteClient` 를 `ForkPublishConfig` 의 `@Bean` 메서드로
+만들면 **클래스 애노테이션은 읽히지 않는다** — 선례로 든 `GitHubApiClient` 자신이 클래스에는
+아무 표기 없이 `GitHubClientConfig` 의 `@ExternalAdapter` 로만 빠진다.
+
+🔴 **이 PR 의 선택: `@Bean` 조립.** 따라서 **프로필을 실제로 거는 것은 파일 16** 이고,
+파일 14 의 클래스 애노테이션은 **의도 표기**다. `@Component` 스캔으로 바꾸면 이 판단이
+뒤집히므로 그때 이 문단을 함께 고친다.
 
 ### 체크리스트 답변
 
@@ -490,13 +562,27 @@ Stage 4 가 Stage 2 의 클라이언트를 쓴다. 파일이 겹치지는 않으
 가드가 그 입력 공간을 안 보면 `testing-philosophy.md` **요구 4(입력 도달)** 에 걸린다.
 
 ```
-③  com.ossagent 전체에서 RestClient·RestTemplate·WebClient 의
-    post·patch·put·delete 를 호출하는 타입은 GitHubWriteClient 뿐이다
+③  com.ossagent 전체에서 「쓰기 HTTP 호출」을 하는 타입은 GitHubWriteClient 뿐이다
 ③b GitHubWriteClient 안에서 assertForkOwner 를 거치지 않는 쓰기 메서드는 createFork 뿐이다
 ```
 
 ③이 **덮개**, ③b 가 **그 안의 예외**다. 둘 다 있어야 한다 — ③만 두면 `createFork` 예외가
 넓어지는 것을 못 보고, ③b 만 두면 클라이언트 밖의 `post` 를 못 본다.
+
+#### 🔴 ③은 아직 열거다 — 두 가지를 더 해야 닫힌다
+
+**① 모수 단언 (요구 1).** 「쓰기 호출」을 `post()`·`patch()`·`put()`·`delete()` **메서드 이름**으로만
+판정하면, 구현이 `restClient.method(HttpMethod.POST)` 나 `.exchange(...)` 로 가는 순간
+**대상이 0건**이 되고 규칙은 조용히 초록이다. 그 상태에서는 **검사하려던 본체를 못 찾았다는
+사실조차 드러나지 않는다.**
+
+> ③은 「찾아낸 쓰기 호출 타입이 **정확히 1개**이고 그것이 `GitHubWriteClient` 다」를 단언한다.
+> **0건이면 실패**다.
+
+**② 판정 축을 넓힌다.** 메서드 이름 ∪ **`HttpMethod.POST/PUT/PATCH/DELETE` 상수 참조**.
+대상 클라이언트 목록은 🔴 **`ExternalAdapters.NETWORK_CLIENTS` 와 같은 출처를 쓴다** —
+따로 적으면 둘이 갈라지고, 그것은 `SecretPatternDriftTest` 가 막으려던 어긋남과 같은 모양이다.
+(`NETWORK_CLIENTS` 에는 `java.net.http.HttpClient` 도 있다 — 손으로 적었으면 빠뜨렸을 것이다.)
 
 ⚠️ **물림을 미끼로 고정한다.** 위반이 0건이면 규칙이 항상 `true` 를 돌려줘도 초록이다.
 `src/test/.../probe/` 에 이미 같은 수법의 표본이 있으므로 그 관행을 따른다.
@@ -533,9 +619,26 @@ Stage 4 가 Stage 2 의 클라이언트를 쓴다. 파일이 겹치지는 않으
 | 4 | `safety-boundary-check.sh` 의 S-1 패턴이 새 모양을 못 본다 | 정적 탐지가 #22 에 대해 공백 | D-6 에서 한 줄 더하되 **한계를 함께 적는다.** 실질 방어는 런타임 어설션 |
 | 5 | 대용량 변경분 | 메모리 | `PublishRequest` 가 파일 수·바이트 상한을 단언 |
 | 6 | **이 PR 에 호출자가 없다** | 죽은 코드처럼 보인다 | 🔴 **의도다** — #16 과 같다. PR 본문에 「배선은 #23」을 명시 |
-| 7 | 🔴 **내용 검사 없이 공개 Fork 에 게시한다** | 대상 저장소가 커밋해 둔 시크릿·LLM 이 넣은 문자열이 **공개 저장소에 영구 게시**된다 | **이 PR 에 방어를 두지 않는다**(D-2 — 같은 방어 두 벌 금지). **없다는 사실을 기록**하고 #18 이 `SecretFilePolicy`·`GeneratedChange` 스크럽으로 책임진다. ⚠️ #18 이 그것을 안 하면 **이 경로가 그대로 유출구**다 — PR 본문에 인계로 남긴다 |
+| 7 | 🔴 **내용 검사 없이 공개 Fork 에 게시한다** | 대상 저장소가 커밋해 둔 시크릿·LLM 이 넣은 문자열이 **공개 저장소에 영구 게시**된다 | **이 PR 에 방어를 두지 않는다**(D-2 — 같은 방어 두 벌 금지). 🔴 **대신 `FileChange.content` 를 `@ExternalText` 로 표시하고 `ExternalTextScrubRegistryTest` 에 `미구현 #18` 로 등록한다** — 아래 |
 | 8 | 같은 이름의 무관한 저장소를 Fork 로 오인 | 내 저장소를 망가뜨린다. **owner 어설션은 통과한다** | D-4a 의 `fork==true && parent 일치` 단언 |
 | 9 | 비멱등 쓰기에 전송 재시도 | 커밋·ref 중복 | D-4d — 단계별 `Idempotency` 인자. 기본값을 두지 않는다 |
+
+#### 🔴 위험 7 의 인계를 **PR 본문이 아니라 테스트**에 남긴다
+
+초안은 대응을 「PR 본문에 인계로 남긴다」로 적었다. **머지 후 아무도 안 읽는다.**
+
+이 저장소는 정확히 이 상황을 위한 관행을 이미 갖고 있다 — `ExternalTextScrubRegistryTest` 가
+강제하는 것은 「스크럽했다」가 아니라 **「스크럽을 어떻게 할지 누군가 정했다」**이고,
+등록값에 **`미구현` + 담당 이슈 번호**를 허용한다.
+
+```java
+Map.entry("FileChange.content", new Decision(Mechanism.PENDING,
+        "#22 — 공개 Fork 에 게시되는 내용. 내용 검사는 #18 이 세운다(D-2)"))
+```
+
+⚠️ **이것은 방어가 아니라 기록의 강제다.** D-2 의 「같은 방어를 두 벌 두지 않는다」와 충돌하지
+않는다 — 비용은 등록 한 줄이고, 얻는 것은 **#18 이 채우지 않으면 그 사실이 테스트 목록에
+계속 보이는 것**이다.
 
 **대외 호출 실패 시나리오**
 
@@ -581,4 +684,5 @@ Stage 4 가 Stage 2 의 클라이언트를 쓴다. 파일이 겹치지는 않으
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-27 | smileboy0014 | 초안 — push 수단을 Git Data API 로 확정(Q-11 재도출) · 이슈 완료조건 FR-8 폐기 근거 · 어설션 두 겹 설계 |
+| 2026-09-27 | smileboy0014 | rev.3 — 재검토 반영 9건. 🔴 **`SyncedFork` 통행증 신설**(「switch 가 드러낸다」가 반환값 무시를 못 잡는다는 지적 — `PolicyClearance` 선례) · ArchUnit ③에 **모수 단언 + 판정 축 확대**(`NETWORK_CLIENTS` 공유) · NFR-1 을 `SAFE`/`UNSAFE` 로 **다시 계산(≈42)** · `merge-upstream` 판정을 **상태코드에서 `merge_type` 으로** · fork 이름 충돌을 **응답 `full_name`** 으로 해소 · 위험 7 인계를 **`ExternalTextScrubRegistry` 등록**으로 · GC 주장 제거 + **커밋 날짜 고정** · `@Bean` 조립임을 명시 · 잔재 2곳 |
 | 2026-09-27 | smileboy0014 | rev.2 — 격리 검토 반영 9건. **D-4a**(fork 재사용 판정) · **D-4b**(동기화 설계) · **D-4d**(비멱등 쓰기 재시도) 신설 · 테스트 8 ③을 **여집합**으로 · `@ExternalAdapter` 누락 · `fork-owner` 바인딩 부재 · `sha:null` 직렬화 함정 · S-4 잔여 위험 명시 · D-1 근거 순서를 **문서 의존 없는 것부터**로 |

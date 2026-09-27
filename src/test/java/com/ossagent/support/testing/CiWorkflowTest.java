@@ -47,6 +47,8 @@ import org.junit.jupiter.api.Test;
  *   <li>브랜치 보호·필수 체크 설정은 저장소 설정이라 파일에 없다 — 보지 못한다</li>
  *   <li>워크플로우를 <b>새로 추가</b>하면서 같은 실수를 하면 이 테스트는 {@code build.yml}
  *       만 본다</li>
+ *   <li>🔵 {@code run: |} 블록 스칼라가 생기면 그 안의 셸 주석·shebang 은 <b>실효 내용인데</b>
+ *       주석 필터가 지운다. 지금 그런 블록이 없어 실해가 없을 뿐이다</li>
  * </ul>
  */
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
@@ -81,7 +83,7 @@ class CiWorkflowTest {
     @Test
     @DisplayName("게이트가 main 푸시와 PR 양쪽에서 돈다 — 한쪽만이면 우회로가 생긴다")
     void 게이트가_양쪽에서_돈다() throws IOException {
-        String yaml = read();
+        String yaml = effectiveLines();
 
         assertThat(yaml).contains("push:");
         assertThat(yaml).contains("branches: [main]");
@@ -91,10 +93,12 @@ class CiWorkflowTest {
     @Test
     @DisplayName("🔴 스캔 2종이 CI 에서 tree 모드로 다시 돈다 — --no-verify 우회를 잡는 자리다")
     void 스캔_2종이_tree_모드로_돈다() throws IOException {
-        String yaml = read();
+        String yaml = effectiveLines();
 
-        assertThat(yaml).contains("secret-scan.sh");
-        assertThat(yaml).contains("safety-boundary-check.sh");
+        // 🔴 이름이 **어딘가에 있다**가 아니라 **그 명령이 실행된다**를 본다.
+        //    이름만 찾으면 `run: echo skip  # …secret-scan.sh` 로 우회된다 — 실제로 뚫렸다
+        assertThat(yaml).contains("run: .claude/scripts/secret-scan.sh");
+        assertThat(yaml).contains("run: .claude/scripts/safety-boundary-check.sh");
         // staged 모드로 돌면 CI 에서는 스테이징이 없어 **0건을 검사하고 초록**이 된다
         assertThat(yaml).contains("SCAN_MODE: tree");
     }
@@ -113,8 +117,28 @@ class CiWorkflowTest {
      */
     private static String effectiveLines() throws IOException {
         return read().lines()
-                .filter(line -> !line.strip().startsWith("#"))
+                .map(CiWorkflowTest::withoutTrailingComment)
+                .filter(line -> !line.isBlank())
                 .collect(java.util.stream.Collectors.joining("\n"));
+    }
+
+    /**
+     * 🔴 <b>줄 끝 주석까지</b> 걷어낸다.
+     *
+     * <p>처음엔 {@code #} 로 <b>시작하는</b> 줄만 걸렀는데, 그러면
+     * {@code run: echo skip  # .claude/scripts/secret-scan.sh} 로 <b>게이트를 지우고도</b>
+     * 이름이 남아 초록이 된다 — 돌연변이로 실제로 뚫었다.
+     *
+     * <p>⚠ YAML 의 줄 끝 주석은 <b>공백 뒤의 {@code #}</b> 다. 값 안의 {@code #}
+     * (예: {@code key: "a#b"})는 건드리지 않는다.
+     */
+    private static String withoutTrailingComment(String line) {
+        String stripped = line.strip();
+        if (stripped.startsWith("#")) {
+            return "";
+        }
+        int marker = line.indexOf(" #");
+        return marker < 0 ? line : line.substring(0, marker);
     }
 
     private static String read() throws IOException {

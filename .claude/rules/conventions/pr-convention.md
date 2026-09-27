@@ -88,7 +88,7 @@ git fetch origin main && git merge origin/main     # 머지 직전에
 ./gradlew build                                     # 여기서 초록이어야 한다
 ```
 
-**branch protection 으로 강제하지 않는다** — 하루 11~16건 머지에 동시 PR 3~4개라,
+**branch protection 으로 강제하지 않는다** — 하루 12~16건 머지에 동시 worktree 5개라,
 up-to-date 를 강제하면 한 번 머지할 때마다 나머지가 전부 무효화된다. 얻는 것은 위 두 줄과
 같고 마찰만 는다 (Q-10 확정).
 

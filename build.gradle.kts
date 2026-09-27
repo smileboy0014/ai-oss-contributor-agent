@@ -127,7 +127,7 @@ tasks.withType<Test>().configureEach {
     // 🔴 CI 워크플로우도 같은 이유로 선언한다 (#61). CiWorkflowTest 가 이 파일을 **텍스트로**
     //   읽으므로, 선언하지 않으면 워크플로우만 고친 커밋에서 UP-TO-DATE 로 건너뛴다 —
     //   요구 0(「돌기는 하는가」).
-    inputs.files(fileTree("$rootDir/.github/workflows") { include("**/*.yml") })
+    inputs.files(fileTree("$rootDir/.github/workflows") { include("**/*.yml", "**/*.yaml") })
             .withPropertyName("ciWorkflows")
             .withPathSensitivity(PathSensitivity.RELATIVE)
 

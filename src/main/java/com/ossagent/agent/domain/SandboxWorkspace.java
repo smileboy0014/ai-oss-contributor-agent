@@ -46,6 +46,41 @@ public record SandboxWorkspace(Path path) {
     }
 
     /**
+     * 🔴 워크스페이스 <b>안의</b> 경로로 푼다 — 밖으로 나가면 거부한다 (#18 · S-3).
+     *
+     * <h2>{@link #under} 와 다른 축이다</h2>
+     *
+     * <table border="1">
+     *   <caption>둘이 막는 것</caption>
+     *   <tr><th></th><th>무엇을 검증하나</th><th>입력의 출처</th></tr>
+     *   <tr><td>{@code under}</td><td>마운트 <b>소스</b>가 루트 하위인가</td><td>우리 설정</td></tr>
+     *   <tr><td><b>이것</b></td><td>쓰려는 <b>대상</b>이 워크스페이스 안인가</td>
+     *       <td>🔴 <b>LLM 출력</b></td></tr>
+     * </table>
+     *
+     * <p>모델이 {@code ../../etc/passwd} 를 돌려주면 우리가 그것을 <b>호스트에 쓴다.</b>
+     * 계획 경로 검사({@code CodingOutOfPlanException})가 1차로 막지만, 계획 자체가
+     * 대상 저장소 트리에서 나오므로 <b>그 검사만으로는 이 축이 닫히지 않는다.</b>
+     *
+     * <p>⚠️ {@code normalize()} 로 {@code ..} 를 접은 <b>뒤에</b> 본다. 접기 전에 보면
+     * {@code a/../../b} 같은 것이 문자열로는 하위처럼 보인다.
+     *
+     * @throws SandboxPermanentException 워크스페이스 밖을 가리킨다
+     */
+    public Path resolveInside(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            throw new SandboxPermanentException("워크스페이스 안의 경로는 필수다");
+        }
+        Path resolved = path.resolve(relativePath).normalize();
+        if (!resolved.startsWith(path)) {
+            // ⚠ 메시지에 해석된 절대경로를 넣지 않는다 — 호스트 구조가 로그로 나간다
+            throw new SandboxPermanentException(
+                    "워크스페이스 밖을 가리킨다 — 상위 참조가 있다 (S-3): " + relativePath);
+        }
+        return resolved;
+    }
+
+    /**
      * 루트 하위임을 확인하고 값을 만든다. <b>유일한 생성 경로다.</b>
      *
      * @param candidate 호출자가 준 경로

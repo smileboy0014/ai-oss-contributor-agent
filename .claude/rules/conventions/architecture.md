@@ -170,12 +170,12 @@ Q5. DB·GitHub·LLM·Docker 기술인가?
 
 ### 재시도 상한이 세 축인 이유 (2026-09-22 신설 · #6 / Q-6 반영 · #36 / **세 번째 축 신설 · #16**)
 
-원래 이 표는 「상한은 `agent.execution.max-retries`」 하나로 적혀 있었다. 그 문장으로는
+원래 이 표는 「상한은 `agent.execution.max-attempts`」 하나로 적혀 있었다. 그 문장으로는
 **전송 계층 실패**를 다룰 수 없다.
 
 | 축 | 설정 키 | 무엇을 세나 | 소진하면 |
 |---|---|---|---|
-| **파이프라인** | `agent.execution.max-retries` (3) | `CODE`→`VERIFY`→`REVIEW` **한 바퀴**. `AgentRun.attempt` 에 기록 | 후보가 `FAILED` — **사람에게 넘기는 신호** (S-6) |
+| **파이프라인** | `agent.execution.max-attempts` (3) | `CODE`→`VERIFY`→`REVIEW` **한 바퀴**. `AgentRun.attempt` 에 기록 | 후보가 `FAILED` — **사람에게 넘기는 신호** (S-6) |
 | **전송 계층** | `github.max-retries` (2) · `agent.llm.max-retries` (2) | HTTP 5xx·연결 실패·타임아웃 | 그 호출 1회가 실패. 파이프라인 카운터는 그대로 |
 | **계획 검증** 🆕 | `agent.plan.max-attempts` (2) | 「모델이 **없는 파일을 지목**했다」 — 스키마·검증 거부 | 후보가 `FAILED` (`SELECTED → FAILED`) — 🔴 **#16 이 그 전이를 열었다** |
 

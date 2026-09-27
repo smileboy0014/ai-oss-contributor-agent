@@ -379,7 +379,7 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 
 | 항목 | 값 |
 |---|---|
-| 상한 | `agent.execution.max-retries: 3` (`application.yml`) |
+| 상한 | `agent.execution.max-attempts: 3` (`application.yml`) |
 | 단계 타임아웃 | `agent.execution.timeout-seconds: 1800` (30분) |
 | 상한 소진 | `FAILED` — **그 자체가 사람에게 넘기는 신호다** |
 
@@ -388,11 +388,66 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 판정 필드는 **`contribution_candidate.attempt`** 이고 도메인이 `MAX_ALLOWED_ATTEMPTS = 3` 을
 넘는 값을 거부한다 — 상한을 올리려면 도메인 코드를 고쳐야 하고 그것이 리뷰에 보인다(불변식 ⑧).
 
-⚠️ `application.yml` 의 키 이름은 `agent.execution.max-retries` 인데 **의미는 attempts**(총 시도 수)다.
-1 만큼 다른 개념이라 「off-by-one 버그」로 오인해 고치면 Q-6 의 곱셈 예산이 무효가 된다.
-개명은 그 프로퍼티를 실제로 읽는 #21 에서 한다.
+✅ **키 이름이 `agent.execution.max-attempts` 로 맞춰졌다** (2026-09-27 · #21).
+값은 **총 시도 수**이고 이제 이름이 그것을 말한다 — 이전 이름(`max-retries`)은 1 만큼
+다른 개념이었다. 🔴 **이름만 바꿨다** — 값(3)도 비교도 그대로다. 「retries 니 한 번 더」로
+읽고 비교를 옮기면 Q-6 의 곱셈 예산이 무효가 된다.
+
+⚠️ **전송 계층 축 둘은 `max-retries` 인 채로 남는다**(`github.max-retries` ·
+`agent.llm.max-retries`) — 그쪽은 이름과 의미가 맞다. 셋을 같은 이름으로 맞추지 않는다.
 
 **재시도마다 `agent_run` 과 `generated_change` 를 새 행으로 남긴다.** 덮어쓰면 무엇이 왜 바뀌었는지 추적이 사라진다.
+
+### ✅ 실행체가 생겼다 — `ImplementCandidateUseCase` 의 루프 (2026-09-27 · #21)
+
+#18 이 1바퀴만 돌렸고 루프·상한 소진 판정·`REVIEW` 배선·후보 단위 실패 기록을 #21 이 닫았다.
+
+| 무엇 | 어디 |
+|---|---|
+| 루프 | `ImplementCandidateUseCase.runOutsideTransaction` — 🔴 **트랜잭션 밖**(최악 3 × 30분) |
+| 「재시도가 의미 있는가」 | `RetryPolicy` — 순수 판정 |
+| 「더 돌 수 있는가」 | 🔴 `ContributionCandidate.retryImplementation` — **카운터의 주인이 후보 루트다** |
+| 전이·기록 | `CandidateRetryWriter` — 짧은 트랜잭션 (self-invocation 회피) |
+
+🔴 **판정 둘을 한곳에 두지 않는다.** 「의미 있는가」와 「더 돌 수 있는가」를 합치면
+도메인 상수가 두 군데가 되고 한쪽만 고쳐지는 날이 온다.
+
+#### 🔴 재시도는 화이트리스트다
+
+「무엇이 재시도 **불가**인가」를 열거하면 **새 실패 종류가 조용히 재시도로 떨어진다** —
+대가는 LLM 과금 ×3 과 샌드박스 90분이다. 그래서 **재시도 가능한 것만** 열거한다.
+
+| 신호 | 판정 |
+|---|---|
+| `report.passed()` && `review.passed()` | `Proceed` → `READY_FOR_PR` |
+| 검증이 `FAILED` (판정 불가 없음) · 리뷰가 `CHANGES_REQUESTED` | `Retry` |
+| 🔴 `UNDETERMINED`(검증·리뷰) · 예외 **전부** | `Stop` → `FAILED` |
+
+⚠️ 통과 판정을 `!failed` 로 쓰지 않는다 — `UNDETERMINED` 가 조용히 접힌다.
+
+#### 🔴 루프의 성공 종착은 `READY_FOR_PR` 이다 — S-2
+
+`PR_CREATED` 로 가지 않는다. 그 다음은 **세 번째 승인 게이트**(#23)다.
+`ApprovalGateArchitectureTest` 가 **여집합**으로 고정한다 —
+「`com.ossagent` 전체에서 `markPrCreated` 를 부르는 타입이 **0개**」.
+⚠️ 허용목록이 아니다: 정당한 호출자는 #23 이고 지금은 아무도 아니다.
+**#23 이 여는 날 그 테스트가 함께 빨개지는 것**이 장치다.
+
+#### 실패 사유가 DB 에 남는다 (S-4)
+
+`CODE`·`VERIFY`·`REVIEW` 세 단계 전부 `AgentRun` 실패 행을 남긴다.
+⚠️ **상한 소진에 행을 하나 더 만들지 않는다** — 마지막 바퀴의 실패 행이 이미 있고,
+또 남기면 같은 실패가 두 번 세어져 비용 집계가 어긋난다.
+상한 소진은 행이 아니라 **후보 상태(`FAILED`)와 `attempt` 값**이 말한다.
+
+#### 🕳 닫지 못한 것
+
+| | |
+|---|---|
+| **같은 실패 2회 조기 중단이 발화하지 않을 수 있다** | 지문 재료가 빌드 출력이라 타임스탬프·경로가 섞이면 같은 오류라도 갈린다. 실측 전에는 정규화하지 않는다(거부목록이 된다). 물지 못해도 **상한이 뒤를 받친다** |
+| 🔴 **Q-4 — 네트워크를 요구하는 테스트가 3바퀴를 태운다** | 정상 코드가 `FAILED` 로 떨어진다. #21 이 그 비용을 **1회에서 3회로 증폭**시켰다. 고칠 주체는 Q-4 다 |
+| **루프 전체 상한이 없다** | 바퀴별 상한(1800s)만 있다. 최악 90분. 실행 프로필 분리(Q-3)와 함께 본다 |
+| **바퀴마다 통행증을 다시 받지 않는다** | 루프가 도는 동안 대상 저장소가 AI 기여 금지로 바뀌어도 **막는 것이 없다**(S-5). #23 에 인계 |
 
 ---
 

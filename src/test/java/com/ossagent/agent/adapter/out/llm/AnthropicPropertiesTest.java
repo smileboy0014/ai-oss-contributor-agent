@@ -60,7 +60,7 @@ class AnthropicPropertiesTest {
         assertThat(bound.baseUrl()).isEqualTo("https://api.anthropic.com");
         assertThat(bound.maxOutputTokens()).isEqualTo(16000);
         assertThat(bound.maxRetries())
-                .as("전송 축 상한. agent.execution.max-retries(3) 와 다른 값이어야 축이 갈린 것이 보인다")
+                .as("전송 축 상한. agent.execution.max-attempts(3) 와 다른 값이어야 축이 갈린 것이 보인다")
                 .isEqualTo(2);
         assertThat(bound.retryBackoff()).isEqualTo(Duration.ofMillis(500));
     }

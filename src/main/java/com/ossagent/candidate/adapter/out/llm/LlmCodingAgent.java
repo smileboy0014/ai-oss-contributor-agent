@@ -8,6 +8,7 @@ import com.ossagent.agent.domain.LlmCallSite;
 import com.ossagent.agent.domain.LlmRequest;
 import com.ossagent.agent.domain.LlmResponse;
 import com.ossagent.candidate.domain.CodingAgent;
+import com.ossagent.candidate.domain.CodingFeedback;
 import com.ossagent.candidate.domain.CodingInput;
 import com.ossagent.candidate.application.CodingProperties;
 import com.ossagent.candidate.domain.CodingOutOfPlanException;
@@ -115,6 +116,8 @@ public class LlmCodingAgent implements CodingAgent {
             prompt.append("\n⚠ 이 저장소는 기여에 테스트를 요구한다. 계획의 테스트 파일을 반드시 채운다.\n");
         }
 
+        appendFeedback(prompt, input);
+
         prompt.append("\n## 저장소 컨텍스트\n");
         for (SelectedFile file : input.context().files()) {
             // ⚠ 내용은 이미 스크럽됐고 경로는 SecretFilePolicy 를 통과했다 —
@@ -123,6 +126,40 @@ public class LlmCodingAgent implements CodingAgent {
                     .append(file.content()).append('\n');
         }
         return prompt.toString();
+    }
+
+    /**
+     * 🔴 직전 바퀴가 왜 실패했는지 되먹인다 — #21 · FR-3 「구분해 다른 프롬프트로」.
+     *
+     * <p>첫 바퀴면 아무것도 붙지 않는다. 붙는 경우 <b>종류마다 다른 지시</b>가 간다 —
+     * 컴파일 오류와 리뷰 지적은 고치는 방식이 다르고, 같은 문장으로 보내면
+     * 모델이 엉뚱한 것을 고친다.
+     *
+     * <p>⚠️ <b>내용은 이미 스크럽됐다</b>({@code StageResult}·{@code DiffReview} 의
+     * compact 생성자). 여기서 다시 스크럽하지 않는 이유는 {@link CodingFeedback} javadoc 에
+     * 있다 — 다만 송신 직전 {@code PromptScrubber} 가 한 번 더 돈다.
+     *
+     * <p>🔴 <b>{@code switch} 에 {@code default} 를 두지 않는다.</b>
+     * {@link CodingFeedback.Kind} 에 값이 추가되면 <b>컴파일이 깨진다</b> — 그것이 목적이다.
+     * {@code default} 를 두면 새 종류가 조용히 아무 지시로나 나간다.
+     */
+    private static void appendFeedback(StringBuilder prompt, CodingInput input) {
+        if (!input.hasFeedback()) {
+            return;
+        }
+        CodingFeedback feedback = input.feedback();
+        prompt.append("\n## 🔴 직전 시도가 실패했다 — 아래를 고쳐 다시 만든다\n");
+        prompt.append(switch (feedback.kind()) {
+            case COMPILE -> "컴파일이 깨졌다. 아래 오류를 해소한다. "
+                    + "계획의 경로는 그대로 두고 내용만 고친다.\n";
+            case TEST -> "테스트가 실패했다. 아래를 보고 구현을 고친다. "
+                    + "⚠ 테스트를 통과시키려고 테스트를 무력화하지 않는다.\n";
+            case DIFF -> "계획에 없는 파일이 바뀌었다. 계획의 경로 밖을 건드리지 않는다.\n";
+            case REVIEW -> "AI 리뷰가 변경을 요구했다. 아래 지적을 반영한다.\n";
+        });
+        for (String point : feedback.points()) {
+            prompt.append("- ").append(point).append('\n');
+        }
     }
 
     /**

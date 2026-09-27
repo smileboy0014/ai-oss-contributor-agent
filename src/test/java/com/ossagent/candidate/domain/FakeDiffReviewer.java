@@ -22,6 +22,9 @@ public class FakeDiffReviewer implements DiffReviewer {
     private DiffReview scripted = passing();
     private RuntimeException failure;
 
+    /** 🔴 바퀴별 결과 — 고정 하나로는 #21 의 루프를 구분할 수 없다. */
+    private final java.util.Deque<DiffReview> queue = new java.util.ArrayDeque<>();
+
     public FakeDiffReviewer given(DiffReview review) {
         this.scripted = review;
         this.failure = null;
@@ -38,9 +41,18 @@ public class FakeDiffReviewer implements DiffReviewer {
         return List.copyOf(calls);
     }
 
+    /** 바퀴 순서대로. 다 쓰면 마지막 것이 반복된다. */
+    public FakeDiffReviewer givenInOrder(DiffReview... reviews) {
+        queue.clear();
+        queue.addAll(java.util.List.of(reviews));
+        this.failure = null;
+        return this;
+    }
+
     /** 싱글턴이라 앞 테스트의 흔적이 남는다. */
     public FakeDiffReviewer reset() {
         calls.clear();
+        queue.clear();
         scripted = passing();
         failure = null;
         return this;
@@ -52,7 +64,21 @@ public class FakeDiffReviewer implements DiffReviewer {
         if (failure != null) {
             throw failure;
         }
-        return scripted;
+        if (queue.size() > 1) {
+            return queue.poll();
+        }
+        return queue.isEmpty() ? scripted : queue.peek();
+    }
+
+    /** 통과 — 테스트가 스크립트에 쓴다. */
+    public static DiffReview passingReview() {
+        return passing();
+    }
+
+    /** 변경 요구 — <b>재시도가 의미 있는</b> 판정이다. */
+    public static DiffReview changesRequested(String finding) {
+        return new DiffReview(ReviewVerdict.CHANGES_REQUESTED, false, true, null, true,
+                "고칠 것이 있다", List.of(finding));
     }
 
     private static DiffReview passing() {

@@ -1,8 +1,13 @@
-# 유일한 강제 게이트다 — open-questions.md Q-10.
+# 우회를 잡는 마지막 자리다 — open-questions.md Q-10.
 #
 # git pre-commit 훅(.githooks/pre-commit)은 커밋 전에 같은 스캔 2종을 돌리지만,
 # `--no-verify` 로 우회 가능하고 core.hooksPath 등록을 잊으면 아예 돌지 않는다.
 # 그래서 여기서 tree 모드(추적 파일 전체)로 다시 돌린다.
+#
+# 🔴 여기 원래 「유일한 **강제** 게이트」라고 적혀 있었다. **그 말은 참이 아니다** (2026-09-27 · #61).
+#   필수 체크(branch protection)를 걸지 않기로 했으므로 — Q-10 확정 — 이 워크플로우가
+#   적색이어도 **머지 버튼은 눌린다.** 막는 것이 아니라 **보이게 하는 것**이다.
+#   「막힌다」고 적으면 거짓 안전감만 남는다(S-1 의 「쓰기 메서드를 안 만들었으니 안전하다」와 같은 오류).
 name: build
 
 on:
@@ -10,10 +15,24 @@ on:
     branches: [main]
   pull_request:
 
-# 같은 브랜치에 새 푸시가 오면 이전 실행을 취소한다
+# 같은 브랜치에 새 푸시가 오면 이전 실행을 취소한다 — 🔴 **PR 에서만**.
+#
+# 원래 무조건 취소였다. PR 에서는 옳다(직전 head 의 결과는 쓸모가 없다). 그런데
+# main 은 group 이 `refs/heads/main` **하나**라, 연달아 머지하면 **앞 머지의 검증이
+# 뒤 머지에 취소된다.**
+#
+# 🔴 그 커밋은 **영영 검증되지 않는다.** squash 머지는 새 커밋을 만들므로 PR 의 green 은
+# 브랜치 head 의 것이고, main 커밋을 보는 실행은 이 push 하나뿐이다.
+#
+# 실측 (2026-09-27 · #61) — main push 최근 25건: **success 16 · cancelled 8 · failure 1**.
+# 즉 **머지 셋 중 하나가 검증 없이 지나갔다.** 그리고 유일한 failure(2026-09-26 11:15)가
+# #61 이 기록한 그 사건인데, 같은 분에 취소된 실행이 **2건 더** 있었다 — 세 개를 연달아
+# 머지한 자리다. 「합쳐진 뒤 빨개지면 안다」는 전제 자체가 그때 성립하지 않았다.
+#
+# ⚠ 대가는 실행 수가 는다는 것뿐이다(머지당 4분). 검증되지 않은 main 커밋보다 싸다.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   gate:

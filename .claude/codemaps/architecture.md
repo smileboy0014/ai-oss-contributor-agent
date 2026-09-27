@@ -165,7 +165,10 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | Scheduler | ❌ | 없음 |
 | Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |
 | 스키마 마이그레이션 | ✅ | **Flyway** · `ddl-auto: validate` · `db/migration/V1` (테이블 1개) |
-| CI | ❌ | 유일한 게이트는 로컬 `./gradlew build` — **Q-10** |
+| CI | ✅ | GitHub Actions `build` — 시크릿·안전 경계 스캔(tree) + `./gradlew build` (#27).
+🔴 **강제가 아니다** — 필수 체크를 걸지 않았으므로 적색이어도 머지 버튼은 눌린다.
+보이게 할 뿐이고 멈추는 것은 사람이다 (Q-10 확정 · #61).
+⚠️ main 푸시 실행은 **취소하지 않는다** — 취소되면 그 커밋이 영영 검증되지 않는다 |
 
 **「경계만」을 「구현됨」으로 읽지 않는다.** 스캔 API 가 200 을 돌려준다고 이슈가 수집된 것이 아니다.
 

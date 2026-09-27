@@ -2,6 +2,7 @@ package com.ossagent.support.web;
 
 import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.candidate.domain.CandidateTransitionException;
+import com.ossagent.candidate.domain.ImplementationNotReadyException;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.repository.domain.PolicyResolutionRejectedException;
 import com.ossagent.repository.domain.RepositoryAlreadyRegisteredException;
@@ -130,5 +131,21 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ContributionNotAllowedException.class)
     public ProblemDetail handleContributionNotAllowed(ContributionNotAllowedException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
+    }
+
+    /**
+     * 🔴 착수 실행기가 준비되지 않았다 — <b>503</b> (#18 · S-6).
+     *
+     * <p>요청이 틀린 것이 아니라 <b>지금 할 수 없는 것</b>이라 4xx 가 아니다.
+     * 같은 요청이 배선 뒤에는 성공한다.
+     *
+     * <p>⚠️ <b>후보는 그대로 남는다.</b> 전이 <b>전에</b> 막는 것이 요점이다 —
+     * {@code IMPLEMENTING} 에서 나갈 길이 {@code TESTING}·{@code FAILED} 뿐이고
+     * {@code FAILED} 는 종단이라, 실행기 없이 전이하면 사람이 버튼 한 번으로
+     * <b>후보를 영구히 죽인다.</b>
+     */
+    @ExceptionHandler(ImplementationNotReadyException.class)
+    public ProblemDetail handleImplementationNotReady(ImplementationNotReadyException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
     }
 }

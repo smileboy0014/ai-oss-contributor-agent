@@ -86,7 +86,11 @@ public class ImplementCandidateUseCase {
         }
         assertNoTransaction();
 
-        CandidateImplementationWriter.ImplementationStart start = writer.start(candidateId);
+        // 🔴 판정은 여기서 하고 **막는 것은 writer 가** 한다 — 통행증 확인 뒤여야 하기 때문이다.
+        //    여기서 바로 던지면 정책이 막았어야 할 요청이 503 으로 가려져 S-5 게이트가
+        //    한 번도 돌지 않는다. 그러면 「막는다」를 검증할 수 없다
+        CandidateImplementationWriter.ImplementationStart start =
+                writer.start(candidateId, executorReady());
 
         MDC.put(MDC_CANDIDATE_ID, String.valueOf(candidateId));
         MDC.put(MDC_ATTEMPT, String.valueOf(start.attempt()));
@@ -114,6 +118,27 @@ public class ImplementCandidateUseCase {
         // TODO(#18-B/C/D): 워크스페이스 clone → 코딩 → 포맷 → diff → GeneratedChange
         //   그때까지는 아래 검증 호출에 넘길 산출물이 없다.
         writer.fail(start.candidateId(), "구현 실행기가 아직 없다 — #18 의 B·C·D 미완");
+    }
+
+    /**
+     * 🔴 실행기가 없으면 <b>전이하지 않는다</b> — 후보를 태우지 않는다.
+     *
+     * <p>{@code IMPLEMENTING} 에서 나갈 길은 {@code TESTING}·{@code FAILED} 뿐이고
+     * <b>{@code FAILED} 는 종단</b>이다. 실행기 없이 전이하면 사람이 버튼 한 번으로
+     * <b>후보를 영구히 죽인다.</b>
+     *
+     * <p>⚠️ {@code UnwiredChangeVerifier} 와 층이 다르다. 그쪽은 <b>코드를 만든 뒤</b>
+     * 검증기가 없을 때이고, 그때는 작업이 실제로 있었으므로 {@code FAILED} 가 맞다.
+     * 여기는 <b>아무것도 하기 전</b>이라 아무것도 태우지 않는 것이 맞다.
+     *
+     * <p>🕳 <b>지금은 항상 걸린다</b> — C(코딩 에이전트 구현)·D(산출)가 아직 없다.
+     * 그래서 이 PR 만으로는 착수가 <b>시작되지 않고</b>, 후보는 {@code SELECTED} 로 남는다.
+     * 게이트는 열렸지만 <b>되돌릴 수 없는 일은 일어나지 않는다.</b>
+     */
+    private boolean executorReady() {
+        // TODO(#18-C/D): CodingAgent·TargetWorkspaceSource 배선이 들어오면
+        //   「그 빈들이 있는가」로 바꾼다. 지금은 실행 경로 자체가 없다.
+        return false;
     }
 
     /**

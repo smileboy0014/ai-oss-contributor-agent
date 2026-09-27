@@ -3,6 +3,7 @@ package com.ossagent.candidate.application;
 import com.ossagent.candidate.adapter.out.persistence.ContributionCandidateRepository;
 import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.candidate.domain.ContributionCandidate;
+import com.ossagent.candidate.domain.ImplementationNotReadyException;
 import com.ossagent.candidate.domain.StatusTransition;
 import com.ossagent.issue.application.FindAnalyzableIssuesUseCase;
 import com.ossagent.issue.domain.AnalyzableIssue;
@@ -77,8 +78,15 @@ class CandidateImplementationWriter {
      * @throws com.ossagent.repository.domain.ContributionNotAllowedException
      *         보류·금지 저장소 — {@code ApiExceptionHandler} 가 <b>403</b> 으로 매핑한다 (S-5)
      */
+    /**
+     * @param executorReady 🔴 실행기가 배선됐는가. <b>순서가 중요하다</b> — 이 값은
+     *                      <b>통행증 확인 뒤에</b> 본다. 앞에서 보면 정책이 막았어야 할
+     *                      요청이 <b>503 으로 가려져</b> S-5 게이트가 한 번도 돌지 않는다.
+     *                      그러면 「막는다」를 검증할 수 없고, 나중에 실행기가 붙는 순간
+     *                      <b>그때 처음으로</b> 정책 경로가 실행된다
+     */
     @Transactional
-    ImplementationStart start(Long candidateId) {
+    ImplementationStart start(Long candidateId, boolean executorReady) {
         ContributionCandidate candidate = candidates.findById(candidateId)
                 .orElseThrow(() -> new CandidateNotFoundException(candidateId));
 
@@ -105,6 +113,24 @@ class CandidateImplementationWriter {
             log.warn("승인 게이트 거부 gate=착수 candidateId={} status={} reason={}",
                     candidateId, candidate.getStatus(), e.getMessage());
             throw e;
+        }
+
+        // 🔴 실행기가 없으면 여기서 던진다 — **트랜잭션이 롤백되어 전이가 사라진다.**
+        //
+        //   순서가 이래야 하는 이유 둘:
+        //   ① 전이 **앞**에서 막으면 「고르지 않은 후보」(409)가 503 에 가려진다 —
+        //      요청이 틀린 것을 우리 사정으로 덮는 셈이다. startImplementing 이
+        //      selectedAt·전이표를 먼저 봐야 그 판정이 드러난다.
+        //   ② 롤백에 맡기면 후보는 **SELECTED 그대로** 남는다. IMPLEMENTING 에서 나갈 길이
+        //      TESTING·FAILED 뿐이고 FAILED 는 종단이라, 커밋됐다면 사람이 버튼 한 번으로
+        //      후보를 영구히 죽이게 된다.
+        //
+        //   ⚠ logAfterCommit 은 아직 등록 전이다. 등록했더라도 롤백 경로에서는 afterCommit 이
+        //     돌지 않으므로 「통과했다」가 잘못 남지 않는다
+        if (!executorReady) {
+            log.warn("착수 중단 — 실행기 미배선 candidateId={} (전이를 롤백한다)", candidateId);
+            throw new ImplementationNotReadyException(
+                    "코딩 에이전트와 산출 경로가 아직 배선되지 않았다 (#18 의 C·D)");
         }
 
         logAfterCommit(candidateId, transition);

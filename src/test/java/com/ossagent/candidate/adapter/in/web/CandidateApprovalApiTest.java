@@ -88,16 +88,29 @@ class CandidateApprovalApiTest {
     }
 
     @Test
-    @DisplayName("착수는 열려 있고 전이의 양끝을 돌려준다 — S-6 두 번째 게이트")
-    void 착수는_200_과_전이의_양끝을_돌려준다_S6() throws Exception {
-        // 🔴 #24 가 이 문을 열지 않은 이유는 「IMPLEMENTING 에서 나갈 트리거가 없다」였다.
-        //    #18 이 실행기와 함께 열었고, 검증기가 아직 배선되지 않았더라도 후보는
-        //    FAILED 로 떨어진다 — 갇히지 않는다
+    @DisplayName("실행기가 없으면 착수를 시작하지 않는다 — 503 · 후보가 살아남는다")
+    void 실행기가_없으면_착수를_시작하지_않는다_S6() throws Exception {
+        // 🔴 이 PR 은 C(코딩)·D(산출)가 미완이다. 그때 「일단 전이하고 FAILED 로
+        //    떨어뜨린다」를 택하면 **사람이 버튼 한 번으로 후보를 영구히 죽인다** —
+        //    IMPLEMENTING 에서 나갈 길이 TESTING·FAILED 뿐이고 FAILED 는 종단이다.
+        //
+        //    그래서 전이 **전에** 막는다. 503 은 「요청이 틀렸다」가 아니라
+        //    「지금 할 수 없다」이고, 배선 뒤에는 같은 요청이 성공한다.
         mockMvc.perform(post("/api/candidates/103/implement"))
+                .andExpect(status().isServiceUnavailable());
+    }
+
+    @Test
+    @DisplayName("🔴 막힌 뒤에도 후보는 그대로 고른 상태다 — 아무것도 태우지 않았다")
+    void 막힌_뒤에도_후보는_그대로_고른_상태다_S6() throws Exception {
+        mockMvc.perform(post("/api/candidates/103/implement"))
+                .andExpect(status().isServiceUnavailable());
+
+        // 🔴 이것이 이 설계의 전부다. 상태가 바뀌었다면 되돌릴 수 없는 일이 일어난 것이다.
+        //    「503 을 받았다」만 보고 통과시키면 그 사실이 검증되지 않는다
+        mockMvc.perform(post("/api/candidates/103/reject"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.candidateId").value(103))
-                .andExpect(jsonPath("$.from").value("SELECTED"))
-                .andExpect(jsonPath("$.to").value("IMPLEMENTING"));
+                .andExpect(jsonPath("$.from").value("SELECTED"));
     }
 
     @Test

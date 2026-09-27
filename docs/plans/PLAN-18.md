@@ -260,10 +260,15 @@ candidate/domain/ChangeVerifier                         ← 이 이슈가 선언
 ```java
 public record VerificationRequest(
         Long candidateId,
+        int attempt,                          // 🔴 호출자가 넘긴다 — 아래
         String workspacePath,                 // 구현이 SandboxWorkspace 로 다시 만든다 — 검증 재실행
         ContributionConstraints constraints,  // repository 의 값 타입 (규율 ④ 예외) — 이미 있다
         Set<String> plannedPaths)             // D-7 판정에 필요
 ```
+
+🔴 **`attempt` 는 이 이슈가 넘긴다.** `AgentRun` 불변식이 **「같은 사이클의 행이 같은
+`attempt` 값을 갖는다」**(Q-6)이므로, 검증기가 스스로 세면 `CODE` 행과 `VERIFY` 행의
+값이 갈린다. 세는 주체는 사이클을 아는 쪽이고 그것은 호출자다.
 
 🔴 **fail-closed 기본값을 이 PR 이 함께 둔다.** #19 가 아직 안 꽂히면 후보가 갇히는 대신
 `FAILED` 로 떨어지고 **사유에 「검증기가 배선되지 않았다」를 명시**한다 —

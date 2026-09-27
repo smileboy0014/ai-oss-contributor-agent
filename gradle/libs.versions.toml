@@ -16,6 +16,11 @@ dockerJava = "3.4.2"
 # 구조 규칙을 테스트로 고정한다 — 「selectedAt 을 쓰는 메서드가 하나뿐」 같은 것.
 # 손으로 열거하면 새 메서드가 추가될 때 조용히 빠진다 (#24 · FR-5)
 archunit = "1.4.1"
+# 대상 저장소 clone·브랜치·diff — #18. ProcessBuilder 로 git CLI 를 부르지 않는 이유는
+# PLAN-18 D-1 (S-3 의 실행체를 만들며 S-3 가드를 safety-ok 로 우회하는 것은 앞뒤가 안 맞는다).
+# 🕳 단 「순수 Java 라 프로세스가 없다」를 근거로 세지 않는다 — JGit 은 시스템 git 설정을
+#    찾으려 네이티브 git 을 spawn 할 수 있다. 억제 구성과 실측은 JGitWorkspaceSource 에 있다
+jgit = "7.1.0.202411261347-r"
 guava = "33.4.8-jre"
 commonsCompress = "1.27.1"
 
@@ -29,6 +34,8 @@ archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref
 docker-java-core = { module = "com.github.docker-java:docker-java-core", version.ref = "dockerJava" }
 # 추가 HTTP 스택을 끌고 오지 않는 전송. Testcontainers 도 이것을 쓴다
 docker-java-transport-zerodep = { module = "com.github.docker-java:docker-java-transport-zerodep", version.ref = "dockerJava" }
+# clone 은 「읽기」다. push 계열을 부르는 타입이 없다는 것은 ArchUnit 이 고정한다 — S-1
+jgit = { module = "org.eclipse.jgit:org.eclipse.jgit", version.ref = "jgit" }
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }

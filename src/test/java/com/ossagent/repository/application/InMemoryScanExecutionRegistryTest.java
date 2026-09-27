@@ -1,7 +1,7 @@
 package com.ossagent.repository.application;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
+import com.ossagent.repository.domain.ScanPhase;
+import com.ossagent.repository.domain.ScanStage;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -14,6 +14,7 @@ import java.util.concurrent.Future;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * 중복 방어(FR-4)와 진행 상태의 불변식.
@@ -36,7 +37,7 @@ class InMemoryScanExecutionRegistryTest {
     void 처음에는_상태가_없다() {
         assertThat(registry.stateOf(REPO)).isEmpty();
         assertThat(ScanExecutionState.idle(REPO).phase())
-                .isEqualTo(ScanExecutionState.Phase.IDLE);
+                .isEqualTo(ScanPhase.IDLE);
     }
 
     @Test
@@ -54,11 +55,11 @@ class InMemoryScanExecutionRegistryTest {
     void 큐와_실행을_가른다() {
         registry.tryStart(REPO);
         assertThat(registry.stateOf(REPO).orElseThrow().phase())
-                .isEqualTo(ScanExecutionState.Phase.QUEUED);
+                .isEqualTo(ScanPhase.QUEUED);
 
         registry.markRunning(REPO);
         assertThat(registry.stateOf(REPO).orElseThrow().phase())
-                .isEqualTo(ScanExecutionState.Phase.RUNNING);
+                .isEqualTo(ScanPhase.RUNNING);
     }
 
     @Test
@@ -98,11 +99,11 @@ class InMemoryScanExecutionRegistryTest {
     @DisplayName("실패는 단계와 타입만 남긴다 — 예외 원문 없음 S4")
     void 실패는_타입만_남긴다_S4() {
         registry.tryStart(REPO);
-        registry.markFailed(REPO, ScanExecutionState.Stage.SCAN, "GitHubApiException", null);
+        registry.markFailed(REPO, ScanStage.SCAN, "GitHubApiException", null);
 
         ScanExecutionState state = registry.stateOf(REPO).orElseThrow();
-        assertThat(state.phase()).isEqualTo(ScanExecutionState.Phase.FAILED);
-        assertThat(state.failureStage()).isEqualTo(ScanExecutionState.Stage.SCAN);
+        assertThat(state.phase()).isEqualTo(ScanPhase.FAILED);
+        assertThat(state.failureStage()).isEqualTo(ScanStage.SCAN);
         assertThat(state.failureType()).isEqualTo("GitHubApiException");
     }
 

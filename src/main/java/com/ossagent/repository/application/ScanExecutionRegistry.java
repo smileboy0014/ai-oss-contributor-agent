@@ -1,5 +1,7 @@
 package com.ossagent.repository.application;
 
+import com.ossagent.repository.domain.ScanPhase;
+import com.ossagent.repository.domain.ScanStage;
 import java.util.Optional;
 
 /**
@@ -23,7 +25,7 @@ import java.util.Optional;
 public interface ScanExecutionRegistry {
 
     /**
-     * 자리를 잡는다 — 성공하면 {@link ScanExecutionState.Phase#QUEUED}.
+     * 자리를 잡는다 — 성공하면 {@link ScanPhase#QUEUED}.
      *
      * @return 이미 진행 중이면 {@code false} (FR-4)
      */
@@ -43,7 +45,7 @@ public interface ScanExecutionRegistry {
     /**
      * @param failureType 🔴 예외 <b>클래스 이름</b>만. 메시지를 넣지 않는다 (S-4)
      */
-    void markFailed(Long repositoryId, ScanExecutionState.Stage stage, String failureType,
+    void markFailed(Long repositoryId, ScanStage stage, String failureType,
             ScanPipelineResult partial);
 
     /** 한 번도 돌지 않았으면 {@link Optional#empty()} — 호출자가 {@code idle} 로 표현한다. */

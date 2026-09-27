@@ -1,5 +1,7 @@
 package com.ossagent.repository.application;
 
+import com.ossagent.repository.domain.ScanPhase;
+import com.ossagent.repository.domain.ScanStage;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Map;
@@ -45,7 +47,7 @@ public class InMemoryScanExecutionRegistry implements ScanExecutionRegistry {
                 return current;
             }
             acquired[0] = true;
-            return new ScanExecutionState(id, ScanExecutionState.Phase.QUEUED,
+            return new ScanExecutionState(id, ScanPhase.QUEUED,
                     now, null, current == null ? null : current.lastResult(), null, null);
         });
         return acquired[0];
@@ -60,24 +62,24 @@ public class InMemoryScanExecutionRegistry implements ScanExecutionRegistry {
     @Override
     public void markRunning(Long repositoryId) {
         states.computeIfPresent(repositoryId, (id, current) ->
-                new ScanExecutionState(id, ScanExecutionState.Phase.RUNNING,
+                new ScanExecutionState(id, ScanPhase.RUNNING,
                         current.startedAt(), null, current.lastResult(), null, null));
     }
 
     @Override
     public void markSucceeded(Long repositoryId, ScanPipelineResult result) {
-        finish(repositoryId, ScanExecutionState.Phase.SUCCEEDED, result, null, null);
+        finish(repositoryId, ScanPhase.SUCCEEDED, result, null, null);
     }
 
     @Override
     public void markSkipped(Long repositoryId, ScanPipelineResult result) {
-        finish(repositoryId, ScanExecutionState.Phase.SKIPPED, result, null, null);
+        finish(repositoryId, ScanPhase.SKIPPED, result, null, null);
     }
 
     @Override
-    public void markFailed(Long repositoryId, ScanExecutionState.Stage stage, String failureType,
+    public void markFailed(Long repositoryId, ScanStage stage, String failureType,
             ScanPipelineResult partial) {
-        finish(repositoryId, ScanExecutionState.Phase.FAILED, partial, stage, failureType);
+        finish(repositoryId, ScanPhase.FAILED, partial, stage, failureType);
     }
 
     @Override
@@ -85,8 +87,8 @@ public class InMemoryScanExecutionRegistry implements ScanExecutionRegistry {
         return Optional.ofNullable(states.get(repositoryId));
     }
 
-    private void finish(Long repositoryId, ScanExecutionState.Phase phase,
-            ScanPipelineResult result, ScanExecutionState.Stage stage, String failureType) {
+    private void finish(Long repositoryId, ScanPhase phase,
+            ScanPipelineResult result, ScanStage stage, String failureType) {
         Instant now = Instant.now(clock);
         states.compute(repositoryId, (id, current) -> new ScanExecutionState(
                 id,

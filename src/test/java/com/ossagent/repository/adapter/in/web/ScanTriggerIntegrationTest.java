@@ -1,11 +1,5 @@
 package com.ossagent.repository.adapter.in.web;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
 import com.ossagent.repository.adapter.out.persistence.OssRepositoryRepository;
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
 import com.ossagent.repository.application.ScanExecutionRegistry;
@@ -15,6 +9,7 @@ import com.ossagent.repository.application.ScanTarget;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RuleReading;
+import com.ossagent.repository.domain.ScanStage;
 import com.ossagent.repository.domain.ScrubbedRules;
 import com.ossagent.support.testing.AgentIntegrationTest;
 import java.time.Clock;
@@ -26,6 +21,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * 스캔 트리거 API — {@code 202} · {@code 409} · 진행 조회 (FR-3 · FR-4).
@@ -139,7 +139,7 @@ class ScanTriggerIntegrationTest {
     @DisplayName("🔴 실패 응답에 예외 원문이 실리지 않는다 S4")
     void 진행_조회에_예외_원문이_실리지_않는다_S4() throws Exception {
         registry.tryStart(repositoryId);
-        registry.markFailed(repositoryId, ScanExecutionState.Stage.SCAN,
+        registry.markFailed(repositoryId, ScanStage.SCAN,
                 "GitHubApiException", null);
 
         mockMvc.perform(get("/api/repositories/{id}/scan", repositoryId))

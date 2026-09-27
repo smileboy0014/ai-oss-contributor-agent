@@ -104,6 +104,7 @@ com.ossagent.{도메인}
 | LLM — 나머지 2층 | `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | — | 소비자 도메인 | ❌ #16 · #18 · #20 |
 | Docker — 실행 (1층) | `CodeSandbox` | `DockerCodeSandbox` | `agent` | ✅ **존재** (#17) — 🔴 `SandboxCommand` 가 sealed 라 「네트워크 개방 + 대상 저장소 명령」이 **표현 불가능**하다 (S-3) |
 | Docker — 변경 검증 (2층) | `ChangeVerifier` | `SandboxChangeVerifier` | **`candidate`** | ✅ **존재** (#19) — `CodeSandbox` 위에 얹는다. 컴파일 → 테스트 → diff 를 돌리고 **첫 실패에서 멈춘다**.<br>⚠️ **선언은 #18 과 겹친다** — 먼저 머지되는 쪽이 남는다 |
+| **알림 — 새 후보** | `CandidateNotifier` | `LoggingCandidateNotifier` (`adapter/out/notification`) | **`candidate`** | ✅ **존재** (#26) — 🔴 **관찰이지 행위가 아니다.** 승인 게이트를 부르는 경로를 만들지 않는다(S-6) — `ApprovalGateArchitectureTest` 규칙 ①이 **허용목록**이라 새 패키지도 고치지 않고 덮인다(#73).<br>🔴 **지금 나가는 곳은 로그와 메트릭뿐이다** — Slack·Webhook 이 아니다. 외부 전송이 필요해지면 어댑터 한 장을 더한다.<br>⚠️ `@ExternalAdapter` 가 **아니다** — 대외 시스템을 타지 않으므로 통합 테스트에서 빠지면 배선을 아무도 확인하지 않게 된다 |
 | PostgreSQL | Spring Data 인터페이스 (완화 ②로 직접 주입) | `adapter/out/persistence` | 각 도메인 | 부분 |
 
 ### GitHub 접근의 읽기/쓰기 분리 — S-1 을 구조로 지킨다

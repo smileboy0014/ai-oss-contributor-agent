@@ -429,3 +429,43 @@ CREATE INDEX idx_scan_execution_phase_lease ON scan_execution (phase, lease_expi
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-27 | smileboy0014 | 초안 — 범위 1·2·4 확정 · ShedLock 기각 · 리스 설계 |
+| 2026-09-27 | smileboy0014 | 구현 — 계획과 **달라진 것 5가지**를 아래에 기록 |
+
+---
+
+## 11. 구현하면서 계획과 달라진 것
+
+계획을 고치는 대신 **왜 달라졌는지**를 남긴다. 지우면 「계획대로 했다」로 읽힌다.
+
+| # | 계획 | 실제 | 왜 |
+|---|---|---|---|
+| 1 | 실행 행은 `RegisterRepositoryUseCase` 가 등록 트랜잭션에서 만든다 | 🔴 **`OssRepository` 생성자가 만든다**(`cascade = {PERSIST, REMOVE}`) | **호출자가 기억하는 구조였다.** 착수해 보니 이 저장소의 테스트 세 곳이 `repositories.save(new OssRepository(...))` 로 루트만 만들고 있었다 — 운영 경로가 하나여서 안 드러났을 뿐이다. 대가는 루트를 읽을 때 질의 하나(`RepositoryPolicy` 가 이미 같은 비용을 치른다) |
+| 2 | 파일 목록에 `ScanExecutionState.Phase` 이동이 없었다 | **`ScanPhase`·`ScanStage`·`ScanSkipReason` 을 domain 으로 내렸다** | 엔티티가 그 어휘를 써야 하는데 셋 다 `application` 에 있었다 — **domain 이 application 을 import 하면 의존 방향이 뒤집힌다**(규율 ①). 문자열로 들면 저장·복원이 `valueOf` 가 되어 어휘가 바뀌는 날 **읽는 쪽에서** 터진다 |
+| 3 | 구현 이름이 `JdbcScanExecutionRegistry` | **`DatabaseScanExecutionRegistry`** | JPA 로 구현했다. `Jdbc` 라고 적으면 **이름이 거짓**이 된다 |
+| 4 | §9 가 `.env.example` 반영을 요구 | **반영 없음** | `scan.*` 설정은 `application.yml` 에 값이 직접 적혀 있고 **환경변수 플레이스홀더를 쓰지 않는다.** 없는 변수를 만들어 넣으면 「설정할 수 있다」는 거짓 인상만 남는다 |
+| 5 | `scan.schedule.fixed-delay: 1h` 그대로 | **`10m` 으로 줄였다** | 훑는 주기와 저장소 주기가 **같으면** 「주기가 됐는데 아무도 안 훑어서」 실질 주기가 두 배가 된다. 훑는 것 자체는 DB 조회 1회라 대외 호출이 아니다 |
+
+### 초안이 틀렸던 곳 — 테스트가 잡았다
+
+| 무엇 | 왜 틀렸나 |
+|---|---|
+| 「`cascade` 는 `PERSIST` 뿐. `REMOVE` 를 안 거는 것은 `policy` 와 같은 이유다」 | 🔴 **FK 가 저장소 삭제를 막는다.** `repositories.deleteAll()` 이 실패해 `ScanIssuesUseCaseTest` 11건이 적색이 됐다.<br>둘은 성격이 다르다 — `policy` 는 **판정의 기록**이라 남아야 하고, `scan_execution` 은 **실행 상태**라 저장소 없이는 뜻이 없다. 「같은 이유」로 묶은 것이 오류였다 |
+
+### 돌연변이 검증 — 「무엇을 빼니 몇 건이 빨개졌다」
+
+| 무엇을 제거 | 결과 |
+|---|---|
+| 조건부 UPDATE 의 `lease_expires_at <= :now` (+ `IS NULL`) | 🔴 **1건 적색** — 「리스가 지난 RUNNING 행은 뺏을 수 있다」 |
+| 조건부 UPDATE 의 `phase NOT IN :activePhases` | 🔴 **3건 적색** |
+| `tryStart` 를 `SELECT` 후 `UPDATE` 로 교체 | 🔴 **2건 적색** — 동시성 테스트 포함 |
+| `LoggingCandidateNotifier` 가 `SelectCandidateUseCase` 를 참조 | 🔴 **1건 적색** — `ApprovalGateArchitectureTest` 규칙 ①(S-6). 새 패키지가 **규칙을 고치지 않고** 덮인다는 것을 실제로 확인했다 |
+
+전부 되돌린 뒤 초록을 다시 확인했고, `grep MUTANT` 로 잔재 0건을 확인했다.
+
+### 🕳 닫지 못한 것
+
+| | |
+|---|---|
+| **완료조건 5 (자동 구현 옵트인)** | 범위 밖이다. #18·#23 이 OPEN 이라 지금 열면 후보가 `IMPLEMENTING` 에 갇힌다 — 이슈는 열어 둔다 |
+| **리스 만료가 진행 조회에 반영되지 않는다** | 죽은 인스턴스의 행은 `tryStart` 가 뺏을 수 있지만, `GET …/scan` 은 여전히 `RUNNING` 으로 보고한다. 다음 `tryStart` 가 덮어쓸 때까지다 — 판정은 옳고 **표시만 낡는다** |
+| **진행 조회는 「행 없음」을 드러내지 않는다** | 행이 항상 존재하므로 「한 번도 안 돌았다」는 `IDLE` + `has_result = false` 로 표현된다. 그래서 컨트롤러의 `orElseGet(idle)` 이 남는 경우는 **행이 실제로 없을 때**뿐인데, 그때 조회는 조용히 `IDLE` 을 돌려준다 — 같은 상태를 `tryStart` 는 예외로 드러낸다. **읽기에서 소리를 내지 않는 것은 의도**(조회가 등록 고장을 500 으로 만들 이유가 없다)지만, 둘의 판정이 다르다는 사실은 적어 둔다 |

@@ -61,10 +61,11 @@ PRD ERD 는 `created_at`/`updated_at` 를 `ISSUE` 에만 그렸지만, **모든 
 
 ---
 
-## 테이블 7개
+## 테이블 8개
 
 ```
 oss_repository ──1:1──▶ repository_policy
+       │      └──1:1──▶ scan_execution          ← ✅ V10 · #26
        │
        └──1:N──▶ issue ──1:0..1──▶ contribution_candidate
                                           │
@@ -87,12 +88,17 @@ oss_repository ──1:1──▶ repository_policy
 | `last_scanned_at` | TIMESTAMP NULL | **언제 돌렸나** — 커서가 아니다(아래) |
 | `issue_cursor_updated_at` | TIMESTAMP NULL | ✅ V6 — 이슈 증분 수집 커서. **어디까지 봤나** |
 | `issue_cursor_etag` | VARCHAR(255) NULL | ✅ V6 — page 1 응답의 ETag |
+| `scan_interval_minutes` | INTEGER NULL | ✅ V10 — 🔴 **NULL 이면 전역 기본값**(`scan.default-interval`) |
 | `default_branch` | VARCHAR | **설계만** — 코드에 없다 |
 | `language` | VARCHAR | 〃 |
 | `build_tool` | VARCHAR | 〃 `gradle` / `maven` |
 | `build_command` | VARCHAR | 〃 |
 
 인덱스 후보 — `UNIQUE(url)` (있음) · `INDEX(enabled, last_scanned_at)` 스캔 대상 선별용.
+
+⚠️ **`scan_interval_minutes` 는 0 을 「무제한」으로 읽지 않는다.** `isDueForScan` 이 양의 값만
+받아들이고 나머지는 기본값으로 떨어뜨린다 — 0 이 통과하면 주기가 사라져 스케줄러가
+**매 순회마다** 그 저장소를 돌린다.
 
 #### ⚠️ `last_scanned_at` 은 커서가 아니다 (#8)
 
@@ -110,6 +116,60 @@ oss_repository ──1:1──▶ repository_policy
 ⚠️ **커서를 `MAX(issue.github_updated_at)` 으로 파생하지 않는다.** 검토했으나 기각했다 —
 커서가 행 보존 정책에 묶여, 오래된 이슈를 정리하는 순간 `MAX` 가 뒤로 점프해 전량
 재스캔이 터진다.
+
+### `scan_execution` ✅ 실재 (V10 · #26)
+
+저장소 하나의 **스캔 진행 상태 + 중복 방어**. 저장소당 1행이고 **덮어쓴다.**
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| `repository_id` | BIGINT **PK** | FK → `oss_repository(id)` — 애그리거트 안이라 건다 |
+| `phase` | VARCHAR(20) NOT NULL | `ScanPhase` — IDLE·QUEUED·RUNNING·SUCCEEDED·SKIPPED·FAILED |
+| `started_at` · `finished_at` | TIMESTAMP NULL | |
+| 🔴 `lease_expires_at` | TIMESTAMP NULL | **활성 판정이 국면과 함께 본다** — 아래 |
+| `owner_token` | VARCHAR(64) NULL | 누가 잡았나. 🔴 **판정에 쓰지 않는다** |
+| `failure_stage` · `failure_type` | VARCHAR(40)·VARCHAR(255) | 🔴 예외 **클래스 이름**만 (S-4) |
+| `issues_saved` … `candidates_skipped` | INTEGER NOT NULL | 직전 집계 6개 |
+| `has_more` | BOOLEAN NOT NULL | |
+| `delayed_until` | TIMESTAMP NULL | 레이트리밋 — 🔴 실패가 아니라 **지연** |
+| `skip_reason` | VARCHAR(40) NULL | `ScanSkipReason` |
+| `has_result` | BOOLEAN NOT NULL | 「한 번도 안 돌았다」와 「돌았는데 0」을 가른다 |
+
+`INDEX(phase, lease_expires_at)` — 만료된 리스를 훑는 축.
+
+#### 🔴 왜 `oss_repository` 의 컬럼이 아닌가
+
+`last_scanned_at` 이 이미 루트에 있어 컬럼 추가가 자연스러워 보이지만, 실행 상태는
+**직전 집계 6개 + 플래그**를 들고 있다. 루트에 펴면 저장소를 읽을 때마다 따라온다 —
+「애그리거트는 작게 유지한다」.
+
+⚠️ 그래도 **애그리거트 멤버는 맞다.** `agent_run`·`generated_change` 가 멤버가 아닌 이유는
+「무한정 자란다」인데, 이 테이블은 저장소당 1행이고 덮어쓴다.
+
+#### 🔴 `lease_expires_at` — 없으면 방어가 스스로를 잠근다
+
+메모리 구현에는 아무도 적어 두지 않은 안전장치가 있었다 — **재기동이 상태를 지운다.**
+DB 로 옮기는 순간 그것이 사라져, 인스턴스가 `kill -9` 되면 `RUNNING` 행이 남고
+그 저장소는 **영원히 409** 가 된다. 재기동해도 안 풀린다.
+
+| 리스를 | 최악 | 되돌릴 수 있나 |
+|---|---|---|
+| **둔다** | 도는 스캔을 뺏어 **중복 스캔 1회** | ✅ 이슈 수집이 멱등(upsert)이다 |
+| 두지 않는다 | 저장소가 **영구히 잠긴다** | 🔴 없다 |
+
+가르는 것은 보수성이 아니라 **실패의 방향이 되돌릴 수 있는가**다.
+
+#### 🔴 행은 **항상 존재**한다 — upsert 를 쓰지 않기 위해서다
+
+자리 잡기는 **조건부 UPDATE 한 방**이라(SELECT 후 UPDATE 로 짜면 두 인스턴스가 그 사이를
+통과한다) 행이 있어야 한다. 「없으면 만든다」를 원자적으로 하려면 `ON CONFLICT`·`MERGE` 가
+필요하고 그것이 벤더 고유 문법이다 — Q-2b-1.
+
+그래서 **V10 이 기존 저장소를 백필**하고, 신규는 **`OssRepository` 생성자가 함께 만든다**
+(`cascade = PERSIST`). 등록 UseCase 가 기억해서 만드는 구조로 두면 언젠가 빠진다.
+
+⚠️ 따라서 「행이 없다」는 정상 상태가 아니다 — `ScanExecutionNotRegisteredException` 으로
+드러낸다. 조용히 「잠겨 있다」로 번역하면 등록 버그가 **영구 409 로 위장**된다.
 
 ### `repository_policy` ✅ 실재 (V2)
 

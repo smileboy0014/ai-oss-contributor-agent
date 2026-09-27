@@ -9,6 +9,7 @@ import static com.tngtech.archunit.base.DescribedPredicate.not;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.belongToAnyOf;
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
 
+import com.ossagent.candidate.application.CreateDraftPrUseCase;
 import com.ossagent.candidate.application.SelectCandidateUseCase;
 import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.PolicyClearance;
@@ -107,11 +108,28 @@ class ApprovalGateArchitectureTest {
      * 사람이 누르는 문은 web 어댑터 하나이므로, 새 진입점이 어떤 이름·어떤 패키지로
      * 생기든 <b>기본이 차단</b>이다.
      */
+    /**
+     * 🔴 <b>게이트 목록은 #23 에서 둘이 됐다.</b> 새 승인 지점이 생기면 여기 더한다 —
+     * 더하지 않으면 그 게이트는 <b>아무 데서나 불릴 수 있다.</b>
+     *
+     * <p>⚠️ 목록에 더하는 것만으로는 부족하다. 아래 양성 대조가 <b>게이트마다</b> 미끼를
+     * 갖고 있어야 한다 — 기존 미끼 하나만으로 초록이면 새 타입을 빠뜨려도 드러나지 않는다.
+     */
+    private static final Class<?>[] APPROVAL_GATES = {
+            SelectCandidateUseCase.class, CreateDraftPrUseCase.class};
+
+    /**
+     * {@code markPrCreated} 를 실제로 부르는 유일한 자리 — package-private 이라 클래스
+     * 리터럴로 지목할 수 없다. 🔴 <b>이 문자열이 실재하는지는 모수 단언이 본다</b>
+     * ({@code 판정_대상이_임포트에_실재한다_모수}).
+     */
+    private static final String PR_WRITER = "com.ossagent.candidate.application.CandidatePrWriter";
+
     private static ArchRule 승인_게이트는_web_어댑터만_부른다() {
         return noClasses()
                 .that().resideOutsideOfPackage("com.ossagent.candidate.adapter.in.web..")
-                .and().doNotBelongToAnyOf(SelectCandidateUseCase.class)
-                .should().dependOnClassesThat().belongToAnyOf(SelectCandidateUseCase.class)
+                .and().doNotBelongToAnyOf(APPROVAL_GATES)
+                .should().dependOnClassesThat().belongToAnyOf(APPROVAL_GATES)
                 .as("승인 게이트를 부르는 것은 사람이 누르는 문(web) 하나여야 한다 (S-6)")
                 .allowEmptyShould(true);
     }
@@ -123,11 +141,16 @@ class ApprovalGateArchitectureTest {
 
     @Test
     void 그_규칙이_실제로_무는지_확인한다_양성_대조() {
+        // 🔴 게이트마다 미끼를 확인한다. 「AutoSelectProbe 를 문다」만 보면 새 게이트를
+        //    목록에 빠뜨려도 이 테스트가 초록이다 — #23 검토에서 잡힌 구멍이다
         assertThatThrownBy(() -> 승인_게이트는_web_어댑터만_부른다().check(PROBES))
                 .as("미끼(AutoSelectProbe)를 놓치면 규칙이 고장 난 것이다 — "
                         + "운영 코드에는 위반이 0건이라 규칙이 잘못 쓰여 있어도 초록이다")
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("AutoSelectProbe");
+                .hasMessageContaining("AutoSelectProbe")
+                .as("PR 생성 게이트(#23)를 자동으로 부르는 미끼도 함께 물어야 한다 — "
+                        + "게이트가 둘인데 미끼가 하나면 둘째는 검사되지 않는다")
+                .hasMessageContaining("AutoPrProbe");
     }
 
     // ───────── ①b UseCase 를 우회해 엔티티를 직접 부르지 못한다 (S-6) ─────────
@@ -146,9 +169,15 @@ class ApprovalGateArchitectureTest {
      */
     private static ArchRule 사람_전이_메서드는_승인_UseCase_만_부른다() {
         return noClasses()
+                // 🔴 면제는 「승인 경로」다. #23 이 CandidatePrWriter 를 더했다 —
+                //    CreateDraftPrUseCase 가 트랜잭션 때문에 쓰기를 그쪽에 위임하므로
+                //    실제로 markPrCreated 를 부르는 것은 writer 다 (self-invocation 회피).
+                //    ⚠️ 그 클래스는 package-private 이라 클래스 리터럴로 지목할 수 없다.
+                //       FQN 문자열의 위험(오타·이동이 조용히 통과)은 아래 모수 단언이 막는다
                 .that().doNotBelongToAnyOf(SelectCandidateUseCase.class)
+                .and().doNotHaveFullyQualifiedName(PR_WRITER)
                 .should(사람_전이_메서드를_부른다())
-                .as("「사람이 골랐다·물렸다」를 만드는 메서드는 승인 UseCase 를 통해서만 불린다 (S-6)")
+                .as("「사람이 골랐다·물렸다·PR 을 냈다」를 만드는 메서드는 승인 경로를 통해서만 불린다 (S-6)")
                 .allowEmptyShould(true);
     }
 
@@ -163,10 +192,25 @@ class ApprovalGateArchitectureTest {
                 .as("미끼(AutoCancelProbe)는 UseCase 를 거치지 않고 cancelSelection 을 부른다 — "
                         + "규칙 ①은 이것을 놓친다")
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("AutoCancelProbe");
+                .hasMessageContaining("AutoCancelProbe")
+                // 🔴 PR 생성 전이도 같은 우회가 가능하다 — AutoPrProbe 가 markPrCreated 를
+                //    UseCase 없이 직접 부른다. 전이 목록에서 그것을 빼면 여기가 빨개진다
+                .as("markPrCreated 가 전이 목록에 없으면 승인 없이 종단으로 보내는 경로가 무방비다")
+                .hasMessageContaining("AutoPrProbe");
     }
 
-    private static final Set<String> 사람이_부르는_전이 = Set.of("selectByHuman", "cancelSelection");
+    /**
+     * 🔴 {@code markPrCreated} 가 #23 에서 더해졌다.
+     *
+     * <p>「사람이 골랐다」(`selectByHuman`)·「물렸다」(`cancelSelection`)와 같은 축이다 —
+     * <b>사람의 승인이 있어야만 일어나야 하는 전이</b>. PR 생성은 S-6 의 세 번째 게이트이고,
+     * 종단({@code PR_CREATED})으로 가는 전이라 잘못 불리면 되돌릴 수 없다.
+     *
+     * <p>⚠️ 규칙 ①이 이것을 대신하지 못한다. ①은 <b>타입</b>({@code CreateDraftPrUseCase})을
+     * 지목하므로, 자동 실행자가 후보를 직접 꺼내 이 메서드를 부르면 걸리지 않는다.
+     */
+    private static final Set<String> 사람이_부르는_전이 =
+            Set.of("selectByHuman", "cancelSelection", "markPrCreated");
 
     /**
      * ⚠️ <b>호출과 메서드 참조를 함께 본다.</b> ArchUnit 은 {@code Type::method} 를
@@ -244,6 +288,37 @@ class ApprovalGateArchitectureTest {
                                 access.getDescription())));
             }
         };
+    }
+
+    // ────────── ②b PR 행을 만드는 곳은 승인 경로 하나다 (S-2 · S-6 · #23) ──────────
+
+    /**
+     * 🔴 <b>PR 생성 게이트의 「증거」는 {@code selectedAt} 이 아니라 {@code PullRequest} 행이다.</b>
+     *
+     * <p>선정은 {@code selectedAt} 필드가 「사람이 골랐다」를 증명하고, 규칙 ②가 그 필드에
+     * 쓰는 곳을 하나로 묶는다. PR 생성에는 대응하는 필드가 없다 — 대신 <b>행의 존재</b>가
+     * 증거다. 그런데 행은 <b>어느 경로로 만들어졌는지를 스스로 말하지 않는다.</b>
+     *
+     * <p>그래서 같은 형식으로 묶는다 — {@code PullRequest.draftFor} 는 <b>유일한 생성
+     * 경로</b>이고, 그것을 부르는 운영 코드가 승인 경로 하나뿐임을 여기서 고정한다.
+     * 이것이 없으면 아무 컴포넌트나 PR 행을 만들어 붙일 수 있고, 그 순간
+     * 「사람이 한 번 승인했다」를 사후에 셀 수 없다.
+     */
+    @Test
+    void PR_행을_만드는_것은_승인_경로뿐이다_S6() {
+        Set<String> callers = PRODUCTION.stream()
+                .filter(type -> Stream.concat(type.getMethodCallsFromSelf().stream(),
+                                type.getMethodReferencesFromSelf().stream())
+                        .anyMatch(access -> access.getTargetOwner()
+                                .isAssignableTo(PullRequest.class)
+                                && access.getName().equals("draftFor")))
+                .map(JavaClass::getName)
+                .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
+
+        assertThat(callers)
+                .as("PullRequest.draftFor 가 유일한 생성 경로다. 그것을 부르는 곳이 늘면 "
+                        + "승인 없이 PR 행이 생기고, 그러면 「사람이 승인했다」가 증거로 무의미해진다")
+                .containsExactly(PR_WRITER);
     }
 
     // ────────── ③ 통행증은 adapter/in 경계를 넘지 않는다 (S-5) ──────────
@@ -377,6 +452,18 @@ class ApprovalGateArchitectureTest {
 
         assertThat(PRODUCTION.contain(SelectCandidateUseCase.class))
                 .as("규칙 ① 이 지목하는 타입이 임포트에 없으면 그 규칙은 공허하다")
+                .isTrue();
+        assertThat(PRODUCTION.contain(CreateDraftPrUseCase.class))
+                .as("규칙 ① 의 두 번째 게이트(#23). 목록에만 있고 임포트에 없으면 공허하다")
+                .isTrue();
+        // 🔴 FQN 문자열로 지목하는 것이 둘 있다(①b 면제 · ②b 기대값). 문자열은 오타나
+        //    패키지 이동이 컴파일에 잡히지 않으므로, 실재를 여기서 확인한다 —
+        //    이 단언이 없으면 「면제 대상이 없어서 통과」와 「위반이 없어서 통과」가 같아진다
+        assertThat(PRODUCTION.contain(PR_WRITER))
+                .as("CandidatePrWriter 가 임포트에 없다 — ①b 면제와 ②b 기대값이 둘 다 공허해진다")
+                .isTrue();
+        assertThat(PRODUCTION.contain(PullRequest.class))
+                .as("규칙 ②b 가 호출을 추적하는 타입")
                 .isTrue();
         assertThat(PRODUCTION.contain(ContributionCandidate.class))
                 .as("규칙 ①b 가 호출을 추적하는 타입")

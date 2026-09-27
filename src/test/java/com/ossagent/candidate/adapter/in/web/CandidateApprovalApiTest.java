@@ -26,6 +26,16 @@ import org.springframework.test.web.servlet.MockMvc;
  * <p>🔴 #18 분은 <b>별도 파일</b>이다({@code candidate-implement-fixtures.sql}) — 공유 픽스처에
  * 후보를 더했더니 {@code CandidateQueryIntegrationTest} 의 개수·페이지 경계 단언이 깨졌다.
  * 조회 테스트는 「전체가 몇 건인가」를, 이쪽은 「게이트가 막는가」를 본다.
+ *
+ * <h2>⚠️ PR 생성의 <b>성공 경로</b>는 여기서 보지 않는다 (#23)</h2>
+ *
+ * <p>{@code READY_FOR_PR} 후보를 만들려면 저장소·정책·이슈·변경분 행이 모두 있어야 하고,
+ * 대역 넷({@code RepositorySource}·{@code ForkPublisher}·{@code DraftPrPublisher}·정책)을
+ * 이 클래스에서 조립하게 된다. 그러면 <b>업무 규칙이 HTTP 테스트로 새어</b> 이 클래스의
+ * 경계(「상태 코드와 열려 있지 않은 문」)가 무너진다.
+ *
+ * <p>성공 경로는 {@code CreateDraftPrUseCaseTest} 가 페이크로 본다.
+ * 여기서 보는 것은 <b>문이 열렸다는 것</b>(404 가 아니라 409)과 거부의 상태 코드다.
  */
 @AgentIntegrationTest
 @AutoConfigureMockMvc
@@ -75,15 +85,27 @@ class CandidateApprovalApiTest {
     }
 
     @Test
-    @DisplayName("PR 생성 엔드포인트는 아직 존재하지 않는다 — S-2 · S-6")
-    void PR생성_엔드포인트는_없다_S6() throws Exception {
-        // 🔴 「아직 안 만들었다」를 테스트로 고정한다. 지금 열면 **PR 없이 종단
-        //    PR_CREATED** 가 만들어지고 S-2 까지 닿는다. 실행기와 함께 연다 — #23.
+    @DisplayName("PR 생성 엔드포인트는 열렸지만 READY_FOR_PR 이 아니면 409 다 — S-6 · S-2")
+    void PR생성은_READY_FOR_PR_이_아니면_409_다_S6() throws Exception {
+        // 🔴 404 가 아니라 409 라는 것이 「문이 열렸다」의 증거다.
+        //    103 은 SELECTED 라 아직 PR 을 낼 수 없다 — 전이표에 그 전이가 없다
         //
-        //    ⚠ 착수(implement)는 #18 이 **실행기와 함께** 열었으므로 여기서 빠졌다.
-        //    테스트를 지운 것이 아니라 **대상이 하나 줄어든 것**이다 —
-        //    지우면 pull-request 까지 함께 열려도 아무것도 빨개지지 않는다
+        // ⚠️ 여기 있던 404 회귀 둘(착수·PR 생성)은 **수명이 끝나 지웠다.**
+        //    #18 이 착수를, #23 이 PR 생성을 **각자 실행기와 함께** 열었고,
+        //    그 강제가 바로 이 테스트였다. 열린 문에 404 를 계속 요구하면
+        //    회귀가 아니라 **거짓말**이 된다 — 착수 쪽 게이트는 아래 403·409 들이 본다
         mockMvc.perform(post("/api/candidates/103/pull-request"))
+                .andExpect(status().isConflict());
+
+        // 분석만 끝난 후보도 마찬가지다. 「사람이 골랐다」만으로는 PR 이 나가지 않는다
+        mockMvc.perform(post("/api/candidates/101/pull-request"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    @DisplayName("없는 후보의 PR 생성은 404 다")
+    void 없는_후보의_PR생성은_404_다() throws Exception {
+        mockMvc.perform(post("/api/candidates/999999/pull-request"))
                 .andExpect(status().isNotFound());
     }
 

@@ -18,6 +18,7 @@ import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryDocuments;
 import com.ossagent.repository.domain.RepositoryNotFoundException;
 import com.ossagent.repository.domain.PolicyClearance;
+import com.ossagent.repository.domain.RepositoryFile;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.repository.domain.RuleReading;
@@ -440,6 +441,60 @@ public class AnalyzeRepositoryPolicyUseCase {
                 .map(repository -> new RepositoryCoordinates(
                         repository.getOwner(), repository.getName()))
                 .orElseThrow(() -> new RepositoryNotFoundException(repositoryId));
+    }
+
+    /**
+     * 대상 저장소의 <b>PR 템플릿</b>을 읽는다 — #23 · S-5.
+     *
+     * <h2>🔴 「없다」와 「못 읽었다」를 가른다</h2>
+     *
+     * <p>{@code RepositorySource.fetchFile} 의 계약을 그대로 쓴다 —
+     * {@link Optional#empty()} 는 <b>404 하나뿐</b>이고 나머지(5xx · 레이트리밋 · 1MB 초과)는
+     * 예외다. 그래서 이 메서드도 <b>예외를 삼키지 않는다.</b>
+     *
+     * <p>⚠️ 삼키면 「못 읽었다」가 「템플릿이 없다」로 번역되고, 그 PR 은 <b>대상 저장소의
+     * 양식을 무시한 채</b> 나간다. Q-8 이 규약 판정에서 막은 것과 같은 오역이고,
+     * 방향도 같다 — <b>되돌릴 수 없는 쪽</b>(규약 위반 PR)을 피한다.
+     *
+     * <p>🔴 <b>{@code @Transactional} 을 붙이지 않는다.</b> GitHub 을 부르므로
+     * {@link #assertNoTransaction()} 으로 호출자가 감싸는 것까지 막는다.
+     *
+     * <h2>좌표·기준 브랜치를 함께 돌려주는 이유</h2>
+     *
+     * <p>PR 을 열려면 셋이 다 필요한데(upstream 좌표 · base 브랜치 · 템플릿) 셋의 출처가 전부
+     * 이 도메인이다. 따로 열면 호출자가 {@code fetchMetadata} 를 <b>두 번</b> 태우고,
+     * 그보다 나쁘게 <b>「좌표만 주는 문」</b>이 생겨 {@code candidate} 가 대상 저장소를
+     * 직접 부르기 시작하는 입구가 된다.
+     *
+     * @return 좌표 · 기준 브랜치 · 템플릿(없으면 {@code null})
+     * @throws com.ossagent.support.github.GitHubApiException 읽지 못했다 — 삼키지 않는다
+     */
+    public PullRequestTarget findPullRequestTarget(Long repositoryId) {
+        if (repositoryId == null) {
+            throw new IllegalArgumentException("저장소 식별자는 필수다");
+        }
+        assertNoTransaction();
+
+        RepositoryCoordinates coordinates = load(repositoryId).coordinates();
+        // 기본 브랜치를 기준으로 읽는다 — BuildRepositoryContextUseCase 와 같은 규칙이다
+        String defaultBranch = repositorySource.fetchMetadata(coordinates).defaultBranch();
+
+        for (PolicyDocumentPath candidate : PolicyDocumentPath.PULL_REQUEST_TEMPLATE_PATHS) {
+            Optional<String> content = repositorySource
+                    .fetchFile(coordinates, candidate.path(), defaultBranch)
+                    .map(RepositoryFile::content)
+                    .filter(text -> !text.isBlank());
+            if (content.isPresent()) {
+                log.info("PR 템플릿을 찾았다 repo={} path={} size={}",
+                        coordinates.fullName(), candidate.path(), content.get().length());
+                return new PullRequestTarget(coordinates, defaultBranch, content.get());
+            }
+        }
+        // 「없다」다 — 후보 경로를 전부 읽었고 전부 404 였다는 뜻이다.
+        // 🔴 못 읽은 경우는 여기 오지 않는다. 예외로 이미 빠져나갔다
+        log.info("PR 템플릿이 없다 repo={} 후보={}",
+                coordinates.fullName(), PolicyDocumentPath.PULL_REQUEST_TEMPLATE_PATHS.size());
+        return new PullRequestTarget(coordinates, defaultBranch, null);
     }
 
     /**

@@ -97,8 +97,8 @@ com.ossagent.{도메인}
 | GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` | ✅ **존재** (#6) |
 | GitHub — 규약 문서 수집 | `PolicyDocumentSource` | `GitHubPolicyDocumentSource` | `repository` | ✅ **존재** (#7) — `RepositorySource` 위에 얹고 **예외를 `UnreadableReason` 으로 번역**한다 |
 | LLM — 규약 판정 | `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | `repository` | ✅ **존재** (#7) — `LanguageModel` 위에 얹는다 |
-| GitHub — **Fork push** | `ForkPublisher` | `GitHubForkPublisher` | `pullrequest` | ✅ **존재** (#22) — Fork 확보·동기화·commit·push·브랜치 삭제.<br>🔴 **쓰기 표면은 `GitHubWriteClient` 하나**이고 `(owner, name, subPath)` 로 받아 **매 호출 직전 owner 를 단언**한다 — 경로를 통째로 받으면 어설션이 문자열 파싱이 되고 호출자가 조립해 우회할 수 있다.<br>⚠️ **호출자가 없다** — 배선은 #23 이 승인 게이트 뒤에 놓는다 |
-| GitHub — Draft PR | `DraftPrPublisher` (제안) | — | `pullrequest` | ❌ #23 — 🔴 `ForkPublisher` 와 **합치지 않는다**. 합치면 세 번째 승인 게이트가 사라진다 |
+| GitHub — **Fork push** | `ForkPublisher` | `GitHubForkPublisher` | `pullrequest` | ✅ **존재** (#22) — Fork 확보·동기화·commit·push·브랜치 삭제.<br>🔴 **쓰기 표면은 `GitHubWriteClient` 하나**이고 `(owner, name, subPath)` 로 받아 **매 호출 직전 owner 를 단언**한다 — 경로를 통째로 받으면 어설션이 문자열 파싱이 되고 호출자가 조립해 우회할 수 있다.<br>✅ **호출자가 생겼다**(#23) — `CreateDraftPrUseCase` 하나이고 승인 게이트 뒤에 있다 |
+| GitHub — Draft PR | `DraftPrPublisher` | `GitHubDraftPrPublisher` | `pullrequest` | ✅ **존재** (#23) — upstream 에 **draft** PR 을 연다. 🔴 `ForkPublisher` 와 **합치지 않았다**: 합치면 「브랜치를 올리려 부른 호출이 PR 생성을 부산물로」 쥐고 세 번째 승인 게이트가 사라진다.<br>🔴 `POST /pulls` 는 **upstream 좌표로 간다** — owner 어설션 면제 둘 중 하나이고, 실질 방어는 면제 근거가 아니라 **호출 위치**(승인 게이트 뒤)다 |
 | LLM — 전송 (1층) | `LanguageModel` · `PromptScrubber` · `AgentRunRecorder` | `AnthropicLanguageModel`(+`RecordingLanguageModel` 데코레이터) · `TokenRedactingPromptScrubber` · `RecordAgentRunUseCase`(candidate) | `agent` | ✅ **존재** (#10) |
 | LLM — 이슈 분석 (2층) | `IssueAnalyst` | `LlmIssueAnalyst` | **`candidate`** | ✅ **존재** (#11) — `LanguageModel` 위에 얹는다 |
 | LLM — 나머지 2층 | `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` | `LlmImplementationPlanner`(#16) · `LlmCodingAgent`(#18) · `LlmDiffReviewer`(#20) | 소비자 도메인 | ✅ **셋 다 존재** |

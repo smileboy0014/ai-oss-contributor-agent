@@ -97,7 +97,8 @@ com.ossagent.{도메인}
 | GitHub — 이슈 | `IssueSource` | `GitHubIssueSource` | `issue` | ✅ **존재** (#6) |
 | GitHub — 규약 문서 수집 | `PolicyDocumentSource` | `GitHubPolicyDocumentSource` | `repository` | ✅ **존재** (#7) — `RepositorySource` 위에 얹고 **예외를 `UnreadableReason` 으로 번역**한다 |
 | LLM — 규약 판정 | `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | `repository` | ✅ **존재** (#7) — `LanguageModel` 위에 얹는다 |
-| GitHub — Fork·PR | `ForkRegistry` · `DraftPrPublisher` (제안) | `GitHubDraftPrPublisher` | `pullrequest` | ❌ #22 · #23 |
+| GitHub — **Fork push** | `ForkPublisher` | `GitHubForkPublisher` | `pullrequest` | ✅ **존재** (#22) — Fork 확보·동기화·commit·push·브랜치 삭제.<br>🔴 **쓰기 표면은 `GitHubWriteClient` 하나**이고 `(owner, name, subPath)` 로 받아 **매 호출 직전 owner 를 단언**한다 — 경로를 통째로 받으면 어설션이 문자열 파싱이 되고 호출자가 조립해 우회할 수 있다.<br>⚠️ **호출자가 없다** — 배선은 #23 이 승인 게이트 뒤에 놓는다 |
+| GitHub — Draft PR | `DraftPrPublisher` (제안) | — | `pullrequest` | ❌ #23 — 🔴 `ForkPublisher` 와 **합치지 않는다**. 합치면 세 번째 승인 게이트가 사라진다 |
 | LLM — 전송 (1층) | `LanguageModel` · `PromptScrubber` · `AgentRunRecorder` | `AnthropicLanguageModel`(+`RecordingLanguageModel` 데코레이터) · `TokenRedactingPromptScrubber` · `RecordAgentRunUseCase`(candidate) | `agent` | ✅ **존재** (#10) |
 | LLM — 이슈 분석 (2층) | `IssueAnalyst` | `LlmIssueAnalyst` | **`candidate`** | ✅ **존재** (#11) — `LanguageModel` 위에 얹는다 |
 | LLM — 나머지 2층 | `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | — | 소비자 도메인 | ❌ #16 · #18 · #20 |
@@ -158,7 +159,7 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | **LLM 능력·어댑터** | ✅ | `LanguageModel`(agent/domain) + `AnthropicLanguageModel` — 송신 전 스크럽 필수(S-4) · 타임아웃·전송 재시도 명시 · 절단·거부는 예외 · **노출 빈은 기록 데코레이터 하나뿐** (#10) |
 | **LLM 토큰·비용 기록** | ✅ | `AgentRunRecorder`(agent/domain) ← `RecordAgentRunUseCase`(candidate/application). 실패도 남긴다 |
 | `agent` 샌드박스 | ❌ | 아직 없다 — #17 |
-| `pullrequest` 도메인 | ❌ | 〃 — **쓰기 경로는 여기 생긴다** (#22 · #23). 어설션 없는 push 는 반려 |
+| **`pullrequest` 도메인** | 부분 | ✅ Fork 확보·commit·push (#22) — **이 저장소에 처음 생긴 쓰기 경로**다. owner 어설션이 두 겹(`ForkRef` 값 타입 + `GitHubWriteClient` 쓰기 직전)이고, 후자가 유일한 방어다.<br>❌ Draft PR 생성은 #23.<br>🔴 **레이트리밋 예산을 읽기 클라이언트와 공유**한다(`GitHubRateLimitBudget`) — 갈리면 한쪽이 태운 예산을 다른 쪽이 모른다 |
 | Scheduler | ❌ | 없음 |
 | Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |
 | 스키마 마이그레이션 | ✅ | **Flyway** · `ddl-auto: validate` · `db/migration/V1` (테이블 1개) |

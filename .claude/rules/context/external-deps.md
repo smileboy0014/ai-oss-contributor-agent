@@ -10,6 +10,7 @@
 | 인증 | **classic PAT** (`GITHUB_TOKEN`) · 스코프 `public_repo` — Q-1 확정 (2026-09-21) |
 | 클라이언트 | **Spring `RestClient` 직접 구현** — Q-1 확정. 라이브러리를 쓰지 않는다 |
 | **권한** | 원본은 **읽기만**. 쓰기는 사용자 Fork 에 한정 — [`safety-boundaries.md`](./safety-boundaries.md) S-1 |
+| **쓰기 표면** | 🔴 **열렸다** (2026-09-27 · #22) — `GitHubWriteClient` 하나. 아래 |
 | 레이트리밋 | 인증 5,000 req/h. Search API 는 별도(30 req/min) — **스캐너가 가장 먼저 부딪힌다** |
 
 ⚠️ **fine-grained PAT 과 GitHub App 설치 토큰은 쓸 수 없다.** 둘 다 우리가 멤버가 아닌
@@ -18,6 +19,31 @@ upstream 에 PR 을 만들지 못한다 — 근거와 표는 [`open-questions.md
 
 ⚠️ classic PAT 은 **저장소별 권한 제한이 불가능**하다. 원본 write 를 권한으로 막을 수 없으므로
 **push 직전 owner 어설션이 유일한 방어**다 (S-1).
+
+### 🔴 쓰기 표면 — `GitHubWriteClient` 하나 (2026-09-27 · #22)
+
+오랫동안 `GitHubApiClient` 의 공개 메서드는 `get` **하나뿐**이었다. #22 가 그 표면을 연다.
+
+| | |
+|---|---|
+| 수단 | **Git Data API** (blob → tree → commit → ref). JGit 을 쓰지 않는다 |
+| 왜 JGit 이 아닌가 | 🔴 **어설션 지점**이다. JGit 은 push 대상이 원격 URL **문자열**이라 S-1 어설션이 URL 파싱(스킴·`user@`·포트·`.git`)이 되고, Git Data API 는 owner 가 **인자**라 문자열 비교 한 줄이다. **유일한 방어를 정규식 위에 세우지 않는다** |
+| 어설션 | `(owner, name, subPath)` 로 받아 **매 호출 직전** 단언하고 **자기가 경로를 조립**한다. 경로를 통째로 받으면 호출자가 조립해 우회할 수 있다 |
+| 유일한 예외 | `createFork` — `POST /repos/{upstream}/forks`. upstream **히스토리를 바꾸지 않고** 내 계정에 저장소를 만든다. `subPath` 가 리터럴이라 다른 경로를 만들 수 없다 |
+| 레이트리밋 | 🔴 **읽기 클라이언트와 예산을 공유**한다(`GitHubRateLimitBudget`). 갈리면 읽기가 태운 예산을 쓰기가 몰라 「임계 미만이면 호출하지 않는다」(#8)가 무력해진다 |
+
+⚠️ **비멱등 쓰기에 전송 재시도를 걸지 않는다.** 읽기 타임아웃은 요청이 **도달했는지 알 수 없는**
+실패라, ref 갱신·fork 생성·merge 를 재전송하면 상태가 두 번 바뀐다. 호출마다 `Idempotency` 를
+**인자로 받고 기본값을 두지 않는다** — 기본값이 있으면 새 쓰기가 조용히 안전한 쪽으로 분류된다.
+
+| 축 | 재시도 | 왜 |
+|---|---|---|
+| blob · tree · commit | ✅ `SAFE` | 결과 sha 를 쓰는 것은 **마지막 응답 하나뿐**이고 중간 객체는 어떤 ref 도 가리키지 않는다.<br>⚠️ commit 해시에 `author.date` 가 들어가므로 **날짜를 고정**해야 진짜 멱등이다 |
+| ref · forks · merge-upstream | 🔴 `UNSAFE` | 상태 변경이다 |
+
+⚠️ **`merge-upstream` 은 상태코드가 아니라 본문 `merge_type` 으로 판정한다.** 성공은 200 + 본문이고
+「이미 최신」은 `merge_type: none` 이다. 상태코드로 판정하면 테스트 스텁이 실제와 다른 응답을
+흉내내도 초록이 되어, **테스트가 같은 오류를 갖고 있어서** 못 잡는다.
 
 **설계 제약**
 - 이슈 수집은 `updated_at` 커서 + `ETag` 조건부 요청으로 증분화한다. 매 스캔 전량 조회는 레이트리밋을 태운다

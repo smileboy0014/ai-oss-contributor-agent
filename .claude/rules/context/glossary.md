@@ -68,6 +68,7 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `ChangeVerifier` | `SandboxChangeVerifier` | 생성된 변경분을 샌드박스에서 검증. `CodeSandbox` 위에 얹히는 **2층**(#19). 🔴 **빌드 실패로 예외를 던지지 않는다** — 그것은 게이트가 작동한 모습이고 예외로 내보내면 호출자가 재시도 루프에서 삼킨다 |
 | `VerificationReport` | — | 검증 한 바퀴의 결과 **값**. 🔴 `passed()` 는 **모든 단계가 `PASSED`** 일 때만 참이다 — 「실패가 없으면 통과」로 적으면 「판정 불가」가 조용히 접힌다 |
 | `StageResult` | — | 단계 하나의 결과 **값**. compact 생성자가 빌드 출력 **스크럽을 강제**한다 (S-4) |
+| `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 #23 이고 그 앞에 세 번째 승인 게이트가 있다 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |
@@ -80,6 +81,10 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `IssueAnalysis` | — | 분석 결과 **값**. 생성자가 스키마와 **스크럽을 함께 강제**한다 (`ScrubbedRules` 와 같은 수법) |
 | `DiffReviewer` | `LlmDiffReviewer` | 생성된 diff 리뷰. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — 임계는 #21 |
 | `DiffReview` | — | 리뷰 결과 **값**. 🔴 **S-4 의 수신 쪽 방어**다 — 리뷰가 diff 를 인용하면 시크릿이 우리 DB 로 복제되므로 생성자가 스크럽을 강제한다 |
+| `ForkRef` | — | **쓰기가 허용된** 저장소 좌표. 생성 시 owner 를 단언한다. ⚠️ **방어가 아니라 「일찍 드러내는 것」**이다 — 유일한 방어는 `GitHubWriteClient` 의 쓰기 직전 어설션이고, 둘 중 지워야 한다면 이쪽이다 (#22) |
+| `SyncedFork` | — | 「upstream 과 맞춰 보았고 결과가 이것이다」는 **통행증**. `PublishRequest` 가 인자로 요구해 **동기화를 보지 않고 publish 하는 것을 표현 불가능**하게 한다 — `PolicyClearance` 와 같은 수법.<br>⚠️ 강제하는 것은 **호출**이지 판단이 아니다 (#22) |
+| `BaseBranch` | — | Fork 의 **기준 브랜치**. 경로에 조립되므로 `RepositoryCoordinates` 와 같은 제한을 받는다 — 초안에서 이 값만 규율에서 빠져 있었다 (#22) |
+| `FileChange` | — | Fork 에 올릴 파일 1건. 🔴 **내용 검사가 이 경로에 없다** — 워크스페이스를 읽는 #18 이 거른다. `@ExternalText` 등록표에 `PENDING #18` 로 남겨 그 사실이 계속 보이게 했다 (#22) |
 
 ## 증분 수집 — 「언제 돌렸나」와 「어디까지 봤나」는 다르다 (#8)
 

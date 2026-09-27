@@ -5,6 +5,7 @@ import com.ossagent.support.github.GitHubApiClient;
 import com.ossagent.support.github.GitHubCredentials;
 import com.ossagent.support.github.GitHubErrorTranslator;
 import com.ossagent.support.github.GitHubProperties;
+import com.ossagent.support.github.GitHubRateLimitBudget;
 import com.ossagent.support.github.StaticTokenCredentials;
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -55,12 +56,40 @@ public class GitHubClientConfig {
      */
     @Bean
     public GitHubApiClient gitHubApiClient(GitHubProperties properties,
-            GitHubCredentials credentials, GitHubErrorTranslator errorTranslator, Clock clock) {
-        RestClient restClient = RestClient.builder()
+            GitHubCredentials credentials, GitHubErrorTranslator errorTranslator, Clock clock,
+            GitHubRateLimitBudget budget) {
+        return new GitHubApiClient(gitHubRestClient(properties), credentials, properties,
+                errorTranslator, clock, budget);
+    }
+
+    /**
+     * 레이트리밋 예산 — <b>읽기·쓰기 클라이언트가 공유한다.</b>
+     *
+     * <p>🔴 GitHub 레이트리밋은 <b>토큰 단위 전역</b>이다. 클라이언트마다 따로 들면 읽기 쪽이
+     * 태운 예산을 쓰기 쪽이 모르고, 「임계 미만이면 호출하지 않는다」(#8)가 둘로 갈려 무력해진다.
+     */
+    @Bean
+    public GitHubRateLimitBudget gitHubRateLimitBudget(Clock clock) {
+        return new GitHubRateLimitBudget(clock);
+    }
+
+    /**
+     * 🔴 <b>{@code RestClient} 를 만드는 유일한 경로.</b> 쓰기 클라이언트({@code ForkPublishConfig})도
+     * 이것을 부른다.
+     *
+     * <p>각자 {@code RestClient.builder()} 를 부르게 두면 타임아웃·리다이렉트 정책이 <b>두 벌</b>이
+     * 되고, 한쪽만 고쳐지는 날 그 사실을 아무도 모른다. {@code GitHubTransportContractTest} 가
+     * 검증하는 것도 여기서 나온 클라이언트다 — 갈라지면 그 검증이 한쪽에만 유효해진다.
+     *
+     * <p>⚠️ 여전히 <b>빈으로 내보내지 않는다.</b> 빈이면 아무 컴포넌트나 주입받아
+     * {@code restClient.post()} 를 할 수 있고, 그 순간 쓰기 표면이 {@code GitHubWriteClient} 밖으로
+     * 새어 S-1 어설션을 우회한다.
+     */
+    static RestClient gitHubRestClient(GitHubProperties properties) {
+        return RestClient.builder()
                 .baseUrl(properties.baseUrl())
                 .requestFactory(requestFactory(properties))
                 .build();
-        return new GitHubApiClient(restClient, credentials, properties, errorTranslator, clock);
     }
 
     /**

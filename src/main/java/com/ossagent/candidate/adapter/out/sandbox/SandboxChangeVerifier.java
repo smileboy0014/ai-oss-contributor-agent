@@ -17,6 +17,7 @@ import com.ossagent.candidate.domain.VerificationRequest;
 import com.ossagent.candidate.domain.VerificationSetupException;
 import com.ossagent.candidate.domain.VerificationStage;
 import com.ossagent.repository.domain.ContributionConstraints;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -130,6 +131,14 @@ public class SandboxChangeVerifier implements ChangeVerifier {
 
         List<String> buildArgv = CommandLine.parse(constraints.buildCommand());
         BuildTool buildTool = resolveBuildTool(buildArgv);
+        // 🔴 테스트 명령의 실행기도 **시작 전에** 본다. 안 보면 「빌드는 Gradle, 테스트는
+        //    Maven」이 컴파일을 통과한 뒤 TEST 단계에서 Gradle 배선(`GRADLE_RO_DEP_CACHE`·
+        //    `--offline` 미부여)으로 돌아 **network=none 때문에** 실패한다 — fail-closed 이긴
+        //    하나 「코드가 틀렸다」로 보고되어 재시도 예산을 태운다. 여기서 막으면
+        //    「사람이 고칠 일」로 정확히 분류된다.
+        if (constraints.hasTestCommand()) {
+            resolveBuildTool(CommandLine.parse(constraints.testCommand())).requireSupported();
+        }
         SandboxWorkspace workspace =
                 SandboxWorkspace.under(request.workspacePath(), properties.workspaceRoot());
         SandboxCacheVolume cacheVolume = SandboxCacheVolume.forRepository(
@@ -168,7 +177,7 @@ public class SandboxChangeVerifier implements ChangeVerifier {
             //    「돌릴 근거가 없다」다. UNDETERMINED 로 두면 재시도가 아니라 사람에게 간다
             //    (VerificationReport.hasUndetermined 의 계약)
             return new StageResult(VerificationStage.TEST, StageOutcome.UNDETERMINED,
-                    null, java.time.Duration.ZERO, false,
+                    null, Duration.ZERO, false,
                     "규약에서 테스트 명령을 읽지 못했다 — 테스트 통과를 주장할 근거가 없다 (S-5)");
         }
         return runCommandStage(context, VerificationStage.TEST,
@@ -211,6 +220,16 @@ public class SandboxChangeVerifier implements ChangeVerifier {
         }
         if (!numstat.outputIsComplete()) {
             return undetermined(numstat, "diff 목록이 잘렸다 — 범위 밖 변경이 있는지 말할 수 없다");
+        }
+        if (numstat.output() == null || numstat.output().isBlank()) {
+            // 🔴 **모수 0 을 통과로 접지 않는다.** 검증은 언제나 코드를 고친 뒤에 돈다 —
+            //    변경이 0건이라는 것은 「깨끗하다」가 아니라 **「우리가 엉뚱한 것을 보고 있다」**다.
+            //    가장 그럴듯한 원인: 코딩 단계가 변경을 **커밋한 뒤**라 `git diff`(워킹 트리 vs
+            //    인덱스)가 비었다. 그대로 두면 계획 범위 검사가 **아무것도 검사하지 않고 초록**이
+            //    되고, 그것이 이 저장소가 반복해 당한 「0건을 검사하고 초록」의 런타임판이다.
+            //    (#18 이 diff 기준점을 정하면 그때 `git diff <base>...HEAD` 로 좁힌다)
+            return undetermined(numstat,
+                    "diff 가 0건이다 — 검사할 변경을 찾지 못했다. 커밋 이후라 워킹 트리가 비었을 수 있다");
         }
 
         List<DiffInspection.Finding> scope =

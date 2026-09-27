@@ -176,6 +176,49 @@ class SandboxChangeVerifierTest {
     }
 
     @Test
+    @DisplayName("🔴 diff 가 0건이면 UNDETERMINED 다 — 아무것도 검사하지 않고 초록이 되지 않는다")
+    void diff_가_0건이면_판정_불가다() {
+        // 코딩 단계가 변경을 **커밋한 뒤**면 `git diff`(워킹 트리 vs 인덱스)가 빈다.
+        // 그대로 두면 계획 범위 검사가 0건을 훑고 PASSED 가 된다 — 이 저장소가 반복해
+        // 당한 「0건을 검사하고 초록」의 런타임판이다.
+        sandbox.givenSequence(
+                FakeCodeSandbox.ok("compiled"),
+                FakeCodeSandbox.ok("tests passed"),
+                FakeCodeSandbox.ok(""));
+
+        var report = verifier.verify(request(constraints("./gradlew compileJava", "./gradlew test")));
+
+        assertThat(report.stage(VerificationStage.DIFF))
+                .get()
+                .satisfies(it -> assertThat(it.outcome())
+                        .as("""
+                                변경 0건을 「깨끗하다」로 접었다.
+                                검증은 언제나 코드를 고친 뒤에 돈다 — 0건은 「우리가 엉뚱한 것을
+                                보고 있다」는 뜻이고, 통과로 접으면 계획 범위 게이트가 통째로
+                                무력해진다 (모수 ≠ 0).""")
+                        .isEqualTo(StageOutcome.UNDETERMINED));
+        assertThat(report.passed()).isFalse();
+        assertThat(sandbox.commands())
+                .as("0건을 확인했으면 diff 본문을 받을 이유가 없다")
+                .hasSize(3);
+    }
+
+    @Test
+    @DisplayName("🔴 테스트 명령이 다른 빌드 도구면 시작 전에 거부한다 (Q-4)")
+    void 테스트_명령의_빌드_도구도_검사한다_S3() {
+        // 빌드는 Gradle 인데 테스트가 Maven 이면, 안 막을 경우 컴파일을 통과한 뒤
+        // TEST 단계가 Gradle 배선으로 돌아 network=none 때문에 실패한다 —
+        // fail-closed 이긴 하나 「코드가 틀렸다」로 보고되어 재시도 예산을 태운다.
+        var mixed = constraints("./gradlew compileJava", "mvn -B test");
+
+        assertThatThrownBy(() -> verifier.verify(request(mixed)))
+                .hasMessageContaining("Q-4");
+        assertThat(sandbox.commands())
+                .as("컴파일을 돌린 뒤에 거부하면 컨테이너 한 번이 헛돈다")
+                .isEmpty();
+    }
+
+    @Test
     @DisplayName("🔴 diff 목록이 잘리면 UNDETERMINED 다 — 「위반 없음」을 말할 근거가 없다")
     void diff_목록이_잘리면_판정_불가다() {
         sandbox.givenSequence(

@@ -170,6 +170,13 @@ public class ImplementCandidateUseCase {
             ContributionConstraints constraints = policies.constraintsOf(start.repositoryId());
 
             String branch = branchName(start.issueNumber());
+            // ⚠ 실패해도 워크스페이스를 지우지 않는다 — 알고 남긴 선택이다 (#18 리뷰).
+            //   ① 다음 단계(#19 검증 · #23 push)가 **체크아웃된 트리**를 필요로 하는데,
+            //      여기서 지우면 그때 다시 clone 해야 한다
+            //   ② 무한 증식은 아니다 — 같은 좌표로 다시 fetch 하면 JGitWorkspaceSource 가
+            //      **통째로 지우고 새로 만든다**(그것이 「앞 실행이 다음 판정을 오염시키지
+            //      않는다」의 실체다). 저장소당 1개가 상한이다
+            //   ⚠ 그래도 실패한 후보의 트리가 **무기한 남는다**. 수명 관리 주체는 #26 이다
             SandboxWorkspace workspace = workspaces.fetch(coordinates, branch);
 
             List<GeneratedFile> generated = codingAgent.write(candidateId, start.attempt(),

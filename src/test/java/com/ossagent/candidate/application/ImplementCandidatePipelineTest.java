@@ -122,6 +122,21 @@ class ImplementCandidatePipelineTest {
         verify(f.writer()).fail(eq(CANDIDATE_ID), anyString());
     }
 
+    @Test
+    @DisplayName("계획이 CREATE 여도 같은 판정을 한다 — 표본이 MODIFY 뿐이면 이 축이 비어 있다")
+    void 계획이_CREATE_여도_판정한다(@TempDir Path root) throws Exception {
+        // ⚠ 「계획 파일이 실재하는가」 검사는 CREATE 를 통과시킬 수 없어 표본이 한쪽으로
+        //    쏠리기 쉬운 자리다. 경로 집합 대조는 변경 종류를 보지 않는다는 것을 고정한다
+        Fixture inside = fixture(root, Set.of(PLANNED), PLANNED, PlannedFile.ChangeKind.CREATE);
+        inside.useCase().implement(CANDIDATE_ID);
+        verify(inside.writer()).recordChange(eq(CANDIDATE_ID), anyString(), anyString());
+
+        Fixture outside = fixture(root, Set.of(PLANNED, "build.gradle"), PLANNED,
+                PlannedFile.ChangeKind.CREATE);
+        outside.useCase().implement(CANDIDATE_ID);
+        verify(outside.writer()).fail(eq(CANDIDATE_ID), anyString());
+    }
+
     // ── 조립 ────────────────────────────────────────────────────────────────
 
     private record Fixture(ImplementCandidateUseCase useCase,
@@ -136,13 +151,19 @@ class ImplementCandidatePipelineTest {
 
     private static Fixture fixture(Path root, Set<String> changedPaths, String generatedPath)
             throws Exception {
+        return fixture(root, changedPaths, generatedPath, PlannedFile.ChangeKind.MODIFY);
+    }
+
+    private static Fixture fixture(Path root, Set<String> changedPaths, String generatedPath,
+            PlannedFile.ChangeKind change) throws Exception {
         Path real = root.toRealPath();
-        Path dir = real.resolve("ws");
+        // ⚠ 픽스처를 한 테스트에서 두 번 만들 수 있어야 한다 — 워크스페이스 이름을 나눈다
+        Path dir = real.resolve("ws-" + Integer.toHexString(System.identityHashCode(changedPaths)));
         Files.createDirectories(dir);
         SandboxWorkspace workspace = SandboxWorkspace.under(dir, real);
 
         ImplementationPlan plan = new ImplementationPlan(
-                List.of(new PlannedFile(PLANNED, PlannedFile.ChangeKind.MODIFY, "고친다")),
+                List.of(new PlannedFile(PLANNED, change, "고친다")),
                 "요약", "테스트 전략", 10);
 
         AnalyzableIssue issue = new AnalyzableIssue(1L, 2L, 42, "제목", "본문",

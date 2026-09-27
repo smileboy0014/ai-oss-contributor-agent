@@ -101,6 +101,16 @@ public class CreateDraftPrUseCase {
                         "후보의 이슈를 찾지 못했습니다 candidateId=" + candidateId
                                 + " issueId=" + snapshot.issueId()));
 
+        // 🔴 이슈 번호가 없으면 제목도 참조도 만들 수 없다 — S-5(규약이 이슈 참조를 요구할 수 있다).
+        //    ⚠ 「실무상 NOT NULL 이니 괜찮다」로 두면 PrTitle.forIssue 의 int 언박싱에서
+        //      NullPointerException 이 나고, 그것은 「왜 PR 이 안 만들어지는지」를 말해주지 않는다.
+        //      AnalyzableIssue 는 id·repositoryId 만 검증하므로 여기서 본다
+        if (issue.githubIssueNumber() == null) {
+            throw new DraftPrException(
+                    "이슈 번호를 알 수 없어 PR 을 만들 수 없습니다 candidateId=" + candidateId
+                            + " issueId=" + snapshot.issueId());
+        }
+
         // ── ② 대외 — 트랜잭션 밖 ──────────────────────────────────────
         // 🔴 PR 생성 직전에 정책을 다시 본다 — S-5 · FR-13.
         //    #18 이 재시도 루프에서 재확인을 생략한 근거는 「바퀴마다 3배」라는 비용이었는데,
@@ -190,7 +200,7 @@ public class CreateDraftPrUseCase {
         PrBodyMaterials materials = new PrBodyMaterials(
                 target.template(),
                 changeSummary(issue),
-                issueReference(issue, constraints),
+                issueReference(issue),
                 verificationSection(snapshot.scrubbedVerification(), constraints),
                 snapshot.scrubbedReview());
 
@@ -216,15 +226,12 @@ public class CreateDraftPrUseCase {
      * 메인테이너가 정하고, 우리 판단으로 닫아 두면 그쪽 트리아지를 침범한다 —
      * #22 가 커밋 메시지에서 같은 판단을 했다.
      */
-    private static String issueReference(AnalyzableIssue issue, ContributionConstraints constraints) {
-        // ⚠ 플래그가 참이든 아니든 <b>항상</b> 넣는다. 우리는 이슈 번호를 항상 알고 있으므로
-        //   「요구되는데 넣지 못하는」 경우가 존재하지 않는다 — 그래서 분기가 없는 것이 정직하다.
+    private static String issueReference(AnalyzableIssue issue) {
+        // ⚠ 규약의 issueReferenceRequired 와 무관하게 **항상** 넣는다. 이슈 번호가 없으면
+        //   위에서 이미 끊겼으므로 「요구되는데 넣지 못하는」 경우가 존재하지 않는다 —
+        //   그래서 분기가 없는 것이 정직하다.
         //   🔴 분기를 만들어 두면 「요구되지 않으면 뺀다」로 읽히고, 그 순간 규약이
         //      issueReferenceRequired 를 늦게 켠 저장소에 참조 없는 PR 이 나간다
-        if (constraints.issueReferenceRequired() && issue.githubIssueNumber() == null) {
-            throw new DraftPrException(
-                    "규약이 이슈 참조를 요구하는데 이슈 번호를 모릅니다 issueId=" + issue.id());
-        }
         return "See #%d.".formatted(issue.githubIssueNumber());
     }
 

@@ -54,4 +54,19 @@ public interface TargetWorkspaceSource {
      * @throws WorkspaceException diff 를 만들지 못했다
      */
     WorkspaceDiff diff(SandboxWorkspace workspace);
+
+    /**
+     * 저장된 통합 diff 를 <b>새로 가져온</b> 워크스페이스에 다시 입힌다 — PR 게이트(#23)의 입력.
+     *
+     * <p>착수(#18)와 PR 생성(#23)은 <b>다른 HTTP 요청</b>이고 그 사이에 재기동·같은 저장소의
+     * 다른 후보 착수가 끼어들 수 있다. 착수 때의 워크스페이스 디렉토리를 다시 읽는 것은
+     * 그래서 근거가 아니다. 정본은 DB 의 {@code GeneratedChange.diff} 이고, PR 시점에는
+     * {@link #fetch} 로 upstream 을 다시 받아 그 diff 를 입힌다.
+     *
+     * <p>🔴 <b>적용 실패는 예외다.</b> upstream 이 그 사이 움직여 변경분이 더는 맞지 않는다는
+     * 뜻이고, 그것을 「부분 적용」으로 넘기면 반쪽 변경이 Fork 에 올라간다. 사람이 다시 착수한다.
+     *
+     * @throws WorkspaceException diff 형식이 깨졌거나 적용되지 않는다
+     */
+    void apply(SandboxWorkspace workspace, String unifiedDiff);
 }

@@ -208,6 +208,36 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
         }
     }
 
+    /**
+     * 저장된 diff 를 새 워크스페이스에 입힌다 — PR 게이트(#23)가 push 직전에 부른다.
+     *
+     * <p>🔴 <b>부분 적용을 남기지 않는다.</b> JGit 의 {@code apply} 는 hunk 하나가 맞지 않으면
+     * 예외를 던지고, 그 시점까지 쓴 파일이 작업 트리에 남을 수 있다. 예외를 그대로 올리므로 호출자는
+     * 이 워크스페이스를 <b>버려야</b> 한다 — 다음 {@link #fetch} 가 디렉토리를 비우고 다시 받는다.
+     *
+     * <p>⚠️ 인덱스는 건드리지 않는다. 뒤이어 {@link #diff} 가 「인덱스 대 작업 트리」로 바뀐 경로를
+     * 세므로, 적용된 변경분이 그대로 diff 로 다시 나온다. 그것이 push 에 실릴 파일 목록이다.
+     */
+    @Override
+    public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+        if (workspace == null) {
+            throw new WorkspaceException("워크스페이스는 필수다");
+        }
+        if (unifiedDiff == null || unifiedDiff.isBlank()) {
+            throw new WorkspaceException("입힐 변경분이 없다 — 빈 diff 로 push 하지 않는다");
+        }
+        try (Git git = Git.open(workspace.path().toFile())) {
+            git.apply()
+                    .setPatch(new java.io.ByteArrayInputStream(
+                            unifiedDiff.getBytes(StandardCharsets.UTF_8)))
+                    .call();
+        } catch (GitAPIException | IOException e) {
+            throw new WorkspaceException(
+                    "저장된 변경분이 현재 upstream 에 적용되지 않는다 — 다시 착수한다", e);
+        }
+        log.info("변경분 적용 완료 workspace={} diffChars={}", workspace.path(), unifiedDiff.length());
+    }
+
     private static void addIfReal(Set<String> paths, String path) {
         if (path != null && !DiffEntry.DEV_NULL.equals(path)) {
             paths.add(path);

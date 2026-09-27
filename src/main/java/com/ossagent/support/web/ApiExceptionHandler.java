@@ -10,9 +10,15 @@ import com.ossagent.repository.domain.RepositoryNotScannableException;
 import com.ossagent.repository.domain.ScanAlreadyRunningException;
 import com.ossagent.repository.domain.RepositoryNotFoundException;
 import com.ossagent.repository.domain.RepositoryPolicyNotFoundException;
+import com.ossagent.support.github.GitHubRateLimitException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -25,6 +31,41 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
  */
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    private final Clock clock;
+
+    public ApiExceptionHandler(Clock clock) {
+        this.clock = clock;
+    }
+
+    /**
+     * GitHub 레이트리밋 — <b>503 + {@code Retry-After}</b>. 실패가 아니라 <b>지연</b>이다.
+     *
+     * <p>사람이 트리거하는 경로(착수 · PR 생성)가 규약·컨텍스트·Fork 를 읽다 리밋에 닿으면 여기로 온다.
+     * PLAN-15 가 「첫 소비자가 이것을 {@code FAILED} 로 받으면 그 번역이 위반」이라고 #16 에 넘겼는데
+     * #16 이 받지 않아, 실제로는 착수 중 리밋 한 번이 후보를 <b>종단 {@code FAILED}</b> 로 보냈다.
+     * 지금은 착수 UseCase 가 대외 읽기를 전이 <b>앞</b>에 두어 후보가 {@code SELECTED} 에 그대로 남고,
+     * 이 매핑이 「언제 다시 부르면 되는가」를 알려 준다.
+     *
+     * <p>⚠️ 429 가 아니다. 우리 API 가 호출자를 제한하는 것이 아니라 <b>우리가 의존하는 쪽</b>이
+     * 잠긴 것이다 — 4xx 로 주면 호출자가 자기 요청을 고치려 든다.
+     */
+    @ExceptionHandler(GitHubRateLimitException.class)
+    public ResponseEntity<ProblemDetail> handleRateLimit(GitHubRateLimitException e) {
+        Instant now = clock.instant();
+        Instant retryAt = e.earliestRetryAt(now);
+        long seconds = retryAt == null ? DEFAULT_RETRY_AFTER.toSeconds()
+                : Math.max(1, Duration.between(now, retryAt).toSeconds());
+        ProblemDetail detail = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "GitHub 레이트리밋(%s)에 닿았습니다 — 후보는 그대로 있습니다. %d초 뒤 다시 요청하세요"
+                        .formatted(e.scope(), seconds));
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(seconds))
+                .body(detail);
+    }
+
+    /** {@code Retry-After} 도 {@code resetAt} 도 없을 때 — 스캔 쪽(#8)과 같은 보수적 기본값. */
+    private static final Duration DEFAULT_RETRY_AFTER = Duration.ofMinutes(5);
 
     @ExceptionHandler(RepositoryNotFoundException.class)
     public ProblemDetail handleNotFound(RepositoryNotFoundException e) {

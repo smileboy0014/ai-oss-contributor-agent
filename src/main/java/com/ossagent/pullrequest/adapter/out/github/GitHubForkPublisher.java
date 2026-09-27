@@ -82,6 +82,11 @@ public class GitHubForkPublisher implements ForkPublisher {
         this.clock = clock;
     }
 
+    @Override
+    public Optional<CommitIdentity> commitIdentity() {
+        return properties.commitIdentity();
+    }
+
     // ── Fork 확보 ───────────────────────────────────────────────────────
 
     @Override

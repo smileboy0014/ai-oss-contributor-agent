@@ -11,6 +11,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ossagent.agent.domain.SandboxWorkspace;
+import com.ossagent.agent.domain.TargetWorkspaceSource;
+import com.ossagent.agent.domain.WorkspaceDiff;
 import com.ossagent.candidate.domain.CandidateStatus;
 import com.ossagent.candidate.domain.CandidateTransitionException;
 import com.ossagent.candidate.domain.StatusTransition;
@@ -28,9 +31,19 @@ import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.support.observability.PipelineMetrics;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.beans.factory.ObjectProvider;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.DisplayNameGeneration;
 import org.junit.jupiter.api.DisplayNameGenerator;
@@ -52,12 +65,17 @@ class CreateDraftPrUseCaseTest {
     private static final RepositoryCoordinates UPSTREAM =
             new RepositoryCoordinates("spring-projects", "spring-kafka");
 
+    private static final String CHANGED_PATH = "src/main/java/A.java";
+    private static final String DIFF = "--- a/" + CHANGED_PATH + "\n+++ b/" + CHANGED_PATH + "\n@@ -1 +1 @@\n-x\n+y\n";
+
     private CandidatePrWriter writer;
     private FindAnalyzableIssuesUseCase issues;
     private AnalyzeRepositoryPolicyUseCase policies;
     private FakeForkPublisher forks;
     private FakeDraftPrPublisher draftPrs;
+    private FakeWorkspaceSource workspaces;
     private CreateDraftPrUseCase useCase;
+    private Path tempRoot;
 
     @BeforeEach
     void setUp() {
@@ -78,9 +96,101 @@ class CreateDraftPrUseCaseTest {
         forks = new FakeForkPublisher();
         forks.givenForkOwner("fork-owner");
         draftPrs = new FakeDraftPrPublisher();
+        workspaces = new FakeWorkspaceSource(newWorkspace());
 
         useCase = new CreateDraftPrUseCase(writer, issues, policies, forks, draftPrs,
-                new PipelineMetrics(new SimpleMeterRegistry()));
+                provider(workspaces), new PipelineMetrics(new SimpleMeterRegistry()),
+                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
+    }
+
+    @AfterEach
+    void tearDown() throws IOException {
+        if (tempRoot != null) {
+            try (var walk = Files.walk(tempRoot)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try {
+                        Files.delete(p);
+                    } catch (IOException ignored) {
+                        // 임시 디렉토리 정리 실패는 테스트 판정과 무관하다
+                    }
+                });
+            }
+        }
+    }
+
+    // ────────────────────────── Fork push (S-1) ──────────────────────────
+
+    @Test
+    @DisplayName("PR 을 열기 전에 Fork 에 push 하고, PR 의 head 는 그 커밋이다 — S-1")
+    void push_가_PR_생성보다_먼저다_S1() {
+        forks.givenCommitSha("pushed-sha-1");
+
+        useCase.create(CANDIDATE_ID);
+
+        assertThat(forks.publishRequests())
+                .as("🔴 이 단언이 없던 동안 publish() 의 운영 호출자가 0 개였다 — PR 게이트가 항상 실패했다")
+                .hasSize(1);
+        assertThat(draftPrs.openDraftRequests()).hasSize(1);
+        assertThat(draftPrs.openDraftRequests().get(0).head().commitSha()).isEqualTo("pushed-sha-1");
+        verify(writer).recordPublished(CANDIDATE_ID, "pushed-sha-1");
+    }
+
+    @Test
+    @DisplayName("push 되는 파일은 저장된 diff 를 새 워크스페이스에 입혀 만든다 — 착수 디렉토리를 다시 읽지 않는다")
+    void 파일은_diff_를_입혀_만든다() {
+        useCase.create(CANDIDATE_ID);
+
+        assertThat(workspaces.appliedDiffs()).containsExactly(DIFF);
+        assertThat(forks.publishRequests().get(0).changes())
+                .extracting("path")
+                .containsExactly(CHANGED_PATH);
+    }
+
+    @Test
+    @DisplayName("Fork 동기화가 어긋나면 push 도 PR 도 하지 않는다 — S-2")
+    void 동기화가_어긋나면_push_도_PR_도_없다_S2() {
+        forks.givenSyncOutcome(com.ossagent.pullrequest.domain.SyncOutcome.CONFLICT);
+
+        assertThatThrownBy(() -> useCase.create(CANDIDATE_ID))
+                .isInstanceOf(DraftPrException.class);
+
+        assertThat(forks.publishRequests()).isEmpty();
+        assertThat(draftPrs.openDraftRequests()).isEmpty();
+        verify(writer, never()).attachPullRequest(anyLong(), anyString(), anyString(), anyInt(),
+                anyString());
+    }
+
+    @Test
+    @DisplayName("전에 push 한 기록(commitSha)이 있으면 새 브랜치 생성이 아니라 갱신이다")
+    void 앞_호출이_push_까지_했으면_갱신으로_다시_올린다() {
+        given(writer.load(CANDIDATE_ID))
+                .willReturn(snapshot(CandidateStatus.READY_FOR_PR, "oss-agent/issue-12-x", "earlier-sha"));
+
+        useCase.create(CANDIDATE_ID);
+
+        assertThat(forks.publishRequests().get(0).allowUpdate()).isTrue();
+    }
+
+    @Test
+    @DisplayName("첫 push 는 브랜치 생성이다 — 우리 기록에 없는 브랜치를 덮어쓰지 않는다")
+    void 첫_push_는_생성이다() {
+        useCase.create(CANDIDATE_ID);
+
+        assertThat(forks.publishRequests().get(0).allowUpdate()).isFalse();
+    }
+
+    @Test
+    @DisplayName("push 가 실패하면 PR 을 열지 않고 전이하지 않는다 — S-1 · S-6")
+    void push_실패면_PR_도_전이도_없다_S1() {
+        forks.givenPublishFails(new com.ossagent.pullrequest.domain.ForkPublishException("브랜치가 이미 있습니다"));
+
+        assertThatThrownBy(() -> useCase.create(CANDIDATE_ID))
+                .isInstanceOf(com.ossagent.pullrequest.domain.ForkPublishException.class);
+
+        assertThat(draftPrs.openDraftRequests()).isEmpty();
+        verify(writer, never()).recordPublished(anyLong(), anyString());
+        verify(writer, never()).attachPullRequest(anyLong(), anyString(), anyString(), anyInt(),
+                anyString());
     }
 
     // ────────────────────────── 성공 경로 ──────────────────────────
@@ -197,13 +307,14 @@ class CreateDraftPrUseCaseTest {
     }
 
     @Test
-    @DisplayName("올라간 브랜치 기록이 없으면 PR 을 만들지 않는다")
+    @DisplayName("검증을 통과한 변경분(브랜치·diff) 기록이 없으면 push 도 PR 도 하지 않는다")
     void 브랜치_기록이_없으면_PR_을_만들지_않는다() {
         given(writer.load(CANDIDATE_ID))
                 .willReturn(snapshot(CandidateStatus.READY_FOR_PR, null, null));
 
         assertThatThrownBy(() -> useCase.create(CANDIDATE_ID))
                 .isInstanceOf(DraftPrException.class);
+        assertThat(forks.publishRequests()).isEmpty();
         assertThat(draftPrs.openDraftRequests()).isEmpty();
     }
 
@@ -253,7 +364,7 @@ class CreateDraftPrUseCaseTest {
     @DisplayName("검증 결과는 판정이 아니라 실행 기록으로 적는다 — Q-4 가 열려 있다")
     void 검증_결과를_통과로_단정하지_않는다() {
         given(writer.load(CANDIDATE_ID)).willReturn(new CandidatePrWriter.PrSnapshot(
-                ISSUE_ID, CandidateStatus.READY_FOR_PR, "oss-agent/issue-12-x", "abc123",
+                ISSUE_ID, CandidateStatus.READY_FOR_PR, "oss-agent/issue-12-x", null, DIFF,
                 "BUILD SUCCESSFUL in 12s", null, null));
 
         useCase.create(CANDIDATE_ID);
@@ -269,13 +380,90 @@ class CreateDraftPrUseCaseTest {
 
     // ────────────────────────── 픽스처 ──────────────────────────
 
+    /** 검증은 끝났고 아직 push 하지 않은 후보 — commitSha 가 없는 것이 정상이다. */
     private static CandidatePrWriter.PrSnapshot readyForPr() {
-        return snapshot(CandidateStatus.READY_FOR_PR, "oss-agent/issue-12-x", "abc123");
+        return snapshot(CandidateStatus.READY_FOR_PR, "oss-agent/issue-12-x", null);
     }
 
     private static CandidatePrWriter.PrSnapshot snapshot(CandidateStatus status, String branch,
             String sha) {
-        return new CandidatePrWriter.PrSnapshot(ISSUE_ID, status, branch, sha, null, null, null);
+        return new CandidatePrWriter.PrSnapshot(ISSUE_ID, status, branch, sha,
+                branch == null ? null : DIFF, null, null, null);
+    }
+
+    private SandboxWorkspace newWorkspace() {
+        try {
+            tempRoot = Files.createTempDirectory("pr-usecase-").toRealPath();
+            Path dir = Files.createDirectories(tempRoot.resolve("ws"));
+            return SandboxWorkspace.under(dir, tempRoot);
+        } catch (IOException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static <T> ObjectProvider<T> provider(T instance) {
+        return new ObjectProvider<>() {
+            @Override
+            public T getObject(Object... args) {
+                return instance;
+            }
+
+            @Override
+            public T getIfAvailable() {
+                return instance;
+            }
+
+            @Override
+            public T getIfUnique() {
+                return instance;
+            }
+
+            @Override
+            public T getObject() {
+                return instance;
+            }
+        };
+    }
+
+    /**
+     * 워크스페이스 대역 — {@code apply} 가 diff 대신 바뀐 파일을 <b>실제로</b> 써 둔다.
+     * UseCase 가 그 파일을 읽어 {@code FileChange} 를 만드는 경로가 실제 파일시스템을 타야
+     * 「존재하면 modified · 없으면 deleted」 분기가 공허하지 않다.
+     */
+    private static final class FakeWorkspaceSource implements TargetWorkspaceSource {
+
+        private final SandboxWorkspace workspace;
+        private final List<String> appliedDiffs = new ArrayList<>();
+
+        private FakeWorkspaceSource(SandboxWorkspace workspace) {
+            this.workspace = workspace;
+        }
+
+        List<String> appliedDiffs() {
+            return List.copyOf(appliedDiffs);
+        }
+
+        @Override
+        public SandboxWorkspace fetch(RepositoryCoordinates coordinates, String branchName) {
+            return workspace;
+        }
+
+        @Override
+        public WorkspaceDiff diff(SandboxWorkspace workspace) {
+            return new WorkspaceDiff(DIFF, Set.of(CHANGED_PATH));
+        }
+
+        @Override
+        public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+            appliedDiffs.add(unifiedDiff);
+            try {
+                Path target = workspace.resolveInside(CHANGED_PATH);
+                Files.createDirectories(target.getParent());
+                Files.writeString(target, "class A {}\n");
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+        }
     }
 
     private static AnalyzableIssue issue() {

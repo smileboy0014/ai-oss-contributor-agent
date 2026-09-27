@@ -7,6 +7,7 @@ import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.ossagent.agent.adapter.out.sandbox.SandboxInstanceId;
 import com.ossagent.agent.application.SandboxPipeline;
 import com.ossagent.agent.domain.CodeSandbox;
+import com.ossagent.agent.domain.DependencyCache;
 import com.ossagent.agent.adapter.out.sandbox.SandboxProperties;
 import com.ossagent.support.ExternalAdapter;
 import java.io.IOException;
@@ -104,7 +105,7 @@ public class SandboxConfig {
      * 받아 없으면 착수하지 않는다. {@code ImplementCandidateUseCase} 가 같은 방식이다.
      */
     @Bean
-    public SandboxPipeline sandboxPipeline(CodeSandbox sandbox, SandboxProperties properties) {
+    public DependencyCache sandboxPipeline(CodeSandbox sandbox, SandboxProperties properties) {
         return new SandboxPipeline(sandbox, properties.defaultImage(),
                 properties.warmLimits(), properties.executeLimits());
     }

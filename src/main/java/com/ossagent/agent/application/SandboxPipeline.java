@@ -1,6 +1,8 @@
 package com.ossagent.agent.application;
 
+import com.ossagent.agent.domain.BuildTool;
 import com.ossagent.agent.domain.CodeSandbox;
+import com.ossagent.agent.domain.DependencyCache;
 import com.ossagent.agent.domain.ExecuteCommand;
 import com.ossagent.agent.domain.SandboxCacheVolume;
 import com.ossagent.agent.domain.SandboxCommand;
@@ -60,7 +62,7 @@ import org.slf4j.LoggerFactory;
  *       동시에 돌아도 서로를 오염시키지 않는다 — 여기서 직렬화하면 이득 없이 느려진다</li>
  * </ul>
  */
-public class SandboxPipeline {
+public class SandboxPipeline implements DependencyCache {
 
     private static final Logger log = LoggerFactory.getLogger(SandboxPipeline.class);
 
@@ -108,12 +110,29 @@ public class SandboxPipeline {
             throw new SandboxPermanentException("샌드박스 실행 요청의 필수 값이 비었다");
         }
         SandboxCacheVolume cacheVolume =
-                SandboxCacheVolume.forRepository(coordinates.owner(), coordinates.name());
-
-        prepareCache(workspace, cacheVolume, javaVersion, command);
+                ensurePrepared(workspace, coordinates, command.buildTool(), javaVersion);
 
         return sandbox.run(ExecuteCommand.of(workspace, cacheVolume, command.buildTool(),
                 javaVersion, defaultImage, command.argv(), executeLimits));
+    }
+
+    /**
+     * 🔴 준비만 한다 — 실행은 호출자가 한다 ({@link DependencyCache}).
+     *
+     * <p>검증(#19)은 한 워크스페이스에서 <b>여러 명령</b>(컴파일 · 테스트 · diff)을 돌리므로
+     * 「준비 + 실행 한 벌」이 맞지 않는다. 준비를 따로 노출하되 <b>볼륨을 돌려주어</b>
+     * 호출자가 다른 볼륨으로 실행할 수 없게 한다.
+     */
+    @Override
+    public SandboxCacheVolume ensurePrepared(SandboxWorkspace workspace,
+            RepositoryCoordinates coordinates, BuildTool buildTool, String javaVersion) {
+        if (workspace == null || coordinates == null || buildTool == null) {
+            throw new SandboxPermanentException("캐시 준비 요청의 필수 값이 비었다");
+        }
+        SandboxCacheVolume cacheVolume =
+                SandboxCacheVolume.forRepository(coordinates.owner(), coordinates.name());
+        prepareCache(workspace, cacheVolume, javaVersion, buildTool);
+        return cacheVolume;
     }
 
     /**
@@ -124,7 +143,7 @@ public class SandboxPipeline {
      * 「저장소당 1회」는 지켜지지 않는다.
      */
     private void prepareCache(SandboxWorkspace workspace, SandboxCacheVolume cacheVolume,
-            String javaVersion, TargetCommandLine command) {
+            String javaVersion, BuildTool buildTool) {
         if (seeded.contains(cacheVolume.name())) {
             return;
         }
@@ -136,7 +155,7 @@ public class SandboxPipeline {
             }
             log.info("의존성 캐시 워밍 시작 volume={}", cacheVolume.name());
             requireSucceeded("워밍",
-                    sandbox.run(WarmCommand.of(workspace, command.buildTool(),
+                    sandbox.run(WarmCommand.of(workspace, buildTool,
                             javaVersion, defaultImage, warmLimits)));
 
             requireSucceeded("씨딩",

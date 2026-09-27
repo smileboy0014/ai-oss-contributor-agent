@@ -43,7 +43,9 @@ description: GitHub 이슈 작업의 단일 진입점 — type(feature/fix/refac
 
 체크아웃이 하나뿐이면 동시에 들어온 두 작업이 서로를 덮어쓴다 — 한쪽의 `git checkout` 이 다른 쪽의
 미커밋 변경을 끌고 다니고, `./gradlew build` 는 같은 `build/` 를 두 세션이 나눠 쓴다.
-빌드 결과가 누구 것인지 알 수 없으면 **로컬 build 가 유일한 게이트**(Q-10)라는 전제가 무너진다.
+빌드 결과가 누구 것인지 알 수 없으면 **로컬 build 로 판정한다**는 전제가 무너진다.
+(⚠️ CI 는 Q-10 으로 구축됐다 — 로컬이 «유일한» 게이트이던 시절의 문장을 정정한다. 다만
+CI 는 PR 을 올린 뒤에야 돌므로 **로컬이 첫 게이트라는 것은 그대로**다.)
 
 | 항목 | 값 |
 |---|---|
@@ -182,15 +184,67 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
     트랜잭션에 들어가면 커넥션이 30분 잡힌다
   - 시각은 `Clock` 주입. `Instant.now()` 직접 호출 금지
 
-  - 테스트 게이트: ./gradlew build   ⚠ CI 미구축(Q-10) — 로컬 build 가 유일한 게이트다
+  - 테스트 게이트: ./gradlew build
+    ℹ️ CI 도 같은 `build` 를 돌린다(Q-10). **CI 는 fresh checkout 이라 아래 ② 의
+    `UP-TO-DATE` 문제가 원천적으로 없다** — 다만 CI 는 **PR 이후**라 Phase 2 의 대체재가 아니다
   ⚠ 빌드 판정 (필수) — 파이프로 자른 출력만 보고 성공 판정 금지
-     (파이프 종료 코드는 마지막 명령이 덮어쓴다):
+     (파이프 종료 코드는 마지막 명령이 덮어쓴다).
+     🔴 로그는 **세션 스크래치패드**에 쓴다 (경로는 세션 시스템 프롬프트에 있다) — 아래 ③:
 
-     mkdir -p build && ./gradlew build > build/work-build.log 2>&1; echo "exit=$?"; \
-       grep -c '^BUILD SUCCESSFUL' build/work-build.log
+     LOG=<세션 시스템 프롬프트의 「Scratchpad directory」 절대경로>/work-build.log
+     #  ↑ 환경변수가 아니다. 그 경로를 문자 그대로 써 넣는다
+     ./gradlew build > "$LOG" 2>&1; echo "exit=$?"
+     grep -c '^BUILD SUCCESSFUL' "$LOG"
+     grep -E '^> Task :test( |$)' "$LOG"          # ← 접미사째 찍힌다. 없으면 「줄 없음」
+     grep -E '^[0-9]+ actionable tasks' "$LOG"
 
-     exit=0 과 grep 결과 1 이 **둘 다** 나와야 통과다. 하나라도 어긋나면 실패로 취급한다
-     ⚠ 로그는 worktree 안(`build/`)에 쓴다. `/tmp/build.log` 같은 공용 경로는 **동시 작업이 서로 덮어쓴다**
+  ⚠ **세 가지를 다 본다. `exit=0` + `BUILD SUCCESSFUL` 만으로는 부족하다.**
+
+  ① **빌드가 성공했는가** — exit=0 과 grep 결과 1 이 둘 다. 하나라도 어긋나면 실패
+
+  ② 🔴 **테스트가 이번 실행에 돌았는가** — `> Task :test` 의 **접미사**를 본다
+
+     | 접미사 | 뜻 | 보고 |
+     |---|---|---|
+     | 없음 | 실행됨 | ✅ **통과** |
+     | `UP-TO-DATE` | **건너뜀** | ℹ️ **「빌드 초록 · 테스트 미실행」** — 「통과」라고 하지 않는다 |
+     | `FAILED` | 실패 | ❌ |
+     | **줄이 아예 없음** | 도달 못 함 | ℹ️ 위와 같은 취급 — 「초록」과 구분되지 않는다 |
+
+     🔴 **`UP-TO-DATE` 를 실패로 치지 않는다.** 문서만 고친 커밋에서 오탐이 나고,
+     **오탐으로 죽는 게이트는 반드시 꺼진다.** 「실행되지 않았다」와 「통과했다」를
+     **다르게 보고**하면 충분하다 — Stop 훅 [`impl-test-loop.sh`](../../scripts/impl-test-loop.sh)
+     가 이미 그렇게 한다(「한 건도 실행하지 않았으면 「통과」라고 하지 않는다」).
+     ℹ️ 가 나오면 **`./gradlew build --rerun-tasks`**(또는 `clean build`)로 한 번 더 받는다.
+     ⚠ **여기서 「CI 로 받겠다」는 성립하지 않는다** — CI 는 PR 이 생긴 뒤(Phase 5)에야 돈다.
+     Phase 2 의 ℹ️ 를 CI 로 미루면 **게이트 없이 Phase 3~4 를 지나간다**
+
+     ⚠ **요약 줄(`N actionable tasks: M executed`)은 보조다.** `executed 0` 이면
+     아무것도 안 돈 것이 확실하지만, **`M executed` 는 `:test` 를 이름으로 지목하지 않는다** —
+     `compileTestJava` 만 돌아도 같은 숫자다. **요약 줄은 「0건」을, 태스크 줄은 「그 태스크가」를** 잡는다
+
+     🔴 **소요 시간(`in 1s`)을 판정에 쓰지 않는다.** 오염이 **양방향**이다 —
+     부분 실행(`--tests`)은 **짧게**, 시스템 절전은 **길게** 만든다(실측: 절전 940초가
+     한 빌드에 통째로 들어갔다). 「너무 짧다」도 「너무 길다」도 근거가 아니다
+
+     🔴 **위 접미사 표는 열거다 — 요구 4 를 여기에도 적용한다**
+     (`testing-philosophy.md` 「열거로 정의한 가드는 **열거에 없는 형태를 적는다**」).
+
+     | 열거에 없는 것 | 왜 지금 안 나오나 | 나오게 되는 조건 |
+     |---|---|---|
+     | `FROM-CACHE` | **빌드 캐시가 꺼져 있다** — `gradle.properties` 없음 · `buildCache {}` 없음 · CI 에 `--build-cache` 없음 | `org.gradle.caching=true` · `--build-cache` · 🔴 **사용자 홈 `~/.gradle/gradle.properties`**(저장소 diff 에 안 보인다) 중 무엇이든 |
+     | `NO-SOURCE` | 테스트 소스가 항상 있다 | ⚠️ **`src/test` 가 비거나 사라지면** — 소스셋 재배치 · 모듈 분리. **캐시와 무관하다** |
+     | **다른 이름의 테스트 태스크** | `build.gradle.kts` 에 `Test` 태스크가 **하나뿐**이다(`withType<Test>().configureEach` 만) | `integrationTest` 같은 걸 등록하면 위 grep 이 **그것을 안 본다** |
+
+     ⚠️ 셋 중 하나라도 생기면 **접미사 표와 grep 을 함께 다시 본다.** 안 보면 조용히 통과한다
+
+  ③ ⚠ **로그를 `build/` 에 쓰지 않는다.** `clean` 이 지우는데, 위 ℹ️ 에서 빠져나오는 방법이
+     **바로 `clean build`** 다 — 규칙이 자기 탈출로와 부딪힌다.
+     `/tmp/build.log` 같은 공용 경로도 안 된다(동시 작업이 서로 덮어쓴다).
+     **세션 스크래치패드는 세션 UUID 로 갈리므로 둘 다 피한다**
+
+     🔵 **대가 하나** — 로그가 worktree 밖이라 `/handoff` 회수 대상이 아니고
+     **세션이 끝나면 사라진다.** 남겨야 할 실패 로그는 PR 본문·코멘트로 옮긴다
 
   - 커밋: /commit (scope = repository·issue·candidate·agent·pr·support·build·infra·docs·claude ·
     한 커밋에 여러 도메인 금지 · 커밋 시 git 훅 2개가 돈다 — secret-scan ·
@@ -332,6 +386,7 @@ lifecycle 은 사람 응답을 기다리지 않고 끝까지 진행한다. 판�
 | **안전 경계(S-1~S-6) 접촉** | 계획서에 조항·준수 방법 명시 없이 Phase 2 로 넘어가지 않는다 |
 | 미결(open-questions) 접촉 | 추측 금지 — 선택 게이트 (가정 명시 진행 / 확인 대기 / 중단) |
 | 빌드·테스트 실패 | Phase 2 중단 — 원인 수정 후 재검증. **파이프 출력만 보고 통과 판정 금지** |
+| **`> Task :test` 가 `UP-TO-DATE` 이거나 줄이 없음** | 빌드는 초록이지만 **테스트가 이번 실행에 안 돌았다.** 「통과」라고 하지 않는다 — `--rerun-tasks` 로 다시 받는다. Phase 2 를 CI 로 미루지 않는다 |
 | 시크릿 훅 차단 (secret-scan) | 값을 지우고 환경변수·`<REPLACE_WITH_SECRET_MANAGER>` 로 대체. 훅 skip 금지 |
 | 안전 경계 훅 차단 (safety-boundary-check) | 위반 수정 — `safety-ok` 예외는 **사유 필수**, 사유 없는 예외는 반려 |
 | `./gradlew` 부재 | 빌드 게이트 없음 — 「통과」라고 하지 않는다. 사실을 보고에 남긴다 |
@@ -357,7 +412,7 @@ PR: {URL}
 |------|------|
 | 0.5 worktree 격리 | ✅ |
 | 1 계획 (+안전 경계·미결 대조 · PLAN 커밋) | ✅ / skip |
-| 2 구현·테스트 (gradlew build) | ✅ |
+| 2 구현·테스트 (gradlew build) | ✅ / **ℹ️ 테스트 미실행 (사유)** |
 | 3 자가 점검 | ✅ |
 | 4 문서 동기화 | ✅ / skip (근거) |
 | 5 PR (+메타데이터 승계) | ✅ |

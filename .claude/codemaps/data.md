@@ -129,7 +129,9 @@ oss_repository ──1:1──▶ repository_policy
 | `pending_reason` | VARCHAR(1024) NULL | **왜 보류됐나** (V5 · #7). `경로=사유코드` 목록. 🔴 해소 뒤에도 **지우지 않는다** |
 | `resolved_at` | TIMESTAMP NULL | **사람이 언제 보류를 풀었나** (V8 · #24). NULL = 기계 판정 |
 | `resolution_note` | VARCHAR(1024) NULL | **사람이 왜 그렇게 판단했나** (V8 · #24) |
-| `analyzed_at` | TIMESTAMP | 규약은 바뀐다. 재분석 주기 판단 근거 |
+| `document_fingerprints` | VARCHAR(4000) NULL | **판정이 무엇을 보고 선 것인가** (V9 · #68). `경로=지문` 목록, 지문은 `absent` 또는 SHA-256 hex. 🔴 NULL = **비교 기준 없음**이지 「안 바뀜」이 아니다 |
+| `documents_checked_at` | TIMESTAMP NULL | **문서를 실제로 다시 읽어 본 시각** (V9 · #68). `analyzed_at` 과 다르다 — 아래 |
+| `analyzed_at` | TIMESTAMP | 규약은 바뀐다. **LLM 판정을 세운** 시각 |
 
 **`ai_contribution_allowed` 를 NOT NULL DEFAULT true 로 두지 않는다.** 기본 허용은 S-5 위반을 기본값으로 만드는 것이다.
 
@@ -141,6 +143,22 @@ oss_repository ──1:1──▶ repository_policy
 ⚠️ `pending_reason` 이 `TEXT` 가 아닌 이유 — 이 프로젝트에서 `TEXT` 는 「외부 텍스트」를 뜻하고
 `@ExternalText` 가 강제된다(`ExternalTextMarkerTest`). 여기 들어가는 것은 **우리가 만든 사유 문자열**
 이고 길이도 유계다(후보 경로 13개 × `경로=사유코드; `).
+
+### 문서 변경 탐지 두 컬럼 — V9 · #68
+
+「못 읽었다」와 「읽었는데 그대로다」가 구분되지 않아, **대상 저장소가 AI 기여를 금지했는데
+그 문서를 못 읽으면 낡은 허용 판정이 그대로 굳었다**(S-5 위반이 진행 중인데 아무도 모른다).
+
+| | |
+|---|---|
+| `document_fingerprints` | 다음 관측의 **비교 기준**. 지문이 같으면 **LLM 을 부르지 않는다** — 그래서 매 스캔 재확인이 성립하고, 「규약이 얼마나 자주 바뀌는가」를 몰라도 TTL 이 필요 없다 |
+| `documents_checked_at` | 🔴 `analyzed_at` 과 **다른 것**이다. 지문이 같으면 LLM 을 안 부르므로 `analyzed_at` 은 전진하지 않는다. 그때 그것을 갱신하면 「분석했다」가 거짓말이 된다 |
+
+🔴 **`documents_checked_at` 이 멈춰 있는 것이 「모르는 상태가 오래됐다」의 유일한 증거다.**
+5xx·레이트리밋으로 응답을 못 받으면 지문을 구할 수 없어 변경 여부를 **원리적으로** 알 수 없다.
+
+⚠️ `document_fingerprints` 가 `TEXT` 가 아닌 이유는 `pending_reason` 과 같다 — SHA-256 은
+단방향이라 원문이 복원되지 않고 경로는 우리 상수다. **외부 텍스트가 아니다.**
 
 ### 보류 해소 두 컬럼 — V8 · #24
 
@@ -297,6 +315,7 @@ stage enum 문자열에 묶이기 때문이다.
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-26 | smileboy0014 | `repository_policy` 에 보류 해소 2컬럼 (V8 · #24) |
+| 2026-09-27 | smileboy0014 | `repository_policy` 에 문서 지문·확인시각 2컬럼 (V9 · #68) |
 | 2026-09-26 | smileboy0014 | `issue` 에 필터 4컬럼 (V7 · #9) · `filter_reason` 을 TEXT 에서 VARCHAR 로 |
 | 2026-09-22 | smileboy0014 | 7테이블 실재로 전환 (V2 · #5) · 스키마 정본을 마이그레이션으로 명시 |
 | 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 §22 ERD 기준 · 멱등키·스크럽 대상 컬럼 지정 |

@@ -7,10 +7,12 @@ import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.support.observability.GateOutcome;
 import com.ossagent.support.observability.PipelineMetrics;
+import com.ossagent.support.observability.PolicyChangeOutcome;
 import com.ossagent.support.observability.SafetyClause;
 import com.ossagent.repository.domain.ContributionRuleInterpreter;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.PolicyDocumentPath;
+import com.ossagent.repository.domain.PolicyDocumentFingerprints;
 import com.ossagent.repository.domain.PolicyDocumentSource;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.repository.domain.RepositoryDocuments;
@@ -19,7 +21,10 @@ import com.ossagent.repository.domain.PolicyClearance;
 import com.ossagent.repository.domain.RepositoryPolicy;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.repository.domain.RuleReading;
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -90,36 +95,103 @@ public class AnalyzeRepositoryPolicyUseCase {
 
             RepositoryDocuments documents =
                     documentSource.collect(snapshot.coordinates(), PolicyDocumentPath.all());
+            // 🔴 지문은 판정과 **무관하게** 뽑는다 — 이슈 #68 FR-2.
+            //    「바뀌었는가」와 「판정이 섰는가」는 서로 다른 입력을 보는 두 물음이다
+            PolicyDocumentFingerprints prints = PolicyDocumentFingerprints.of(documents);
 
             // ③ 🔴 일시적 실패 — 아무것도 쓰지 않고 중단한다.
-            //    보류로 만들면 한 시간 뒤면 저절로 풀렸을 일이 되돌릴 수단 없는 영구 보류가
-            //    된다(#24 미구현). 정책이 없으므로 구현 단계는 어차피 막히고(FR-4),
-            //    안전 성질은 보류와 같으면서 복구만 자동이다
+            //    보류로 만들면 한 시간 뒤면 저절로 풀렸을 일이 사람이 풀어야 하는 보류가 된다.
+            //    ⚠ 응답을 못 받았으므로 지문도 없다 — 바뀌었는지 **원리적으로 알 수 없다**(#68 FR-5).
+            //      「바뀌지 않았다」로 읽지 않기 위해 여기서는 아무것도 기록하지 않는다
             if (documents.hasTransientlyUnreadableRequired()) {
+                metrics.policyDocuments(PolicyChangeOutcome.INDETERMINATE);
                 log.warn("규약 문서를 일시적으로 읽지 못했다 repo={} — 기록 없이 중단, 다음 스캔에서 재시도",
                         snapshot.coordinates().fullName());
                 return Optional.empty();
             }
 
-            // ④ 영구적으로 못 읽었다 → 보류. 사람이 봐야 풀린다
-            if (documents.hasPermanentlyUnreadableRequired()) {
+            RepositoryPolicy existing = snapshot.policy();
+            PolicyDocumentFingerprints baseline = existing == null
+                    ? PolicyDocumentFingerprints.none()
+                    : existing.fingerprints();
+            List<String> changed = baseline.changedRequiredPaths(prints);
+
+            // ④ 영구적으로 못 읽었다
+            Set<String> unreadable = documents.permanentlyUnreadableRequiredPaths();
+            if (!unreadable.isEmpty()) {
+                // 🔴 #68 — **같은 경로에서** 「판정 근거를 확인할 수 없다」가 성립하는가.
+                //    서로 다른 경로에서 따로 일어난 것을 겹친 것으로 세면 오탐이 된다.
+                //
+                //    두 형태를 모두 센다 — 이슈 5단계가 든 원인이 둘이기 때문이다.
+                //      ⓐ 지문이 **달라졌는데** 못 읽는다        (우리 상한 초과 = TRUNCATED)
+                //      ⓑ 전에는 읽었는데 이번엔 **지문조차** 못 구했다 (1MB 초과 등)
+                //    ⓑ 를 빼면 1MB 형태가 조용히 통과한다 — 「양쪽에 지문이 있을 때만
+                //    바뀌었다고 한다」는 옳은 규칙이 정작 이슈의 절반을 놓치는 자리다
+                List<String> blind = Stream
+                        .concat(changed.stream(), baseline.lostRequiredPaths(prints).stream())
+                        .filter(unreadable::contains)
+                        .distinct()
+                        .toList();
+                if (!blind.isEmpty() && existing != null && existing.allowsContribution()) {
+                    metrics.policyDocuments(PolicyChangeOutcome.CHANGED_UNVERIFIABLE);
+                    return Optional.of(writer.saveUnverifiable(
+                            existing.getId(), changedUnreadableReason(documents, blind), prints));
+                }
+                // 겹치지 않으면 기존 규칙 그대로 — 신규 행이면 보류, 기존 행이면 판정 유지.
+                // ⚠ 안전하지만 계속 쌓이면 곤란하다 — 그 저장소는 규약 변경을 탐지할 수단이
+                //   없다는 뜻이다. 계측하지 않으면 이 분기만 통계에서 사라진다
+                metrics.policyDocuments(PolicyChangeOutcome.UNREADABLE_KEPT);
                 return Optional.of(writer.savePending(
-                        snapshot.repository(), snapshot.policy(), documents.requiredPendingReason()));
+                        snapshot.repository(), existing, documents.requiredPendingReason(), prints));
             }
 
-            // ⑤ 필수 경로가 전부 404 → 허용. 금지 표기가 존재할 수 없다 (Q-8 확정 ①).
+            // ⑤ 🔴 #68 — 바뀐 것을 관측하지 못했으면 **LLM 을 부르지 않는다.**
+            //    이것이 있어야 스캔마다 규약을 다시 볼 수 있다. 비싼 것은 GitHub 조회가 아니라
+            //    LLM 판정이고, 그것을 건너뛰므로 「규약이 얼마나 자주 바뀌는가」를 몰라도
+            //    재확인 주기를 정할 수 있다 — PLAN-14 R-4 가 TTL 을 미룬 이유가 사라진다.
+            //
+            //    ⚠ unseenRequiredPaths 를 함께 요구한다. 기준에 없던 경로는 「바뀌었다」도
+            //      「그대로다」도 아니라서, 그것을 건너뛰면 그 경로의 금지 문구를 한 바퀴 놓친다
+            if (existing != null && !baseline.isEmpty()
+                    && changed.isEmpty() && baseline.unseenRequiredPaths(prints).isEmpty()) {
+                metrics.policyDocuments(PolicyChangeOutcome.UNCHANGED);
+                log.info("규약 문서가 그대로다 repo={} — 판정을 유지하고 LLM 을 부르지 않는다",
+                        snapshot.coordinates().fullName());
+                return Optional.of(writer.saveVerified(existing.getId(), prints));
+            }
+
+            // ⑥ 필수 경로가 전부 404 → 허용. 금지 표기가 존재할 수 없다 (Q-8 확정 ①).
             //    LLM 을 부르지 않는다 — 판정할 텍스트가 없는데 토큰을 쓸 이유가 없다
             RuleReading reading = documents.readDocuments().isEmpty()
                     ? RuleReading.allowedByAbsence()
                     : interpreter.interpret(snapshot.coordinates(), documents);
 
-            // ⑥ 판정이 서지 않았다 → 보류
+            // ⑦ 판정이 서지 않았다 → 보류
             if (reading.isUndetermined()) {
                 return Optional.of(writer.savePending(
-                        snapshot.repository(), snapshot.policy(), "LLM_UNDETERMINED"));
+                        snapshot.repository(), existing, "LLM_UNDETERMINED", prints));
             }
+            // ⑧ 🔴 사람이 해소한 판정을 자동이 **다시 쓰지 않는다** — Q-8 · #24.
+            //    문서가 바뀌었고 판정이 여전히 허용이면 확인된 것이니 지문만 갱신한다.
+            //    ⚠ 이 분기가 없으면 RepositoryPolicy.reanalyze 가 예외를 던지고
+            //      ScanPipelineUseCase 가 POLICY 단계를 FAILED 로 올린다 — #24 의 규칙이
+            //      「거부」가 아니라 「스캔 전체 실패」로 나타난다. 지금까지는 analyze() 가
+            //      불리지 않아 도달 불가였고, 이 PR 이 그 경로를 연다.
+            //    🔴 엔티티 가드는 그대로 둔다 — 최종 방어는 거기다
+            if (existing != null && existing.isHumanResolved()
+                    && Boolean.TRUE.equals(reading.aiContributionAllowed())) {
+                // ⚠ UNCHANGED 가 아니다 — 문서는 실제로 바뀌었고 LLM 도 불렀다.
+                //   UNCHANGED 로 세면 「LLM 을 아꼈다」는 뜻이 되어 비용 지표가 거짓이 된다
+                metrics.policyDocuments(PolicyChangeOutcome.CHANGED_REANALYZED);
+                log.info("사람이 해소한 판정이 재분석으로도 허용이다 repo={} — 판정을 유지하고 지문만 갱신한다",
+                        snapshot.coordinates().fullName());
+                return Optional.of(writer.saveVerified(existing.getId(), prints));
+            }
+            metrics.policyDocuments(baseline.isEmpty()
+                    ? PolicyChangeOutcome.BASELINE_RECORDED
+                    : PolicyChangeOutcome.CHANGED_REANALYZED);
             return Optional.of(writer.saveAnalyzed(snapshot.repository(),
-                    snapshot.policy() == null ? null : snapshot.policy().getId(), reading));
+                    existing == null ? null : existing.getId(), reading, prints));
 
         } catch (LlmTransientException e) {
             // LLM 쪽 일시적 실패도 ③과 같다 — 기록 없이 중단
@@ -130,7 +202,24 @@ public class AnalyzeRepositoryPolicyUseCase {
     }
 
     /**
-     * 🔴 <b>정책이 없을 때만 분석하고, 스캔 파이프라인이 쓸 판정을 돌려준다</b> — #14 FR-0.
+     * 강등 사유 — 🔴 <b>우리 어휘만</b> 들어간다 (S-4). 경로 + 사유 코드뿐이다.
+     *
+     * <p>사람이 이것만 보고 「어느 문서가 바뀌었는데 왜 못 읽는지」를 알 수 있어야 한다.
+     * 그러지 못하면 보류를 풀 수가 없고, 그것은 이슈가 막으려는
+     * 「아무도 모르는 채로 남는다」와 실질적으로 같다.
+     */
+    private static String changedUnreadableReason(RepositoryDocuments documents,
+            List<String> blindPaths) {
+        String detail = documents.documents().stream()
+                .filter(d -> blindPaths.contains(d.path().path()))
+                .map(d -> d.path().path() + "=" + d.reason())
+                .reduce((a, b) -> a + "; " + b)
+                .orElse("");
+        return "CHANGED_UNREADABLE " + detail;
+    }
+
+    /**
+     * 🔴 <b>정책을 최신으로 만들고, 스캔 파이프라인이 쓸 판정을 돌려준다</b> — #14 FR-0 · #68.
      *
      * <h2>⚠️ 이것은 게이트가 아니다</h2>
      *
@@ -139,15 +228,19 @@ public class AnalyzeRepositoryPolicyUseCase {
      * 여전히 막는다. <b>이것만 부르고 넘어가면 S-5 가 뚫린다</b> — 이름이 비슷해 혼동하기
      * 쉬운 자리라 적어 둔다.
      *
-     * <h2>🔴 왜 「없을 때만」인가</h2>
+     * <h2>🔴 「없을 때만」이었다 — 그것이 구멍이었다 (#68)</h2>
      *
-     * <p>{@link #analyze} 는 보류·금지면 비용 없이 즉시 반환하지만 <b>허용이면 재분석</b>한다
-     * ({@code blocksReanalysis()} 가 false). 스케줄러가 매 주기 부르면 규약이 바뀌지도
-     * 않았는데 저장소마다 GitHub 호출 + LLM 1회씩을 <b>영구히</b> 태운다.
+     * <p>원래 이 메서드는 {@code analyzeIfAbsent} 였고 정책 행이 있으면 아무것도 하지
+     * 않았다. 근거는 「스케줄러가 매 주기 부르면 규약이 바뀌지도 않았는데 저장소마다
+     * GitHub 호출 + LLM 1회씩을 영구히 태운다」였고, 대가로 남긴 것이
+     * <b>「한 번 허용이면 영원히 허용」</b>이었다 — PLAN-14 R-4.
      *
-     * <p>⚠️ 대가는 「한 번 허용이면 영원히 허용」이다. 대상 저장소가 나중에 AI 기여를
-     * 금지해도 모른다. 갱신 주기(TTL)는 「규약이 얼마나 자주 바뀌는가」 데이터가 없어
-     * 지금 정하지 않는다 — PLAN-14 R-4.
+     * <p>🔴 <b>그 대가가 S-5 구멍이다.</b> 대상 저장소가 나중에 AI 기여를 금지해도
+     * 우리는 확인조차 하지 않는다. 규약 문서를 다시 읽는 코드 경로가 아예 없었다.
+     *
+     * <p>지문 비교가 그 딜레마를 없앤다 — <b>비싼 것은 GitHub 조회가 아니라 LLM 판정</b>이고,
+     * 지문이 같으면 그것을 건너뛴다({@link #analyze} ⑤). 그래서 「규약이 얼마나 자주
+     * 바뀌는가」를 몰라도 매 스캔 확인할 수 있다. TTL 을 정하지 못해 미뤘던 이유가 사라진다.
      *
      * <h2>🔴 트랜잭션을 걸지 않는다</h2>
      *
@@ -158,15 +251,11 @@ public class AnalyzeRepositoryPolicyUseCase {
      * 못한다.</b> 그 가드는 파이프라인 4단계에 있고, 그때는 여기서 열었던 트랜잭션이 이미
      * 닫혀 통과한다. 그래서 같은 단언을 여기에도 둔다.
      */
-    public ScanTarget analyzeIfAbsent(Long repositoryId) {
+    public ScanTarget ensurePolicy(Long repositoryId) {
         assertNoTransaction();
         Snapshot snapshot = load(repositoryId);
-
-        RepositoryPolicy policy = snapshot.policy() != null
-                ? snapshot.policy()
-                : analyze(repositoryId).orElse(null);
-
-        return toScanTarget(repositoryId, snapshot.coordinates(), policy);
+        return toScanTarget(repositoryId, snapshot.coordinates(),
+                analyze(repositoryId).orElse(null));
     }
 
     private static ScanTarget toScanTarget(Long repositoryId, RepositoryCoordinates coordinates,
@@ -326,7 +415,7 @@ public class AnalyzeRepositoryPolicyUseCase {
     /**
      * ⚠️ <b>{@code @Transactional} 을 붙이지 않는다 — 붙여도 적용되지 않는다.</b>
      *
-     * <p>{@code analyze}·{@code analyzeIfAbsent} 가 {@code this} 로 부르는 self-invocation
+     * <p>{@code analyze}·{@code ensurePolicy} 가 {@code this} 로 부르는 self-invocation
      * 이라 프록시를 타지 않는다. 애노테이션을 달아 두면 <b>「트랜잭션 안에서 읽는다」는
      * 알리바이</b>만 남고 실제로는 동작하지 않는다 — {@code ScanProperties} 가 경계한
      * 「영원히 false 인 필드」와 같은 유형이다.

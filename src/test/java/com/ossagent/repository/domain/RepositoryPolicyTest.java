@@ -261,4 +261,84 @@ class RepositoryPolicyTest {
                         + "그 방향은 되돌릴 수 없는 쪽(규약 위반 PR)이라 열어 둔다")
                 .isTrue();
     }
+
+    // ─────────────── 문서 변경 탐지 — 이슈 #68 ───────────────
+
+    @Test
+    void 바뀐_것을_관측했는데_판정이_안_서면_보류로_강등한다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), allowed(), CLOCK);
+
+        policy.markUnverifiable("CHANGED_UNREADABLE AGENTS.md=TRUNCATED", prints("가"), CLOCK);
+
+        assertThat(policy.isAiContributionUndetermined())
+                .as("🔴 판정을 유지하면 「아무도 모르는 채로」 Draft PR 이 계속 나간다")
+                .isTrue();
+        assertThat(policy.getPendingReason()).contains("AGENTS.md");
+        assertThat(policy.allowsContribution()).isFalse();
+    }
+
+    @Test
+    void 강등은_사람의_판정_출처를_지운다_Q8() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=UNKNOWN", CLOCK);
+        policy.resolvePending(true, "문서를 직접 읽었고 금지 문구가 없다", CLOCK);
+
+        policy.markUnverifiable("CHANGED_UNREADABLE AGENTS.md=TRUNCATED", prints("가"), CLOCK);
+
+        assertThat(policy.isHumanResolved())
+                .as("🔴 사람의 판단이 새 증거로 무효가 됐다. 남겨 두면 「지금 판정이 사람 것」이라고 "
+                        + "거짓말하는데, 안전 판정에 쓰이는 술어라 거짓말을 남길 수 없다")
+                .isFalse();
+        assertThat(policy.getResolutionNote())
+                .as("이력은 잃지 않는다 — #24 가 pendingReason 을 비우지 않는 것과 대칭이다")
+                .isNotBlank();
+    }
+
+    @Test
+    void 금지_판정은_강등으로도_풀리지_않는다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), forbidden(), CLOCK);
+
+        assertThatThrownBy(() -> policy.markUnverifiable("무엇이든", prints("가"), CLOCK))
+                .as("금지 → 보류는 게이트를 **푸는** 방향이다. 열면 FR-2 가 자동으로 뚫린다")
+                .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void 이미_보류면_강등_사유를_덮어쓰지_않는다() {
+        RepositoryPolicy policy = RepositoryPolicy.pending(repo(), "AGENTS.md=UNKNOWN", CLOCK);
+
+        assertThatThrownBy(() -> policy.markUnverifiable("다른 사유", prints("가"), CLOCK))
+                .as("덮어쓰면 원래 왜 보류였는지가 사라진다 — pendingReason 의 존재 이유")
+                .isInstanceOf(IllegalStateException.class);
+        assertThat(policy.getPendingReason()).isEqualTo("AGENTS.md=UNKNOWN");
+    }
+
+    @Test
+    void 확인만_한_것은_판정_시각을_전진시키지_않는다() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), allowed(), CLOCK);
+        Instant analyzedAt = policy.getAnalyzedAt();
+        Clock later = Clock.fixed(Instant.parse("2026-10-01T00:00:00Z"), ZoneOffset.UTC);
+
+        policy.markVerified(prints("가"), later);
+
+        assertThat(policy.getAnalyzedAt())
+                .as("🔴 LLM 을 부르지 않았다. 갱신하면 「분석했다」가 거짓말이 되고 "
+                        + "「마지막으로 판정한 때」를 영영 알 수 없게 된다")
+                .isEqualTo(analyzedAt);
+        assertThat(policy.getDocumentsCheckedAt()).isEqualTo(later.instant());
+        assertThat(policy.allowsContribution()).isTrue();
+    }
+
+    @Test
+    void 지문은_다음_비교의_기준으로_남는다() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), allowed(), prints("가"), CLOCK);
+
+        assertThat(policy.fingerprints().changedRequiredPaths(prints("나")))
+                .as("판정과 함께 기준을 남기지 않으면 다음에 비교할 것이 없다")
+                .containsExactly("CONTRIBUTING.md");
+    }
+
+    private static PolicyDocumentFingerprints prints(String content) {
+        return PolicyDocumentFingerprints.parse(
+                "CONTRIBUTING.md=" + DocumentFingerprint.of(content).value());
+    }
 }

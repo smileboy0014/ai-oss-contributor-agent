@@ -185,6 +185,18 @@ fi
 violations=""
 found=0
 
+# 🔴 어느 검사에 걸렸는지를 따로 센다 — 조치 방법이 검사마다 다르기 때문이다.
+#
+#   전에는 「실제 값을 <REPLACE_WITH_SECRET_MANAGER> 로 바꾸세요」를 전역으로 찍었는데,
+#   그 면제를 상속하는 것은 scan_pattern 6개뿐이고 **개인키 검사에는 없다**(#58 에서
+#   회귀로 제거했다 — 의도된 상태다). 즉 안내가 7개 중 6개에서만 참이었다.
+#
+#   ⚠ 이 거짓이 실제 사고를 냈다. 안내대로 했는데 개인키에서만 안 먹으니 그 탈출구가
+#   없는 것이 결함처럼 보였고, #58 에서 화이트리스트를 되살렸다가 **진짜 키 파일이
+#   통과하는 회귀**로 잡혔다. 고칠 것은 게이트가 아니라 **메시지**다 (#66).
+placeholder_found=0
+pk_found=0
+
 # ── ① .env 실파일 스테이징 검사 ────────────────────────────────
 for f in $files; do
   base=$(basename "$f")
@@ -205,19 +217,34 @@ scan_pattern() {
   local regex="$3"
   local f="$4"
 
+  # $5: 플레이스홀더 면제를 줄 것인가 (기본 yes). 🔴 「키 하나 = 줄 하나」가 성립하는
+  #     검사에만 준다 — 아래 Private Key (JSON) 이 그 반례다.
+  local allow_placeholder="${5:-yes}"
+
   local hits
   # 🕳 LC_ALL=C 가 **면제를 넓히는** 유일한 경로다 (#75 리뷰).
   #   한 줄이 `진짜토큰 → 0xE9 → 마커` 순서면, 이전에는 마커 매칭이 버려져 위반으로
-  #   **찍혔고** 지금은 면제된다. 그러나 그 차단은 이 PR 이 고치는 버그의 **부작용**이었고,
-  #   지금 동작이 #66 이 정한 「면제는 줄 단위」 그대로다.
-  #   ⚠ 키 파일 포맷에는 닿지 않는다 — PEM·SA JSON 검사는 이 면제를 받지 않는다.
-  hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
+  #   **찍혔고** 지금은 면제된다. 그러나 그 차단은 #75 가 고치는 버그의 **부작용**이었고,
+  #   지금 동작이 이 함수가 정한 「면제는 줄 단위」 그대로다.
+  #   ⚠ `allow_placeholder = no` 인 검사에는 애초에 닿지 않는다 — 아래 분기가 면제를
+  #     주지 않으므로, 키 파일 포맷(PEM · SA JSON)은 이 경로와 무관하다.
+  if [ "$allow_placeholder" = "yes" ]; then
+    hits=$(read_file "$f" | grep -nE "$regex" | grep -v '<REPLACE_WITH_SECRET_MANAGER>' || true)
+  else
+    hits=$(read_file "$f" | grep -nE "$regex" || true)
+  fi
   if [ -n "$hits" ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       local lineno="${line%%:*}"
       violations="${violations}\n  ❌ ${label} — ${f}:${lineno}\n     → ${advice}"
       found=$((found+1))
+      # 면제를 안 주는 검사는 플레이스홀더 안내도 받지 않는다 — 없는 경로를 안내하지 않는다
+      if [ "$allow_placeholder" = "yes" ]; then
+        placeholder_found=1
+      else
+        pk_found=1
+      fi
     done <<< "$hits"
   fi
 }
@@ -266,18 +293,25 @@ for f in $files; do
   # GCP 서비스계정 키 JSON — 공개 저장소에 가장 흔히 커밋되는 키 「파일」 포맷이다.
   # 헤더가 "private_key": " 뒤에 오므로 아래 줄 단위 검사가 놓친다(대시 앞이 따옴표다).
   #
-  # ⚠ 이 패턴은 scan_pattern 을 쓰므로 <REPLACE_WITH_SECRET_MANAGER> 면제를 상속한다.
-  #   아래 PEM 검사에서 그 면제를 뺀 이유(줄 하나 = 시크릿의 머리)가 여기는 해당하지
-  #   않는다 — GCP SA JSON 은 키 값이 한 줄에 다 들어 있어 「줄 하나 = 시크릿 전체」다.
-  #   🕳 단 그것은 **포맷팅에 기댄 전제**다. pretty-printer 가 값을 줄바꿈하면 깨지고,
-  #   그때는 이 패턴 자체가 헤더 줄만 보게 된다. 실측으로 그 변종은 지금도 놓친다.
+  # 🔴 이 검사는 플레이스홀더 면제를 **받지 않는다** (5번째 인자 no).
+  #
+  #   전에는 scan_pattern 을 쓴다는 이유로 면제를 상속했고, 근거는 「GCP SA JSON 은 키 값이
+  #   한 줄에 다 들어 있어 줄 하나 = 시크릿 전체」였다. **그 전제가 면제와 맞물리면 뒤집힌다.**
+  #
+  #   🕳 실측으로 확인한 우회 (#66) — minify 된 SA JSON 은 모든 필드가 한 줄이므로
+  #   **private_key 는 진짜 값 그대로 두고 다른 필드 하나만 <REPLACE_WITH_SECRET_MANAGER>
+  #   로 바꾸면 줄 전체가 면제**되어 키가 통과했다. 면제가 줄 단위라 생긴 구멍이다.
+  #   PEM 검사에서 면제를 뺀 이유(#58)가 여기에도 그대로 성립했던 것이다.
+  #
+  #   🕳 남은 한계 — **포맷팅에 기댄 전제**는 여전하다. pretty-printer 가 값을 줄바꿈하면
+  #   이 패턴이 헤더 줄만 보게 된다. 실측으로 그 변종은 지금도 놓친다.
   #
   # 덤 — 한 줄 임베드({"private_key":"-----BEGIN…"})도 같이 잡힌다. 아래 줄 단위
   # 검사가 「의도적으로 안 잡는다」고 적은 그 형태인데, 여기서 넓게 잡히는 것은
   # 더 막는 방향이라 그대로 둔다.
   scan_pattern "Private Key (JSON)" \
     "서비스계정 키 파일은 저장소에 두지 않습니다. Secret Manager 또는 Workload Identity 를 쓰세요." \
-    '"private_key"[[:space:]]*:[[:space:]]*"-+ ?BEGIN' "$f"
+    '"private_key"[[:space:]]*:[[:space:]]*"-+ ?BEGIN' "$f" no
 
   # 개인키는 별도 처리 (하이픈으로 시작하는 정규식이 grep 인자로 오해되는 것을 피한다)
   # ⚠ PRIVATE KEY 뒤에 곧바로 대시를 요구하면 PGP 가 통째로 빠져나간다 —
@@ -342,6 +376,7 @@ for f in $files; do
       lineno="${line%%:*}"
       violations="${violations}\n  ❌ Private Key — ${f}:${lineno}\n     → 개인키는 저장소에 두지 않습니다. *.pem·*.key 는 .gitignore 대상이고, 값은 Secret Manager 로 주입합니다."
       found=$((found+1))
+      pk_found=1
     done <<< "$pk_hits"
   fi
 done
@@ -351,9 +386,29 @@ if [ "$found" -gt 0 ]; then
   printf "%b\n" "$violations"
   echo ""
   echo "조치 방법:"
-  echo "  1. 실제 값을 <REPLACE_WITH_SECRET_MANAGER> 플레이스홀더로 바꾸고 .env.example 에만 남깁니다."
-  echo "  2. 실행 시 값은 환경변수 또는 Secret Manager 에서 주입합니다."
-  echo "  3. 이미 유출된 크리덴셜은 파일을 지우는 것으로 끝나지 않습니다 — 즉시 폐기·재발급하세요."
+  echo "  1. 값을 지우고 실행 시 환경변수 또는 Secret Manager 에서 주입합니다."
+  echo "  2. 이미 유출된 크리덴셜은 파일을 지우는 것으로 끝나지 않습니다 — 즉시 폐기·재발급하세요."
+
+  # 🔴 아래 둘은 **걸린 검사에 따라서만** 찍는다. 안내가 참인 범위를 넘지 않게 한다 (#66).
+  if [ "$placeholder_found" -eq 1 ]; then
+    echo ""
+    echo "  토큰·키 값 검사에 걸린 건:"
+    echo "    값을 <REPLACE_WITH_SECRET_MANAGER> 로 바꾸면 통과합니다 (.env.example 에만 남깁니다)."
+    echo "    ⚠ 면제는 **줄 단위**입니다 — 그 줄에 플레이스홀더가 있으면 같은 줄의 진짜 값도"
+    echo "      함께 면제됩니다. 다른 필드가 아니라 **그 값 자체**를 바꾸세요."
+  fi
+
+  if [ "$pk_found" -eq 1 ]; then
+    echo ""
+    echo "  ⚠ 개인키 검사에는 플레이스홀더 경로가 없습니다 — 그것이 의도입니다."
+    echo "    플레이스홀더 면제는 한때 있었고, 그 때문에 **진짜 키 파일이 통과했습니다**(#58)."
+    echo "    키 파일이라면: 스테이징에서 빼고 .gitignore 에 넣은 뒤 그 키를 폐기·재발급하세요."
+    echo "    문서의 예시라면(보호할 값이 없다면): 헤더를 줄 시작에서 떼어 놓으세요."
+    echo "      쓸 수 있는 것 — │ 접두 · {@code …} · 코드 펜스 안의 다른 접두."
+    echo "      ⚠ 인용 기호(>)·목록(- *)은 안 됩니다. 이 검사가 그것들까지 잡습니다."
+    echo "    어느 쪽도 아니면 이슈로 올려 주세요 — 화이트리스트를 되살리는 것은 답이 아닙니다."
+  fi
+
   echo ""
   echo "  (grep: ${GREP_IMPL} · sed: ${SED_IMPL} · 상속 로케일: ${INHERITED_LOCALE})"
   exit 1

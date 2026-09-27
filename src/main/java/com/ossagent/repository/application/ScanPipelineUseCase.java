@@ -104,7 +104,7 @@ public class ScanPipelineUseCase {
         long policyStart = System.nanoTime();
         ScanTarget target;
         try {
-            target = repositoryPolicy.analyzeIfAbsent(repositoryId);
+            target = repositoryPolicy.ensurePolicy(repositoryId);
         } catch (GitHubRateLimitException e) {
             stageDone(PipelineStage.POLICY, StageOutcome.SKIPPED, policyStart);
             // 🔴 지연이지 실패가 아니다. analyze() 의 catch 는 LlmTransientException 뿐이라

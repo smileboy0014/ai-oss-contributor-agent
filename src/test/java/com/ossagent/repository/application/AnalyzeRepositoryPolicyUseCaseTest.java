@@ -9,6 +9,8 @@ import com.ossagent.agent.domain.LlmTransientException;
 import com.ossagent.repository.adapter.out.persistence.OssRepositoryRepository;
 import com.ossagent.repository.adapter.out.persistence.RepositoryPolicyRepository;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
+import com.ossagent.repository.domain.DocumentFingerprint;
+import com.ossagent.repository.domain.PolicyDocumentFingerprints;
 import com.ossagent.repository.domain.FakeContributionRuleInterpreter;
 import com.ossagent.repository.domain.FakePolicyDocumentSource;
 import com.ossagent.repository.domain.FakeRepositorySource;
@@ -21,6 +23,9 @@ import com.ossagent.repository.domain.RuleReading;
 import com.ossagent.repository.domain.ScrubbedRules;
 import com.ossagent.repository.domain.UnreadableReason;
 import com.ossagent.support.testing.AgentIntegrationTest;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayNameGeneration;
@@ -36,6 +41,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 @AgentIntegrationTest
 @DisplayNameGeneration(DisplayNameGenerator.ReplaceUnderscores.class)
 class AnalyzeRepositoryPolicyUseCaseTest {
+
+    /** 기존 행을 직접 심을 때만 쓴다 — UseCase 는 주입된 Clock 을 쓴다. */
+    private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-27T00:00:00Z"),
+            ZoneOffset.UTC);
 
     @Autowired
     private AnalyzeRepositoryPolicyUseCase useCase;
@@ -223,23 +232,126 @@ class AnalyzeRepositoryPolicyUseCaseTest {
     }
 
     @Test
-    void 이미_판정이_선_저장소를_보류로_되돌리지_않는다_S5() {
-        documents.givenRead("CONTRIBUTING.md", "기여 방법");
-        interpreter.given(allowed());
-        useCase.analyze(repositoryId);
+    void 지문_기록이_없는_기존_정책은_강등하지_않는다_S5() {
+        // 🔴 지문 기록 이전에 만들어진 행 — 비교 기준이 없다.
+        //    이것을 「바뀌었다」로 읽으면 #68 을 배포하는 순간 모든 저장소가 일괄 보류로 떨어진다
+        policies.save(RepositoryPolicy.analyzed(
+                repositories.findById(repositoryId).orElseThrow(), allowed(), CLOCK));
 
-        // 나중에 문서가 상한을 넘었다 — 영구 실패다
-        documents.reset().givenUnreadable("CONTRIBUTING.md", UnreadableReason.TRUNCATED);
-        interpreter.reset();
+        documents.givenUnreadable("CONTRIBUTING.md", UnreadableReason.UNKNOWN);
 
         RepositoryPolicy policy = useCase.analyze(repositoryId).orElseThrow();
 
         assertThat(policy.allowsContribution())
-                .as("이미 확인한 판정을 지울 이유가 없다. 되돌리면 사람이 풀어야 하는 상태가 된다 (#24 미구현)")
+                .as("비교 기준이 없으면 「바뀌었다」를 주장할 수 없다 — 기존 판정을 유지한다")
                 .isTrue();
         assertThat(policies.findAll())
                 .as("UNIQUE(repository_id) 가 있다 — 새 행을 만들면 제약 위반으로 터진다")
                 .hasSize(1);
+    }
+
+    @Test
+    void 규약이_바뀌었는데_못_읽으면_보류로_강등한다_S5() {
+        // ① 읽었다 → 금지 문구 없음 → 허용
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        // ②③ 저장소가 문서를 고쳤고, 그 결과 우리 상한을 넘어 판정에 쓸 수 없게 됐다.
+        //     🔴 내용을 받긴 했으므로 **바뀌었다는 사실은 안다** — 그것이 이 이슈의 요점이다
+        documents.reset().givenUnreadableWithFingerprint(
+                "CONTRIBUTING.md", UnreadableReason.TRUNCATED, "기여 방법 + AI 생성 기여 금지");
+        interpreter.reset();
+
+        RepositoryPolicy policy = useCase.analyze(repositoryId).orElseThrow();
+
+        // ④⑤ 판정이 TRUE 로 남으면 우리는 계속 Draft PR 을 만든다 — 아무도 모르는 채로
+        assertThat(policy.isAiContributionUndetermined())
+                .as("🔴 바뀐 것을 관측했는데 판정이 서지 않았다. 통과시키면 S-5 위반이 진행된다")
+                .isTrue();
+        assertThat(policy.getPendingReason())
+                .as("「아무도 모르는 채로 남지 않는다」 — 어느 경로가 왜 그런지가 남아야 사람이 푼다")
+                .contains("CONTRIBUTING.md")
+                .contains("TRUNCATED");
+        assertThat(policies.findAll()).hasSize(1);
+    }
+
+    @Test
+    void 읽던_문서를_이제_못_읽으면_보류로_강등한다_S5() {
+        // 🔴 1MB 초과 형태 — GitHub 이 본문을 주지 않아 **지문조차 없다.**
+        //    「양쪽에 지문이 있을 때만 바뀌었다고 한다」는 규칙만으로는 이 형태를 놓친다
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        documents.reset().givenUnreadable("CONTRIBUTING.md", UnreadableReason.UNKNOWN);
+        interpreter.reset();
+
+        RepositoryPolicy policy = useCase.analyze(repositoryId).orElseThrow();
+
+        assertThat(policy.isAiContributionUndetermined())
+                .as("판정 근거로 삼았던 문서를 이제 확인할 수 없다 — 낡은 판정을 유지하지 않는다")
+                .isTrue();
+        assertThat(policy.getPendingReason()).contains("CHANGED_UNREADABLE");
+    }
+
+    @Test
+    void 일시적으로_못_읽으면_강등하지_않는다_S5() {
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        // 🔴 5xx 는 한 시간 뒤면 풀린다. 이것으로 강등하면 정상 운영 상황이
+        //    사람이 풀어야 하는 보류가 된다 — #7 이 세운 규칙을 뒤집지 않는다
+        documents.reset().givenUnreadable("CONTRIBUTING.md", UnreadableReason.SERVER_ERROR);
+        interpreter.reset();
+
+        assertThat(useCase.analyze(repositoryId))
+                .as("아무것도 쓰지 않고 중단한다 — 다음 스캔이 다시 시도한다")
+                .isEmpty();
+        assertThat(policies.findByRepositoryId(repositoryId).orElseThrow().allowsContribution())
+                .isTrue();
+    }
+
+    @Test
+    void 지문이_같으면_LLM_을_부르지_않는다() {
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        interpreter.reset().given(allowed());
+        useCase.analyze(repositoryId);
+
+        assertThat(interpreter.calls())
+                .as("🔴 비싼 것은 LLM 판정이다. 건너뛰지 못하면 매 스캔 재확인이 성립하지 않고, "
+                        + "그러면 「한 번 허용이면 영원히 허용」으로 되돌아간다")
+                .isEmpty();
+    }
+
+    @Test
+    void 못_읽던_문서가_읽히면_다시_판정한다_S5() {
+        // 기준에 지문이 없던 필수 경로가 이번에 읽혔다. 「바뀌었다」도 「그대로다」도 아니다 —
+        // 🔴 그대로로 취급해 LLM 을 건너뛰면 그 문서의 금지 문구를 한 바퀴 놓친다
+        documents.givenRead("CONTRIBUTING.md", "기여 방법")
+                .givenUnreadable("AGENTS.md", UnreadableReason.UNKNOWN);
+        interpreter.given(allowed());
+        policies.save(RepositoryPolicy.analyzed(
+                repositories.findById(repositoryId).orElseThrow(), allowed(),
+                PolicyDocumentFingerprints.parse(
+                        "CONTRIBUTING.md=" + DocumentFingerprint.of("기여 방법").value()),
+                CLOCK));
+
+        documents.reset()
+                .givenRead("CONTRIBUTING.md", "기여 방법")
+                .givenRead("AGENTS.md", "AI 생성 기여 금지");
+        interpreter.reset().given(forbidden());
+
+        useCase.analyze(repositoryId);
+
+        assertThat(policies.findByRepositoryId(repositoryId).orElseThrow()
+                .isAiContributionForbidden())
+                .as("새로 읽힌 경로의 금지 문구가 반영되어야 한다")
+                .isTrue();
     }
 
     @Test
@@ -398,5 +510,81 @@ class AnalyzeRepositoryPolicyUseCaseTest {
                 .isInstanceOf(ContributionNotAllowedException.class);
         assertThatThrownBy(() -> useCase.clearanceFor(repositoryId))
                 .isInstanceOf(ContributionNotAllowedException.class);
+    }
+
+    @Test
+    void 사람이_해소한_판정은_재분석이_허용으로_되돌리지_않는다_그리고_스캔을_깨뜨리지도_않는다() {
+        // 🔴 #24 가 「사람이 해소한 판정을 재분석이 허용으로 되돌리지 않는다」를 엔티티 예외로
+        //    고정해 뒀다. 그 예외가 스캔 파이프라인까지 올라가면 POLICY 단계가 FAILED 가 되어
+        //    「거부」가 「스캔 전체 실패」로 나타난다. 지금까지는 analyze() 가 불리지 않아
+        //    도달 불가였고, #68 이 그 경로를 연다
+        RepositoryPolicy resolved = RepositoryPolicy.pending(
+                repositories.findById(repositoryId).orElseThrow(), "AGENTS.md=UNKNOWN",
+                PolicyDocumentFingerprints.parse(
+                        "CONTRIBUTING.md=" + DocumentFingerprint.of("옛 내용").value()),
+                CLOCK);
+        resolved.resolvePending(true, "문서를 직접 읽었고 금지 문구가 없다", CLOCK);
+        policies.save(resolved);
+
+        documents.givenRead("CONTRIBUTING.md", "새 내용");
+        interpreter.given(allowed());
+
+        RepositoryPolicy after = useCase.analyze(repositoryId).orElseThrow();
+
+        assertThat(after.allowsContribution()).isTrue();
+        assertThat(after.isHumanResolved())
+                .as("자동이 사람 판단을 다시 쓰지 않는다 — 판정 출처가 그대로 사람이어야 한다")
+                .isTrue();
+        assertThat(after.fingerprints().changedRequiredPaths(
+                PolicyDocumentFingerprints.parse(
+                        "CONTRIBUTING.md=" + DocumentFingerprint.of("새 내용").value())))
+                .as("지문을 갱신하지 않으면 매 스캔 같은 변경을 다시 발견해 LLM 을 영원히 태운다")
+                .isEmpty();
+    }
+
+    @Test
+    void 사람이_해소하면_같은_문서로_다시_강등되지_않는다_Q8() {
+        documents.givenRead("CONTRIBUTING.md", "기여 방법");
+        interpreter.given(allowed());
+        useCase.analyze(repositoryId);
+
+        documents.reset().givenUnreadableWithFingerprint(
+                "CONTRIBUTING.md", UnreadableReason.TRUNCATED, "커진 문서");
+        interpreter.reset();
+        useCase.analyze(repositoryId);
+
+        // 사람이 문서를 직접 확인하고 풀었다
+        RepositoryPolicy pending = policies.findByRepositoryId(repositoryId).orElseThrow();
+        pending.resolvePending(true, "브라우저로 전문을 확인했고 금지 문구가 없다", CLOCK);
+        policies.save(pending);
+
+        // 다음 스캔 — 문서는 여전히 상한을 넘지만 **내용은 그대로다**
+        RepositoryPolicy after = useCase.analyze(repositoryId).orElseThrow();
+
+        assertThat(after.allowsContribution())
+                .as("🔴 같은 문서로 다시 강등하면 사람의 해소가 무력화되고 보류가 영구 루프가 된다")
+                .isTrue();
+    }
+
+    @Test
+    void 판정을_유지하는_경우에도_비교_기준은_세운다_S5() {
+        // 🔴 필수 경로 하나가 계속 안 읽히는 저장소. 판정만 유지하고 돌려보내면
+        //    비교 기준이 영영 서지 않아, **읽히는 다른 문서가 바뀌어도 탐지되지 않는다** —
+        //    「낡은 판정이 굳는다」가 다른 모양으로 남는다
+        policies.save(RepositoryPolicy.analyzed(
+                repositories.findById(repositoryId).orElseThrow(), allowed(), CLOCK));
+
+        documents.givenRead("CONTRIBUTING.md", "기여 방법")
+                .givenUnreadable("AGENTS.md", UnreadableReason.UNKNOWN);
+
+        RepositoryPolicy after = useCase.analyze(repositoryId).orElseThrow();
+
+        assertThat(after.allowsContribution()).isTrue();
+        assertThat(after.fingerprints().get("CONTRIBUTING.md"))
+                .as("읽은 문서의 지문은 남아야 다음 변경을 잡을 수 있다")
+                .isPresent();
+        assertThat(after.getDocumentsCheckedAt())
+                .as("「마지막으로 확인한 시각」이 전진해야 「모르는 상태가 오래됐다」를 구분할 수 있다")
+                .isNotNull();
     }
 }

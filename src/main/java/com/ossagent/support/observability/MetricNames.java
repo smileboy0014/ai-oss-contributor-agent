@@ -55,6 +55,14 @@ public final class MetricNames {
     /** 이슈 분석의 <b>건당</b> 결과. 태그: {@code outcome} */
     public static final String ANALYSIS_OUTCOME = "ossagent.analysis.outcome";
 
+    /**
+     * 규약 문서 재확인 결과 — 이슈 #68. 태그: {@code outcome}
+     *
+     * <p>🔴 {@code CHANGED_UNVERIFIABLE} 이 0 이 아니면 <b>S-5 위반이 진행 중일 수 있다.</b>
+     * 대상 저장소가 규약을 바꿨는데 우리가 그 문서를 읽지 못한 상태다.
+     */
+    public static final String POLICY_DOCUMENTS = "ossagent.policy.documents";
+
     /** 후보 상태 분포 — 누적이 아니라 <b>현재 값</b>이다. 태그: {@code status} */
     public static final String CANDIDATE_COUNT = "ossagent.candidate.count";
 

@@ -5,6 +5,8 @@ import com.github.dockerjava.core.DefaultDockerClientConfig;
 import com.github.dockerjava.core.DockerClientImpl;
 import com.github.dockerjava.zerodep.ZerodepDockerHttpClient;
 import com.ossagent.agent.adapter.out.sandbox.SandboxInstanceId;
+import com.ossagent.agent.application.SandboxPipeline;
+import com.ossagent.agent.domain.CodeSandbox;
 import com.ossagent.agent.adapter.out.sandbox.SandboxProperties;
 import com.ossagent.support.ExternalAdapter;
 import java.io.IOException;
@@ -87,6 +89,24 @@ public class SandboxConfig {
                         properties.workspaceRoot(), e);
             }
         };
+    }
+
+    /**
+     * 워밍 → 씨딩 → 실행 오케스트레이터 — #18 B4.
+     *
+     * <p>🔴 <b>여기서 조립하는 이유</b> — {@link SandboxPipeline} 은 {@code application} 에
+     * 있고 설정값({@code sandbox.*})은 어댑터 패키지의 record 가 들고 있다. 파이프라인이
+     * 그것을 직접 import 하면 <b>의존이 바깥으로 뒤집힌다</b>(규율 ①). 조립만 하는 이 자리가
+     * 양쪽을 아는 유일한 지점이다 — 파이프라인이 받는 것은 <b>값</b>뿐이다.
+     *
+     * <p>⚠ 이 설정은 {@code @ExternalAdapter} 라 대역 프로필에서 통째로 빠진다.
+     * 즉 <b>테스트 컨텍스트에는 이 빈이 없다</b> — 쓰는 쪽(#19)은 {@code ObjectProvider} 로
+     * 받아 없으면 착수하지 않는다. {@code ImplementCandidateUseCase} 가 같은 방식이다.
+     */
+    @Bean
+    public SandboxPipeline sandboxPipeline(CodeSandbox sandbox, SandboxProperties properties) {
+        return new SandboxPipeline(sandbox, properties.defaultImage(),
+                properties.warmLimits(), properties.executeLimits());
     }
 
     /**

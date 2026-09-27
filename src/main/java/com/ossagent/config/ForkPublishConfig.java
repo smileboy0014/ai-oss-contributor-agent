@@ -1,8 +1,11 @@
 package com.ossagent.config;
 
 import com.ossagent.pullrequest.adapter.out.github.ForkPublishProperties;
+import com.ossagent.pullrequest.adapter.out.github.GitHubForkPublisher;
 import com.ossagent.pullrequest.adapter.out.github.GitHubWriteClient;
+import com.ossagent.pullrequest.domain.ForkPublisher;
 import com.ossagent.support.ExternalAdapter;
+import com.ossagent.support.github.GitHubApiClient;
 import com.ossagent.support.github.GitHubCredentials;
 import com.ossagent.support.github.GitHubErrorTranslator;
 import com.ossagent.support.github.GitHubProperties;
@@ -42,5 +45,18 @@ public class ForkPublishConfig {
             GitHubErrorTranslator errorTranslator, GitHubRateLimitBudget budget, Clock clock) {
         return new GitHubWriteClient(GitHubClientConfig.gitHubRestClient(properties), credentials,
                 properties, errorTranslator, budget, forkProperties.owner(), clock);
+    }
+
+    /**
+     * 🔴 <b>이 빈에 호출자가 없다 — 의도다.</b>
+     *
+     * <p>배선은 #23 이 세 번째 승인 게이트({@code POST /api/candidates/{id}/pull-request})
+     * <b>뒤에</b> 놓는다. 지금 스케줄러나 {@code implement} 경로에서 부르게 하면 그 시점에
+     * S-6 위반이다 — #16 의 {@code PlanImplementationUseCase.build()} 와 같은 처리다.
+     */
+    @Bean
+    public ForkPublisher forkPublisher(GitHubApiClient readClient, GitHubWriteClient writeClient,
+            ForkPublishProperties forkProperties, Clock clock) {
+        return new GitHubForkPublisher(readClient, writeClient, forkProperties, clock);
     }
 }

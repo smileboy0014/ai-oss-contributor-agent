@@ -42,6 +42,26 @@ public record SandboxCacheVolume(String name) {
      * <p>⚠ <b>좌표를 그대로 잇지 않는다.</b> 허용 문자만 남기고 나머지는 {@code -} 로 접는다.
      * 접은 결과가 비면 거부한다 — 「전부 걸러져서 접두사만 남은」 이름은 모든 저장소가
      * 같은 볼륨을 공유하게 만든다.
+     *
+     * <h2>🔴 접는 것만으로는 <b>다른 저장소가 같은 볼륨</b>을 쓴다 (2026-09-27 · #18 리뷰)</h2>
+     *
+     * <p>소문자화 + 비영숫자를 {@code -} 로 접기 + {@code -} 로 잇기이므로 <b>서로 다른
+     * 좌표가 같은 이름</b>이 된다.
+     *
+     * <table border="1">
+     *   <caption>실제로 충돌하는 짝</caption>
+     *   <tr><th>좌표 A</th><th>좌표 B</th><th>접은 결과</th></tr>
+     *   <tr><td>{@code a-b/c}</td><td>{@code a/b-c}</td><td>{@code a-b-c}</td></tr>
+     *   <tr><td>{@code Foo/Bar}</td><td>{@code foo/bar}</td><td>{@code foo-bar}</td></tr>
+     * </table>
+     *
+     * <p>🔴 <b>「볼륨 이름이 겹친다」로 끝나지 않는다.</b> {@code SandboxPipeline} 이
+     * 「이 저장소는 준비됐다」를 <b>볼륨 이름으로</b> 기억하므로, B 가 A 의 워밍으로
+     * 준비됐다고 표시되어 <b>A 의 캐시로 오프라인 실행</b>을 한다. 그 결과가 바로
+     * 그 파이프라인이 막으려던 <b>「코드는 멀쩡한데 테스트 실패」</b>다.
+     *
+     * <p>그래서 <b>원래 좌표의 지문</b>을 붙인다. 읽을 수 있는 슬러그는 남기되,
+     * 같고 다름은 지문이 판정한다 — 접는 규칙이 무엇을 뭉개든 무관해진다.
      */
     public static SandboxCacheVolume forRepository(String owner, String name) {
         String slug = sanitize(owner) + "-" + sanitize(name);
@@ -49,7 +69,40 @@ public record SandboxCacheVolume(String name) {
             throw new SandboxPermanentException(
                     "저장소 좌표에서 볼륨 이름을 만들 수 없다 — 전역 공유가 되어선 안 된다");
         }
-        return new SandboxCacheVolume(PREFIX + slug);
+        if (slug.length() > MAX_SLUG_LENGTH) {
+            slug = slug.substring(0, MAX_SLUG_LENGTH);
+        }
+        return new SandboxCacheVolume(PREFIX + slug + "-" + fingerprintOf(owner, name));
+    }
+
+    /** 슬러그 상한. 접두사 + 슬러그 + {@code -} + 지문이 볼륨 이름 규칙(127자) 안에 들어가야 한다 */
+    private static final int MAX_SLUG_LENGTH = 80;
+
+    /** 지문 길이(16진). 충돌 확률이 저장소 수 규모에서 무시할 만하다 */
+    private static final int FINGERPRINT_LENGTH = 12;
+
+    /**
+     * 🔴 <b>접기 전의 좌표</b>로 만든다 — 접은 뒤 만들면 충돌을 그대로 물려받는다.
+     *
+     * <p>구분자로 {@code /} 를 쓴다. 좌표에 {@code /} 가 들어올 수 없으므로
+     * ({@code RepositoryCoordinates} 가 막는다) {@code a-b/c} 와 {@code a/b-c} 의
+     * 입력 문자열이 서로 달라진다.
+     */
+    private static String fingerprintOf(String owner, String name) {
+        String canonical = (owner == null ? "" : owner) + "/" + (name == null ? "" : name);
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(FINGERPRINT_LENGTH);
+            for (int i = 0; hex.length() < FINGERPRINT_LENGTH; i++) {
+                hex.append(String.format("%02x", digest[i]));
+            }
+            return hex.substring(0, FINGERPRINT_LENGTH);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            // SHA-256 은 모든 JVM 이 제공한다. 없으면 「대충 이름을 짓는다」가 아니라 멈춘다 —
+            // 여기서 물러서면 충돌 가능한 이름이 조용히 돌아간다
+            throw new SandboxPermanentException("볼륨 지문을 만들 수 없다");
+        }
     }
 
     /** 컨테이너 안에서의 마운트 지점. 🔴 볼륨 루트가 곧 {@code modules-2} 의 부모다. */

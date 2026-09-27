@@ -2,6 +2,7 @@ package com.ossagent.config;
 
 import com.ossagent.agent.adapter.out.sandbox.SandboxProperties;
 import com.ossagent.agent.domain.CodeSandbox;
+import com.ossagent.agent.domain.DependencyCache;
 import com.ossagent.candidate.adapter.out.sandbox.SandboxChangeVerifier;
 import com.ossagent.candidate.domain.ChangeVerifier;
 import org.springframework.context.annotation.Bean;
@@ -39,7 +40,8 @@ public class VerificationConfig {
      */
     @Bean
     @Profile("!fakes")
-    public ChangeVerifier changeVerifier(CodeSandbox sandbox, SandboxProperties properties) {
-        return new SandboxChangeVerifier(sandbox, properties);
+    public ChangeVerifier changeVerifier(CodeSandbox sandbox, DependencyCache dependencyCache,
+            SandboxProperties properties) {
+        return new SandboxChangeVerifier(sandbox, dependencyCache, properties);
     }
 }

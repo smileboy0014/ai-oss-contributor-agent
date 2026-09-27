@@ -42,6 +42,12 @@ dependencies {
     implementation(libs.docker.java.core)
     implementation(libs.docker.java.transport.zerodep)
 
+    // 대상 저장소 clone·브랜치·diff — #18. 여기서 push 는 하지 않는다(S-1 · #22 의 몫).
+    // 🕳 JGit 은 jar 안에 있으므로 safety-boundary-check.sh 와 HostExecutionAbsenceTest 가
+    //    **못 본다.** 두 가드가 초록인 것이 「프로세스를 안 띄운다」의 증거가 아니다 —
+    //    실측은 JGitProcessAbsenceTest 가 한다
+    implementation(libs.jgit)
+
     // 🔴 docker-java-core 가 끌고 오는 전이 의존이 낡았다 — guava 19.0(2016) ·
     //    commons-compress 1.21. 둘 다 알려진 취약점이 있는 버전이라 올려 고정한다.
     //    의존성을 들이는 것과 그 전이 의존을 방치하는 것은 별개다.

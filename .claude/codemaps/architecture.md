@@ -101,9 +101,11 @@ com.ossagent.{도메인}
 | GitHub — Draft PR | `DraftPrPublisher` (제안) | — | `pullrequest` | ❌ #23 — 🔴 `ForkPublisher` 와 **합치지 않는다**. 합치면 세 번째 승인 게이트가 사라진다 |
 | LLM — 전송 (1층) | `LanguageModel` · `PromptScrubber` · `AgentRunRecorder` | `AnthropicLanguageModel`(+`RecordingLanguageModel` 데코레이터) · `TokenRedactingPromptScrubber` · `RecordAgentRunUseCase`(candidate) | `agent` | ✅ **존재** (#10) |
 | LLM — 이슈 분석 (2층) | `IssueAnalyst` | `LlmIssueAnalyst` | **`candidate`** | ✅ **존재** (#11) — `LanguageModel` 위에 얹는다 |
-| LLM — 나머지 2층 | `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` (제안) | — | 소비자 도메인 | ❌ #16 · #18 · #20 |
+| LLM — 나머지 2층 | `ImplementationPlanner` · `CodingAgent` · `DiffReviewer` | `LlmImplementationPlanner`(#16) · `LlmCodingAgent`(#18) · `LlmDiffReviewer`(#20) | 소비자 도메인 | ✅ **셋 다 존재** |
 | Docker — 실행 (1층) | `CodeSandbox` | `DockerCodeSandbox` | `agent` | ✅ **존재** (#17) — 🔴 `SandboxCommand` 가 sealed 라 「네트워크 개방 + 대상 저장소 명령」이 **표현 불가능**하다 (S-3) |
-| Docker — 변경 검증 (2층) | `ChangeVerifier` | `SandboxChangeVerifier` | **`candidate`** | ✅ **존재** (#19) — `CodeSandbox` 위에 얹는다. 컴파일 → 테스트 → diff 를 돌리고 **첫 실패에서 멈춘다**.<br>⚠️ **선언은 #18 과 겹친다** — 먼저 머지되는 쪽이 남는다 |
+| Docker — 3단계 순서 | — (조율자) | `SandboxPipeline`(`agent/application`, #18) | `agent` | ✅ **존재** — 워밍 → 씨딩 → 실행. 🔴 **저장소당 워밍 1회**(프로세스 내 락). `CodeSandbox` 는 한 번에 한 명령이라 **순서를 아는 것이 없었다** |
+| Docker — 변경 검증 (2층) | `ChangeVerifier` | `SandboxChangeVerifier` | **`candidate`** | ✅ **존재** (#19) — 컴파일 → 테스트 → diff 를 돌리고 **첫 실패에서 멈춘다**.<br>🔴 **캐시를 채우는 단계를 부르지 않는다** — 워밍·씨딩 없이 `ExecuteCommand` 만 돈다. 빈 캐시로 오프라인 실행하면 의존성 해석 실패가 **「테스트 실패」로 오분류**된다 (Q-4) |
+| 대상 저장소 워크스페이스 | `TargetWorkspaceSource` | `JGitWorkspaceSource` | `agent` | ✅ **존재** (#18) — 익명 clone · **push 슬롯이 없다**(S-1) |
 | PostgreSQL | Spring Data 인터페이스 (완화 ②로 직접 주입) | `adapter/out/persistence` | 각 도메인 | 부분 |
 
 ### GitHub 접근의 읽기/쓰기 분리 — S-1 을 구조로 지킨다
@@ -158,7 +160,7 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | `issue` 수집 UseCase | ❌ | 능력(`IssueSource`)은 있다. 커서·지연·멱등 저장이 없다 — #8 |
 | **LLM 능력·어댑터** | ✅ | `LanguageModel`(agent/domain) + `AnthropicLanguageModel` — 송신 전 스크럽 필수(S-4) · 타임아웃·전송 재시도 명시 · 절단·거부는 예외 · **노출 빈은 기록 데코레이터 하나뿐** (#10) |
 | **LLM 토큰·비용 기록** | ✅ | `AgentRunRecorder`(agent/domain) ← `RecordAgentRunUseCase`(candidate/application). 실패도 남긴다 |
-| `agent` 샌드박스 | ❌ | 아직 없다 — #17 |
+| `agent` 샌드박스 | ✅ | `CodeSandbox` + `DockerCodeSandbox`(#17) · 3단계 오케스트레이터 `SandboxPipeline`(#18). 🔴 **명령은 화이트리스트 argv** — 대상 저장소 문자열이 그대로 실행되지 않는다 |
 | **`pullrequest` 도메인** | 부분 | ✅ Fork 확보·commit·push (#22) — **이 저장소에 처음 생긴 쓰기 경로**다. owner 어설션이 두 겹(`ForkRef` 값 타입 + `GitHubWriteClient` 쓰기 직전)이고, 후자가 유일한 방어다.<br>❌ Draft PR 생성은 #23.<br>🔴 **레이트리밋 예산을 읽기 클라이언트와 공유**한다(`GitHubRateLimitBudget`) — 갈리면 한쪽이 태운 예산을 다른 쪽이 모른다 |
 | Scheduler | ❌ | 없음 |
 | Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |

@@ -3,6 +3,7 @@ package com.ossagent.candidate.adapter.out.sandbox;
 import com.ossagent.agent.adapter.out.sandbox.SandboxProperties;
 import com.ossagent.agent.domain.BuildTool;
 import com.ossagent.agent.domain.CodeSandbox;
+import com.ossagent.agent.domain.DependencyCache;
 import com.ossagent.agent.domain.ExecuteCommand;
 import com.ossagent.agent.domain.SandboxCacheVolume;
 import com.ossagent.agent.domain.SandboxResult;
@@ -72,13 +73,24 @@ public class SandboxChangeVerifier implements ChangeVerifier {
     private static final List<String> GRADLE_LAUNCHERS = List.of("./gradlew", "gradlew", "gradle");
 
     private final CodeSandbox sandbox;
+    private final DependencyCache dependencyCache;
     private final SandboxProperties properties;
 
-    public SandboxChangeVerifier(CodeSandbox sandbox, SandboxProperties properties) {
-        if (sandbox == null || properties == null) {
-            throw new IllegalArgumentException("샌드박스와 설정은 필수다");
+    /**
+     * 🔴 {@link DependencyCache} 가 <b>선택이 아니다</b> — #18 배선.
+     *
+     * <p>실행 단계는 {@code network=none} 이고 캐시 볼륨을 읽기전용으로 문다. 아무도
+     * 채우지 않은 볼륨으로 돌리면 <b>의존성 해석 실패가 「빌드 실패」로 보고</b>되어
+     * 후보의 코드가 멀쩡한데 {@code FAILED} 가 된다. 없으면 <b>기동에서 막는다</b> —
+     * 그 고장은 런타임에 「테스트가 실패했다」로만 보여 발견이 늦다.
+     */
+    public SandboxChangeVerifier(CodeSandbox sandbox, DependencyCache dependencyCache,
+            SandboxProperties properties) {
+        if (sandbox == null || dependencyCache == null || properties == null) {
+            throw new IllegalArgumentException("샌드박스·의존성 캐시·설정은 필수다");
         }
         this.sandbox = sandbox;
+        this.dependencyCache = dependencyCache;
         this.properties = properties;
     }
 
@@ -141,8 +153,12 @@ public class SandboxChangeVerifier implements ChangeVerifier {
         }
         SandboxWorkspace workspace =
                 SandboxWorkspace.under(request.workspacePath(), properties.workspaceRoot());
-        SandboxCacheVolume cacheVolume = SandboxCacheVolume.forRepository(
-                request.coordinates().owner(), request.coordinates().name());
+        // 🔴 실행 **전에** 캐시를 준비한다 (Q-4 의 워밍 → 씨딩). 볼륨 이름을 여기서
+        //    따로 만들지 않고 **준비한 쪽이 돌려준 것**을 쓴다 — 따로 만들면
+        //    「A 를 준비하고 B 로 실행」이 가능해지고, 그것은 준비를 하고도 빈 캐시로
+        //    오프라인 실행하는 것과 같다
+        SandboxCacheVolume cacheVolume = dependencyCache.ensurePrepared(
+                workspace, request.coordinates(), buildTool, constraints.javaVersion());
 
         Context context = new Context(request, workspace, cacheVolume, buildTool);
         List<StageResult> stages = new ArrayList<>();

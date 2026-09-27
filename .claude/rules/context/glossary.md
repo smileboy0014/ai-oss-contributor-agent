@@ -64,7 +64,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `ContributionRuleInterpreter` | `LlmContributionRuleInterpreter` | 규약 판정. `LanguageModel` 위에 얹히는 2층 |
 | `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
 | `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
-| `CodeSandbox` | `DockerCodeSandbox` | 대상 저장소 코드를 **격리 컨테이너 안에서만** 실행. S-3 의 실행체 |
+| `CodeSandbox` | `DockerCodeSandbox` | 대상 저장소 코드를 **격리 컨테이너 안에서만** 실행. S-3 의 실행체. 🔴 **한 번에 한 명령**이고 순서는 모른다 — 그것은 `SandboxPipeline` 이 세운다 |
+| `TargetWorkspaceSource` | `JGitWorkspaceSource` | 대상 저장소를 **호스트에 체크아웃**하고 diff 를 뜬다. 🔴 **push 슬롯이 없다** — 능력에 자리가 없으면 어댑터가 만들 수 없다 (S-1) |
+| `CodingAgent` | `LlmCodingAgent` | 계획대로 코드를 만든다. `LanguageModel` 위 **2층**. 계획 밖 경로는 그 자리에서 거부한다 |
 | `ChangeVerifier` | `SandboxChangeVerifier` | 생성된 변경분을 샌드박스에서 검증. `CodeSandbox` 위에 얹히는 **2층**(#19). 🔴 **빌드 실패로 예외를 던지지 않는다** — 그것은 게이트가 작동한 모습이고 예외로 내보내면 호출자가 재시도 루프에서 삼킨다 |
 | `VerificationReport` | — | 검증 한 바퀴의 결과 **값**. 🔴 `passed()` 는 **모든 단계가 `PASSED`** 일 때만 참이다 — 「실패가 없으면 통과」로 적으면 「판정 불가」가 조용히 접힌다 |
 | `StageResult` | — | 단계 하나의 결과 **값**. compact 생성자가 빌드 출력 **스크럽을 강제**한다 (S-4) |
@@ -76,6 +78,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `PolicyClearance` | — | 구현 단계 **통행증** 값 타입. 〃 — 규율 ④의 값 타입 예외다. 🔴 `adapter/in` 경계를 넘지 않는다(외부가 주입하면 게이트가 껍데기가 된다) |
 | `IssueSnapshot` | — | 수집 시점의 이슈 원본 **값**. 영속 엔티티 `Issue` 와 다르다 |
 | `AnalyzableIssue` | — | 분석 단계로 넘기는 이슈 **값**. `issue` 가 소유하고 `candidate` 가 import 한다 — 규율 ④ |
+| `SandboxPipeline` | — | 워밍 → 씨딩 → 실행의 **순서를 세우는 것**. 능력이 아니라 `agent/application` 의 조율자다. 🔴 **저장소당 워밍 1회**(프로세스 내 락 — 다중 인스턴스에서는 성립하지 않는다) |
+| `TargetCommandLine` | — | 대상 저장소의 빌드 명령 **문자열 → argv**. 🔴 **화이트리스트**다 — 거부목록이 아니다. 모르는 런처·Maven 은 거부(Q-4) |
+| `WorkspaceDiff` | — | 워크스페이스의 변경분 — **본문 + 바뀐 경로 집합**. 경로 집합이 「계획 밖 파일을 건드렸는가」의 판정 근거다 |
 | `RepositoryTree` | — | 대상 저장소의 **경로 목록**. 내용이 없다. `truncated` 는 「못 본 것이 있다」이지 「없다」가 아니다 (#15) |
 | `RepositoryContext` | — | 저장소 분석의 산출물 — **고른 파일 + 왜 골랐나**. `repository` 가 소유하고 #16 이 받는다. 🔴 **영속화하지 않는다** |
 | `SelectedFile` | — | 컨텍스트에 실린 파일 1건. compact 생성자가 **스크럽을 강제**한다 (S-4) |

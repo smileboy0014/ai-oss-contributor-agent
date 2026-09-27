@@ -106,11 +106,18 @@ class ExternalTextScrubRegistryTest {
                     "completeAnalysis(...) — 이 필드에 대입하는 유일한 지점이고 거기서"
                             + " redact 한다. IssueAnalysis 가 1차로 거르지만 그 경로를 타지"
                             + " 않고 들어오는 값(역직렬화 등)을 위한 마지막 그물이다 (#11)")),
-            Map.entry("GeneratedChange.diff", new Decision(Mechanism.PENDING,
-                    "#18 — 대상 저장소 코드 조각이 그대로 담긴다. 저장소가 시크릿을"
-                            + " 커밋해 뒀으면 diff 에 실려 온다")),
+            // #18 이 머지되며 PENDING 에서 올라왔다 — 「쓰는 코드」가 이 이슈에서 생겼다.
+            // 낡은 PENDING 을 그대로 두면 이 표가 알리바이가 된다.
+            Map.entry("GeneratedChange.diff", new Decision(Mechanism.FORCED_POINT,
+                    "GeneratedChange.record(...) — 이 필드에 대입하는 유일한 지점이고"
+                            + " 거기서 redact 한다. 생성자는 protected 라 다른 경로가 없다."
+                            + " 대상 저장소 코드 조각이 그대로 담기므로 저장소가 시크릿을"
+                            + " 커밋해 뒀으면 diff 에 실려 온다 (#18)")),
+            // 🔴 여전히 PENDING 이다 — 담당이 #18 이 아니라 #19 였다.
+            //    검증 결과를 쓰는 코드가 그쪽에서 생긴다 (recordVerification)
             Map.entry("GeneratedChange.testResult", new Decision(Mechanism.PENDING,
-                    "#18 — 빌드·테스트 출력. 환경변수를 찍는 빌드 스크립트가 흔하다")),
+                    "#19 — 빌드·테스트 출력. 환경변수를 찍는 빌드 스크립트가 흔하다."
+                            + " #18 은 이 필드를 쓰지 않는다 — 생성 시점에는 검증 전이다")),
             Map.entry("GeneratedChange.reviewResult", new Decision(Mechanism.PENDING,
                     "#20 — LLM 리뷰 원문. 리뷰가 diff 를 인용하면 위 위험이 복제된다."
                             + " #20 이 DiffReview 값 타입을 세워 그 값은 이미 스크럽되지만,"
@@ -155,6 +162,13 @@ class ExternalTextScrubRegistryTest {
 
             // ── #16 구현 계획 — 전부 VALUE_TYPE. 영속되지 않지만 하류(#18 코딩 프롬프트)로
             //    다시 나가므로 방어 조건은 같다 ───────────────────────────────────
+            // 🔴 #18 코딩 산출 — 모델이 만든 파일 내용이다. 유입(SelectedFile)이 아니라 **산출** 방향이고,
+            //    이 값이 diff 로, 다시 GeneratedChange.diff 로 흘러간다
+            Map.entry("GeneratedFile.content", new Decision(Mechanism.VALUE_TYPE,
+                    "GeneratedFile compact 생성자가 redact 한다. String 을 그대로 받는"
+                            + " 생성 경로가 없다. 모델은 대상 저장소 코드를 컨텍스트로 받았고,"
+                            + " 그 저장소가 시크릿을 커밋해 뒀다면 되뱉을 수 있다 (#18)")),
+
             Map.entry("PlannedFile.intent", new Decision(Mechanism.VALUE_TYPE,
                     "PlannedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"
                             + " 경로가 없다. 계획 프롬프트에 대상 저장소 파일 내용이 실려"

@@ -514,6 +514,8 @@ class SecretScanScriptTest {
     private static ScanResult run(Path workingDir, Map<String, String> extraEnv, String... command)
             throws Exception {
         Path log = Files.createTempFile("secret-scan-out", ".log");
+        // 🔴 try 밖에 선언해 finally 가 반드시 데려가게 한다 — 아래 finally 주석
+        Process process = null;
         try {
             // 🕳 사유는 한 줄이어야 한다 — 훅은 위반 라인의 「바로 윗줄」만 본다. 이어짐 줄은 못 본다
             // safety-ok: 임시 디렉토리에서 git 플러밍과 우리 저장소의 .claude/scripts 만 돌린다. 대상 저장소 코드가 아니라 S-3 대상이 아니다
@@ -524,13 +526,17 @@ class SecretScanScriptTest {
             isolateGitConfig(builder.environment(), workingDir);
             builder.environment().putAll(extraEnv);
 
-            Process process = builder.start();
+            process = builder.start();
             if (!process.waitFor(60, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
                 throw new IllegalStateException("스크립트가 끝나지 않았습니다: " + String.join(" ", command));
             }
             return new ScanResult(process.exitValue(), Files.readString(log, StandardCharsets.UTF_8));
         } finally {
+            // 🔴 타임아웃 경로에만 두면 샌다 — SafetyBoundaryCheckScriptTest 와 같은 이유.
+            //    JVM 이 죽거나 스레드가 인터럽트되면 자식 셸이 **JVM 과 함께 죽지 않는다.**
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
             Files.deleteIfExists(log);
         }
     }

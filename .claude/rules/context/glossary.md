@@ -36,7 +36,8 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | **Candidate** | 분석을 통과해 기여 대상이 된 이슈. 상태머신의 주체 |
 | **Repository Analysis** | 이슈 키워드로 대상 저장소의 관련 소스·테스트를 좁혀 찾는 단계. 저장소 전체를 LLM 에 넣지 않는다 |
 | **Implementation Plan** | 수정할 파일과 방법. 검증(Validate)을 거쳐야 코딩으로 넘어간다 |
-| **Verification** | 컴파일 → 유닛 → 통합 → 포맷 → diff 검사. **샌드박스 안에서** 수행 |
+| **Verification** | 🔴 **컴파일 → 테스트 → diff 검사** 셋. **샌드박스 안에서** 수행(#19).<br>⚠️ 원래 「유닛 → 통합 → 포맷」까지 다섯이었다. **둘은 입력이 없어 뺐다** — 포맷 명령은 `RepositoryPolicy` 에 필드가 없어 하드코딩하면 대상 저장소 규약을 우리 어휘로 대체하는 것이고(S-5), 통합 테스트는 `testCommand` 가 하나뿐인데다 실행 단계가 `network=none` 이라 **정상 코드가 실패**한다.<br>**이름만 있는 칸을 두지 않는다** — 다음 사람이 채우려다 더 나쁜 것을 만든다 |
+| **판정 불가** (`UNDETERMINED`) | 🔴 검증 한 단계를 **판정할 근거가 없는** 상태(#19). 「통과」도 「실패」도 아니다 — 출력이 `sandbox.max-output-chars` 에서 잘려 「위반 없음」을 말할 수 없거나, 규약에서 **테스트 명령을 읽지 못했을 때**.<br>⚠️ **재시도하지 않는다** — 같은 입력에 같은 결과라 Q-6 예산만 태운다. `VerificationReport.hasUndetermined()` 가 그 분기점이다.<br>⚠️ **`SKIPPED` 와 다르다** — 그쪽은 「앞이 멈춰서 안 돌렸다」이고 앞의 실패가 이미 설명한다. 이것은 **아무도 설명하지 않는 공백**이라 사람이 본다 |
 | **AI Review** | 생성된 diff 에 대한 LLM 리뷰 — 빌드·테스트가 못 잡는 것(요구 충족·범위·관습·테스트 적절성)을 본다. 🔴 **판정은 셋**이다(`PASS`·`CHANGES_REQUESTED`·`UNDETERMINED`) — 「판정 불가」를 실패와 한 칸에 넣으면 고칠 수 없는 것에 재시도 예산을 태운다. 되돌릴지는 #21 이 정한다 |
 | **Draft PR** | 사용자 Fork 에서 원본으로 여는 **draft** 상태 PR. 여기서 자동화가 끝난다 |
 
@@ -64,6 +65,9 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `RecordingLanguageModel` | — | 기록 강제 **데코레이터**. 노출되는 `LanguageModel` 빈은 이것뿐이라 기록을 건너뛸 경로가 없다 |
 | `PromptScrubber` | `TokenRedactingPromptScrubber` | 송신 **직전** 프롬프트 시크릿 제거. S-4 에서 「밖으로 나가는 것」을 막는 유일한 방어 |
 | `CodeSandbox` | `DockerCodeSandbox` | 대상 저장소 코드를 **격리 컨테이너 안에서만** 실행. S-3 의 실행체 |
+| `ChangeVerifier` | `SandboxChangeVerifier` | 생성된 변경분을 샌드박스에서 검증. `CodeSandbox` 위에 얹히는 **2층**(#19). 🔴 **빌드 실패로 예외를 던지지 않는다** — 그것은 게이트가 작동한 모습이고 예외로 내보내면 호출자가 재시도 루프에서 삼킨다 |
+| `VerificationReport` | — | 검증 한 바퀴의 결과 **값**. 🔴 `passed()` 는 **모든 단계가 `PASSED`** 일 때만 참이다 — 「실패가 없으면 통과」로 적으면 「판정 불가」가 조용히 접힌다 |
+| `StageResult` | — | 단계 하나의 결과 **값**. compact 생성자가 빌드 출력 **스크럽을 강제**한다 (S-4) |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `IssueAnalyst` | `LlmIssueAnalyst` | 이슈의 기여 가능성 판정. `LanguageModel` 위에 얹히는 **2층**. 🔴 **관찰값만 돌려준다** — `REJECTED` 판정은 UseCase 몫이다 |
 | `RepositoryCoordinates` | — | `owner/name` 값 타입. `repository` 가 소유하고 다른 도메인이 import 한다 |

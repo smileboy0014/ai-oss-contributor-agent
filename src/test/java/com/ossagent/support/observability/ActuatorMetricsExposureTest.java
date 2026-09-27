@@ -30,6 +30,23 @@ import org.springframework.test.web.servlet.MockMvc;
  *
  * <p>Boot 가 URI <b>템플릿</b>으로 태깅한다는 것은 문서로 알려져 있지만,
  * <b>우리 설정에서 실제로 그런지</b>는 확인해야 아는 것이다. 주장 대신 테스트로 고정한다.
+ *
+ * <h2>🔴 HTTP 노출은 여기서 보지 않는다 — #74</h2>
+ *
+ * <p>#74 가 {@code management.server.port} 를 앱 포트에서 떼어 놨다. 포트가 갈리면
+ * Boot 는 actuator 를 <b>별도 자식 컨텍스트</b>에 올리는데, {@code @SpringBootTest} 의
+ * MOCK 환경은 웹 서버를 띄우지 않아 <b>그 자식 컨텍스트가 시작되지 않는다.</b>
+ * 그래서 MockMvc 로 {@code /actuator/metrics} 를 쳐도 <b>404</b> 다.
+ *
+ * <p>⚠️ <b>여기서 프로퍼티로 포트를 되돌리지 않았다.</b> 되돌리면 통과하지만,
+ * 그렇게 하면 <b>운영 설정에서 포트 분리를 지워도 이 테스트가 초록</b>이 된다 —
+ * 내가 넣은 값이 그것을 덮기 때문이다. 가드가 있다는 것과 가드가 그 입력에 닿는다는
+ * 것은 다른 말이다.
+ *
+ * <p>그래서 축을 갈랐다. 이 클래스는 <b>「무엇이 보이는가」(내용)</b>만 보고,
+ * <b>「어느 포트에 보이는가」(배선)</b>는 둘이 나눠 본다 —
+ * {@link ActuatorManagementPortTest} 가 <b>설정</b>을, 
+ * {@code ActuatorManagementPortIsolationTest} 가 <b>실제 서버를 띄워</b> 본다.
  */
 @AgentIntegrationTest
 @AutoConfigureMockMvc
@@ -68,23 +85,21 @@ class ActuatorMetricsExposureTest {
     }
 
     @Test
-    @DisplayName("우리 미터가 actuator 에 노출된다 — FR-1")
-    void 우리_미터가_노출된다() throws Exception {
+    @DisplayName("우리 미터가 레지스트리에 등록된다 — FR-1 (HTTP 노출은 IsolationTest 가 본다)")
+    void 우리_미터가_레지스트리에_등록된다() {
         // 게이트를 한 번 태워 미터를 만든다(기동 시점에는 아직 없을 수 있다)
         registry.counter(MetricNames.SAFETY_GATE,
                 MetricNames.TAG_CLAUSE, SafetyClause.S5.name(),
                 MetricNames.TAG_OUTCOME, GateOutcome.PASSED.name(),
                 MetricNames.TAG_REASON, "NONE").increment();
 
-        mockMvc.perform(get("/actuator/metrics"))
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                        .status().isOk())
-                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                        .jsonPath("$.names").isArray());
-
         assertThat(ourMeterNames())
                 .as("계측을 만들고 안 보여주면 이 이슈가 하는 일이 없다")
                 .contains(MetricNames.SAFETY_GATE);
+
+        // ⚠ /actuator/metrics 가 실제로 그것을 내보내는지는 여기서 볼 수 없다 —
+        //   관리 포트가 갈려 MOCK 컨텍스트에 그 엔드포인트가 없다(#74).
+        //   ActuatorManagementPortIsolationTest 가 실제 서버를 띄워 본다
     }
 
     @Test

@@ -27,7 +27,7 @@ public record ImplementationPlanProperties(
      * <table>
      *   <tr><th>축</th><th>키</th><th>무엇을 세나</th></tr>
      *   <tr><td>전송 계층</td><td>{@code agent.llm.max-retries}</td><td>429·5xx·타임아웃</td></tr>
-     *   <tr><td>파이프라인</td><td>{@code agent.execution.max-retries}</td><td>{@code CODE}→{@code VERIFY}→{@code REVIEW} 한 바퀴</td></tr>
+     *   <tr><td>파이프라인</td><td>{@code agent.execution.max-attempts}</td><td>{@code CODE}→{@code VERIFY}→{@code REVIEW} 한 바퀴</td></tr>
      *   <tr><td><b>계획 검증</b></td><td><b>여기</b></td><td>「모델이 <b>없는 파일을 지목</b>했다」</td></tr>
      * </table>
      *
@@ -38,8 +38,13 @@ public record ImplementationPlanProperties(
      * 이 값을 올릴 때는 그 곱을 먼저 계산한다.
      *
      * <p>⚠️ 이름이 {@code max-attempts} 인 것은 의도다 — 값이 <b>총 시도 수</b>다.
-     * {@code agent.execution.max-retries} 가 이름과 의미가 어긋나 혼란을 만든 자리라
-     * (Q-6 의 경고), 새로 만드는 축은 처음부터 맞춰 둔다.
+     * {@code agent.execution} 축이 한때 {@code max-retries} 라는 이름으로 <b>총 시도 수</b>를
+     * 들고 있어 혼란을 만든 자리라(Q-6 의 경고), 이 축은 처음부터 맞춰 두었다.
+     * 그쪽도 #21 에서 {@code max-attempts} 로 개명돼 이제 둘이 같은 규칙을 따른다.
+     *
+     * <p>⚠️ 반대로 <b>전송 계층 축은 {@code max-retries} 가 맞다</b>
+     * ({@code agent.llm.max-retries} · {@code github.max-retries}) — 그쪽은 첫 시도를
+     * 세지 않는다. <b>세는 것이 다르므로 이름도 다르다.</b>
      */
     private static final int DEFAULT_MAX_ATTEMPTS = 2;
 

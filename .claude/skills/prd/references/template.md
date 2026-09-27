@@ -139,7 +139,7 @@
 | 경로 | 멱등키 또는 상한 |
 |------|-----------------|
 | {예: 스캔 재실행} | {예: (repository_id, github_issue_number) UNIQUE} |
-| {예: 구현 재시도} | `agent.execution.max-retries` |
+| {예: 구현 재시도} | `agent.execution.max-attempts` |
 
 ### 안전 경계 접촉 — S-1~S-6
 

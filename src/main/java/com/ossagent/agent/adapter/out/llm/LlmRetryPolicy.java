@@ -8,7 +8,7 @@ import java.time.Duration;
  * 전송 계층 재시도 판정 — 순수 함수. 부작용도 대기도 여기서 하지 않는다.
  * {@code GitHubRetryPolicy} 와 같은 모양이다.
  *
- * <p>🔴 <b>이 상한은 {@code agent.execution.max-retries} 와 다른 축이다.</b>
+ * <p>🔴 <b>이 상한은 {@code agent.execution.max-attempts} 와 다른 축이다.</b>
  * 후자는 Q-6 이 확정한 {@code CODE → VERIFY → REVIEW} 한 바퀴를 세고 {@code AgentRun.attempt} 에
  * 기록된다. 타임아웃 한 번으로 그 카운터를 태우면 후보가 코드 문제 없이 {@code FAILED} 로
  * 떨어지고, 사람은 「AI 가 못 고쳤다」로 읽는다. 그래서 별도 키 {@code agent.llm.max-retries} 를 쓴다.

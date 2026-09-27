@@ -2,6 +2,7 @@ package com.ossagent.candidate.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -15,6 +16,7 @@ import com.ossagent.agent.domain.TargetWorkspaceSource;
 import com.ossagent.agent.domain.WorkspaceDiff;
 import com.ossagent.candidate.domain.CandidateStatus;
 import com.ossagent.candidate.domain.FakeChangeVerifier;
+import com.ossagent.candidate.domain.FakeDiffReviewer;
 import com.ossagent.candidate.domain.CodingAgent;
 import com.ossagent.candidate.domain.CodingInput;
 import com.ossagent.candidate.domain.GeneratedFile;
@@ -74,7 +76,7 @@ class ImplementCandidatePipelineTest {
 
         f.useCase().implement(CANDIDATE_ID);
 
-        verify(f.writer()).fail(eq(CANDIDATE_ID), anyString());
+        verify(f.retries()).fail(eq(CANDIDATE_ID), anyInt(), any(), anyString());
         assertThat(f.verifier().requests())
                 .as("🔴 계획 밖인데 검증까지 갔다면 게이트가 없는 것과 같다")
                 .isEmpty();
@@ -90,7 +92,7 @@ class ImplementCandidatePipelineTest {
 
         verify(f.writer()).recordChange(eq(CANDIDATE_ID), anyString(), anyString());
         assertThat(f.verifier().requests()).hasSize(1);
-        verify(f.writer(), never()).fail(anyLong(), anyString());
+        verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
     }
 
     @Test
@@ -117,7 +119,7 @@ class ImplementCandidatePipelineTest {
         assertThat(escaped)
                 .as("🔴 워크스페이스 밖에 파일이 생겼다면 S-3 가 뚫린 것이다")
                 .doesNotExist();
-        verify(f.writer()).fail(eq(CANDIDATE_ID), anyString());
+        verify(f.retries()).fail(eq(CANDIDATE_ID), anyInt(), any(), anyString());
     }
 
     @Test
@@ -132,7 +134,7 @@ class ImplementCandidatePipelineTest {
         Fixture outside = fixture(root, Set.of(PLANNED, "build.gradle"), PLANNED,
                 PlannedFile.ChangeKind.CREATE);
         outside.useCase().implement(CANDIDATE_ID);
-        verify(outside.writer()).fail(eq(CANDIDATE_ID), anyString());
+        verify(outside.retries()).fail(eq(CANDIDATE_ID), anyInt(), any(), anyString());
     }
 
     // ── 조립 ────────────────────────────────────────────────────────────────
@@ -140,7 +142,8 @@ class ImplementCandidatePipelineTest {
     private record Fixture(ImplementCandidateUseCase useCase,
             CandidateImplementationWriter writer,
             FakeTargetWorkspaceSource workspaces,
-            FakeChangeVerifier verifier) {
+            FakeChangeVerifier verifier,
+            CandidateRetryWriter retries) {
     }
 
     private static Fixture fixture(Path root, Set<String> changedPaths) throws Exception {
@@ -187,12 +190,17 @@ class ImplementCandidatePipelineTest {
         FakeTargetWorkspaceSource workspaces =
                 new FakeTargetWorkspaceSource(workspace, changedPaths);
         FakeChangeVerifier verifier = new FakeChangeVerifier().givenPassing();
+        FakeDiffReviewer reviewer = new FakeDiffReviewer();
+        // 🔴 루프의 전이 구간은 별도 빈이다(#21). 여기서는 전이를 세지 않고
+        //    「경로 게이트가 검증까지 넘기는가」만 보므로 mock 으로 충분하다 —
+        //    바퀴 수·전이는 ImplementCandidateRetryLoopTest 가 본다
+        CandidateRetryWriter retries = mock(CandidateRetryWriter.class);
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
                 contexts, policies, provider(workspaces), provider(new FakeCodingAgent(generatedPath)),
-                provider(verifier));
+                provider(verifier), provider(reviewer), retries);
 
-        return new Fixture(useCase, writer, workspaces, verifier);
+        return new Fixture(useCase, writer, workspaces, verifier, retries);
     }
 
     private static RepositoryCoordinates coordinates() {

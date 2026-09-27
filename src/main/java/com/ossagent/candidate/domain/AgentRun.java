@@ -65,7 +65,7 @@ public class AgentRun {
      *
      * <p>단계별 독립 카운터가 아니다. 카운터의 주체는 stage 가 아니라 <b>사이클</b>이고,
      * 그래서 <b>같은 사이클에서 만들어진 세 행이 같은 값을 갖는다</b>. 상한은
-     * {@code agent.execution.max-retries}(3)이고 소진하면 후보가 {@code FAILED} 다 — S-6.
+     * {@code agent.execution.max-attempts}(3)이고 소진하면 후보가 {@code FAILED} 다 — S-6.
      *
      * <p>{@code ANALYZE}·{@code PLAN} 은 이 카운터 밖이다. 루프가 아니라 선형 단계이므로
      * 파이프라인 재시도가 없고, 값은 항상 1 이다. 5xx·타임아웃은 전송 계층 축

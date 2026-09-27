@@ -568,4 +568,42 @@ class ContributionCandidateTest {
                 .as("전이가 거부됐으면 필드도 오염되지 않아야 한다")
                 .isNull();
     }
+
+    // ── 🔴 설정과 도메인 상수의 교차 검증 — #21 (S-6) ──────────────────────
+
+    /**
+     * 🔴 <b>{@code application.yml} 의 값이 도메인 절대 상한을 넘지 않는다</b> — 불변식 ⑧.
+     *
+     * <p>넘으면 {@code assertCanStartImplementing} 이 거부해 <b>착수가 통째로 막힌다.</b>
+     * 배포해 봐야 아는 고장이라 여기서 고정한다.
+     *
+     * <p>⚠️ 이 단언이 <b>이 패키지에</b> 있는 이유는 {@link ContributionCandidate#MAX_ALLOWED_ATTEMPTS}
+     * 가 package-private 이기 때문이다. {@code ExecutionPropertiesTest} 에서 하려면 예외
+     * <b>메시지 문자열</b>로 상한을 되짚어야 하는데, 그것은 거부목록이라 문구를 바꾸는 순간
+     * 조용히 어긋난다.
+     */
+    @Test
+    @DisplayName("🔴 yml 의 max-attempts 가 도메인 절대 상한 이하다 — S-6")
+    void 설정값이_도메인_상한을_넘지_않는다_S6() throws Exception {
+        int configured = bindMaxAttemptsFromApplicationYml();
+
+        assertThat(configured)
+                .as("설정 한 줄로 상한을 사실상 없애는 경로를 막는 것이 불변식 ⑧ 의 요점이다. "
+                        + "올리려면 도메인 상수를 고쳐야 하고 그것이 리뷰에 보인다")
+                .isBetween(1, ContributionCandidate.MAX_ALLOWED_ATTEMPTS);
+    }
+
+    private static int bindMaxAttemptsFromApplicationYml() throws java.io.IOException {
+        var sources = new org.springframework.boot.env.YamlPropertySourceLoader()
+                .load("application.yml",
+                        new org.springframework.core.io.ClassPathResource("application.yml"));
+        var propertySources = new org.springframework.core.env.MutablePropertySources();
+        sources.forEach(propertySources::addLast);
+        return new org.springframework.boot.context.properties.bind.Binder(
+                org.springframework.boot.context.properties.source.ConfigurationPropertySources
+                        .from(propertySources))
+                .bind("agent.execution.max-attempts", Integer.class)
+                .orElseThrow(() -> new AssertionError(
+                        "agent.execution.max-attempts 를 찾지 못했다 — 키가 어긋났다"));
+    }
 }

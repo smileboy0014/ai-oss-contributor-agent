@@ -202,7 +202,32 @@ class ExternalTextScrubRegistryTest {
                             + " 거르는 주체는 워크스페이스를 소유한 #18 이고,"
                             + " 그쪽이 SecretFilePolicy·GeneratedChange 스크럽을 세운다."
                             + " ⚠ #18 이 채우지 않으면 이 경로가 그대로 유출구다 —"
-                            + " PR 본문이 아니라 이 행이 그 사실을 계속 보이게 한다")));
+                            + " PR 본문이 아니라 이 행이 그 사실을 계속 보이게 한다")),
+
+            // ── #23 Draft PR 본문 ────────────────────────────────────────
+            // 🔴 FileChange.content 와 같은 성격이다 — 공개 저장소에 영구 게시되고 회수가
+            //    불가능하다. 다만 이쪽은 PENDING 이 아니다: 쓰는 코드가 이 PR 에 있다.
+            Map.entry("PrTitle.value", new Decision(Mechanism.VALUE_TYPE,
+                    "PrTitle compact 생성자가 redact 한다. String 을 그대로 받는 생성 경로가"
+                            + " 없다. 재료는 대상 저장소가 쓴 이슈 제목이다 (#23)")),
+
+            Map.entry("PrBody.value", new Decision(Mechanism.VALUE_TYPE,
+                    "PrBody compact 생성자가 redact 한다. 🔴 상류에 강제 지점이 없는 값 셋이"
+                            + " 여기 모인다 — 대상 저장소 템플릿 · GeneratedChange.testResult"
+                            + " · reviewResult(둘 다 이 표에서 PENDING). 그래서 여기가"
+                            + " 마지막 그물이고, 나가면 남의 저장소에 영구히 남는다 (#23)")),
+
+            // ⚠ 아래 셋은 「스크럽 전」인 것이 정체다. 유일한 소비자가 PrBody.compose 이고
+            //   그것이 PrBody 생성자를 타므로, 여기서 나가는 길이 스크럽을 통과하는 길 하나뿐이다.
+            //   🔴 PrBodyMaterials 에 getter 말고 다른 출구를 만들면 이 근거가 무너진다
+            Map.entry("PrBodyMaterials.template", new Decision(Mechanism.VALUE_TYPE,
+                    "PrBody.compose 가 유일한 소비자이고 PrBody 생성자가 redact 한다 (#23)")),
+
+            Map.entry("PrBodyMaterials.verificationSummary", new Decision(Mechanism.VALUE_TYPE,
+                    "〃 — 샌드박스 빌드 출력이라 환경변수가 찍혀 있을 수 있다 (#23)")),
+
+            Map.entry("PrBodyMaterials.reviewSummary", new Decision(Mechanism.VALUE_TYPE,
+                    "〃 — LLM 이 diff 를 인용하면 그 안의 시크릿이 따라온다 (#23)")));
 
     @Test
     @DisplayName("외부 텍스트 필드는 전부 스크럽 결정이 등록돼 있다")

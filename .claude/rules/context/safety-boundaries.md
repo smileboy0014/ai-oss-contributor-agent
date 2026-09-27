@@ -71,6 +71,23 @@ GitHub App 설치 토큰은 **우리가 멤버가 아닌 upstream 에 PR 을 만
 빠져나간다. 하위 경로의 `..` 도 거부한다(접두어를 빠져나가면 **어설션이 참인 채로** 다른
 저장소에 쓴다 — 어설션이 우회되는 유일한 모양이다).
 
+#### 🔴 어설션 면제가 둘이 됐다 (2026-09-27 · #23)
+
+Draft PR 은 **원리적으로** upstream 좌표로 간다(`POST /repos/{upstream}/pulls`) —
+「Fork 에만 쓴다」로 표현할 수 없는 유일한 산출물이고, 그것이 이 제품이 만들려는 그것이다.
+
+| | `createFork` | `createDraftPullRequest` |
+|---|---|---|
+| upstream 히스토리 | ❌ 안 바꾼다 | ❌ 안 바꾼다 |
+| 우회 가능 | ❌ 리터럴 subPath | ❌ 리터럴 subPath + 값 타입 좌표 |
+| **되돌릴 수 있나** | ✅ | 🔴 **부분적으로만 — 알림은 회수 불가** |
+
+셋째 행이 다르므로 이 면제의 실질 방어는 **호출 위치**다. 사람이 누르는 게이트
+(`POST /api/candidates/{id}/pull-request`) 뒤에만 놓인다 — S-6. **면제보다 게이트가 본체다.**
+
+⚠️ **새 면제를 만들 때 세 행을 모두 본다.** 통과하지 못하면 면제가 아니라 게이트가 필요하다는 뜻이다.
+목록이 셋이 되면 `ForkPublishArchitectureTest.어설션_우회는_fork_생성과_PR_생성뿐이다_S1` 이 빨개진다.
+
 **정적 탐지의 모양이 바뀌었다.** 기존 S-1 패턴 둘(`setRemote(...)` · `.push()`)은 **JGit 모양만**
 본다. #22 는 Git Data API 를 쓰므로 그 둘에 **전혀 걸리지 않는다** — 패턴을 하나 더했고,
 그 한계(변수명 의존 거부목록 · `src/**/*.java` 문자열만)를 스크립트 주석에 적었다.
@@ -260,12 +277,19 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
   |---|---|---|---|
   | 선정 | `POST /api/candidates/{id}/select` | Q-5 (2026-09-25) | ✅ #24 |
   | 착수 | `POST /api/candidates/{id}/implement` | PRD §23 | ⬜ #18 |
-  | **PR 생성** | `POST /api/candidates/{id}/pull-request` | PRD §23 | ⬜ #23 |
+  | **PR 생성** | `POST /api/candidates/{id}/pull-request` | PRD §23 | ✅ #23 (2026-09-27) |
 
-  ⚠️ 뒤의 둘이 **없는 것이 일정 문제가 아니다.** 실행기 없이 열면 후보가 각각
-  `IMPLEMENTING`(탈출 트리거 없음)과 **PR 없는 종단 `PR_CREATED`** 에 갇힌다.
-  `CandidateApprovalApiTest` 가 둘 다 404 인 것을 회귀로 고정하므로, 여는 사람은
-  그 테스트를 함께 고쳐야 한다 — 실행기와 같은 PR 에서 열라는 강제다.
+  ⚠️ **`implement` 가 없는 것은 일정 문제가 아니다.** 실행기 없이 열면 후보가
+  `IMPLEMENTING` 에 갇힌다(탈출 트리거가 없다). `CandidateApprovalApiTest` 가
+  그 404 를 회귀로 고정하므로, 여는 사람은 그 테스트를 함께 고쳐야 한다 —
+  실행기와 같은 PR 에서 열라는 강제다.
+
+  ✅ **PR 생성은 #23 이 PR 생성기와 함께 열었다.** 「PR 없는 종단 `PR_CREATED`」가
+  생기지 않는 이유는 두 가지다 — ① 대외 호출이 **성공한 뒤에만** 쓰기 트랜잭션을 연다
+  ② `ContributionCandidate.markPrCreated` 가 **`PullRequest` 를 인자로 요구**해
+  PR 없이 전이하는 것이 표현 불가능하다(불변식 ③).
+
+  ⚠️ **셋 중 둘이 열렸다.** 「승인 지점이 다 열렸다」로 뭉뚱그리지 않는다.
 
   🔴 **`implement` 가 PR 까지 흘려보내면 반려다.** ~~PRD §24 시퀀스가 그렇게 그려져 있다~~ —
   **PRD v1.2 가 그 다이어그램을 정정했다**(2026-09-27 · #30). 그대로 구현하면 세 번째
@@ -289,7 +313,7 @@ PRD §20 이 정한 승인 지점은 **Draft PR 이후 사람의 검토**다.
 | # | 한 줄 | 정적 탐지 |
 |---|---|---|
 | S-1 | push 대상이 Fork 인가 (어설션 있는가) | 부분 — [`safety-boundary-check.sh`](../../scripts/safety-boundary-check.sh) · **여집합 ArchUnit**(`ForkPublishArchitectureTest`) — 아래 |
-| S-2 | PR 이 draft 고정인가 · 머지/ready 호출이 없는가 | 부분 — 위 훅 |
+| S-2 | PR 이 draft 고정인가 · 머지/ready 호출이 없는가 | 부분 — 위 훅 · **ArchUnit 3종**(`ForkPublishArchitectureTest`) — ① 쓰기 엔드포인트 화이트리스트(⚠️ #23 전까지 **파일 하나만** 훑어 새 어댑터를 못 봤다) ② `draft` 를 담을 자리가 없다 ③ 머지·ready 호출 부재 |
 | S-3 | 대상 저장소 실행이 샌드박스 경유인가 | 부분 — 위 훅 |
 | S-4 | 시크릿이 코드·로그·프롬프트에 없는가 | 부분 — [`secret-scan.sh`](../../scripts/secret-scan.sh) · 소스 검사 2종(`SecretPatternDriftTest`·`PromptBoundaryTest`). ⚠️ 마스킹 동작 자체는 **런타임 테스트**가 본다 (#28) |
 | S-5 | `RepositoryPolicy` 를 읽고 따르는가 | 부분 — `startImplementing` 이 `PolicyClearance` 를 요구해 **컴파일러가** 막는다(#24). 나머지는 리뷰 |

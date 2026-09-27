@@ -73,7 +73,8 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `VerificationReport` | — | 검증 한 바퀴의 결과 **값**. 🔴 `passed()` 는 **모든 단계가 `PASSED`** 일 때만 참이다 — 「실패가 없으면 통과」로 적으면 「판정 불가」가 조용히 접힌다 |
 | `StageResult` | — | 단계 하나의 결과 **값**. compact 생성자가 빌드 출력 **스크럽을 강제**한다 (S-4) |
 | `LlmPricing` | — | 모델 하나의 **단가** 값 — 100만 토큰당 USD. 설정(`agent.llm.pricing.<model>`)에서만 온다.<br>🔴 **없으면 비용 미터를 만들지 않는다**(#71) — 0 은 「공짜」로 읽히고 그것은 「모른다」와 다른 말이다. 한쪽만 적힌 단가는 **기동에서 거부**한다 |
-| `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 #23 이고 그 앞에 세 번째 승인 게이트가 있다 |
+| `ForkPublisher` | `GitHubForkPublisher` | 변경분을 **사용자 Fork 에** 올린다 — Fork 확보·동기화·commit·push·브랜치 삭제. **S-1 의 실행체**. 🔴 PR 을 만들지 않는다 — 그것은 `DraftPrPublisher` 이고 그 앞에 세 번째 승인 게이트가 있다 |
+| `DraftPrPublisher` | `GitHubDraftPrPublisher` | upstream 에 **Draft PR** 을 연다 — **S-2 의 실행체**(#23). 🔴 이 제품이 대상 저장소에 남기는 **유일한 글**이다. `markReadyForReview`·`requestReviewers`·`merge` 는 **없는 것이 방어**다.<br>⚠️ 상태 전이도 영속화도 하지 않는다 — 능력을 합치면 게이트가 부산물이 된다 |
 | `AgentRunRecorder` | `RecordAgentRunUseCase` (candidate) | 실행 이력 기록. `AgentRun` 이 남의 애그리거트라 능력으로 뒤집었다 |
 | `CandidateNotifier` | `LoggingCandidateNotifier` | 새 후보가 `ANALYZED` 로 쌓였음을 알린다(#26). 🔴 **관찰이지 행위가 아니다** — 승인 게이트를 부르지 않는다(S-6).<br>🔴 **지금 나가는 곳은 로그와 메트릭뿐이다** — Slack·Webhook 이 아니다. 「알림 경로가 있다」로만 적으면 다음 사람이 외부 전송이 있다고 믿는다 |
 | `CandidateNotification` | — | 알림 **값**. 🔴 **이슈 제목·본문이 들어올 자리가 타입에 없다**(S-4) — 「나중에 필요하면」으로 자리를 비워 두지 않았다. 식별자와 숫자뿐이다 |
@@ -95,6 +96,10 @@ DB 접근 인터페이스를 도메인 이름으로 줄여 쓰지 않는다(`Rep
 | `ForkRef` | — | **쓰기가 허용된** 저장소 좌표. 생성 시 owner 를 단언한다. ⚠️ **방어가 아니라 「일찍 드러내는 것」**이다 — 유일한 방어는 `GitHubWriteClient` 의 쓰기 직전 어설션이고, 둘 중 지워야 한다면 이쪽이다 (#22) |
 | `SyncedFork` | — | 「upstream 과 맞춰 보았고 결과가 이것이다」는 **통행증**. `PublishRequest` 가 인자로 요구해 **동기화를 보지 않고 publish 하는 것을 표현 불가능**하게 한다 — `PolicyClearance` 와 같은 수법.<br>⚠️ 강제하는 것은 **호출**이지 판단이 아니다 (#22) |
 | `BaseBranch` | — | Fork 의 **기준 브랜치**. 경로에 조립되므로 `RepositoryCoordinates` 와 같은 제한을 받는다 — 초안에서 이 값만 규율에서 빠져 있었다 (#22) |
+| `OpenedPullRequest` | — | 열린 Draft PR 의 **관측값** — 번호 · URL · headRef · **forkUrl**. 🔴 `draft` 플래그가 **없다**: 값으로 들면 `false` 인 인스턴스가 표현 가능해지고 소비자가 분기를 쓴다. 확인은 어댑터가 **값으로 바꾸기 전에** 한다 (#23) |
+| `PrBody` | — | Draft PR 본문. 🔴 **상류에 강제 지점이 없는 값 셋이 여기 모인다** — 대상 저장소 템플릿 · 빌드 출력 · LLM 리뷰. 밖으로 나가기 직전이라 **마지막 그물**이고 compact 생성자가 스크럽을 강제한다 (S-4) |
+| `PrBodyMaterials` | — | `PrBody` 의 재료. **스크럽 「전」인 것이 정체다** — 유일한 소비자가 `PrBody.compose` 라 나가는 길이 스크럽을 통과하는 길 하나뿐이다. 🔴 getter 말고 다른 출구를 만들지 않는다 |
+| `PullRequestTarget` | — | PR 을 열기 위해 대상 저장소에서 읽어야 하는 것 전부 — 좌표 · 기준 브랜치 · 템플릿. 🔴 `template == null` 은 **「없다」**이고 「못 읽었다」가 아니다(그쪽은 예외로 끊긴다 — S-5) |
 | `FileChange` | — | Fork 에 올릴 파일 1건. 🔴 **내용 검사가 이 경로에 없다** — 워크스페이스를 읽는 #18 이 거른다. `@ExternalText` 등록표에 `PENDING #18` 로 남겨 그 사실이 계속 보이게 했다 (#22) |
 
 ## 증분 수집 — 「언제 돌렸나」와 「어디까지 봤나」는 다르다 (#8)

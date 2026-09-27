@@ -1,6 +1,7 @@
 package com.ossagent.pullrequest.adapter.out.github;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.ossagent.pullrequest.domain.CommitIdentity;
 import com.ossagent.pullrequest.domain.FileChange;
 import java.time.Instant;
@@ -99,5 +100,92 @@ final class GitDataPayloads {
 
     /** {@code POST /merge-upstream} */
     record MergeUpstreamRequest(String branch) {
+    }
+
+    /**
+     * {@code POST /repos/{upstream}/pulls} 의 본문 — 🔴 <b>S-2 의 실행체</b>.
+     *
+     * <h2>🔴 {@code draft} 가 필드가 아니다</h2>
+     *
+     * <p>{@code boolean draft} 를 컴포넌트로 두면 {@code false} 를 담은 인스턴스가
+     * <b>표현 가능</b>해진다. {@code safety-boundaries.md} 가 「플래그를 두면 언젠가 켜진다」고
+     * 못 박은 그것이다. 여기서는 <b>상수를 돌려주는 접근자</b>라 담을 자리가 없다 —
+     * {@code PullRequest.Status} 가 {@code DRAFT} 하나뿐인 것과 같은 수법이다.
+     *
+     * <p>⚠️ <b>record 가 아니라 클래스인 것이 의도다.</b> record 로 두면 Jackson 이
+     * 컴포넌트를 기준으로 직렬화하므로 「컴포넌트가 아닌 접근자」가 포함되는지가
+     * <b>기본 동작에 달린다.</b> 일반 클래스의 getter 는 그런 조건이 없다.
+     *
+     * <h2>🔴 그럼에도 애노테이션을 단다 — 「기본값이 그렇다」에 기대지 않는다</h2>
+     *
+     * <p>안전 리뷰가 짚은 자리다. 직렬화 회귀 테스트는 {@code new ObjectMapper()} 와
+     * {@code RestClient.builder()} 의 <b>기본 컨버터</b>로 돈다. 지금은 운영도 같은
+     * 경로다({@code GitHubClientConfig} 가 {@code RestClient.builder()} 를 쓰고
+     * {@code spring.jackson.*} 설정이 없다). <b>그 둘이 갈라지는 날</b> — 누가 Boot 가
+     * 조립한 {@code RestClient.Builder} 빈을 쓰거나 {@code default-property-inclusion}·
+     * {@code visibility} 를 건드리면 — <b>테스트는 초록인 채 운영에서만 {@code draft} 가
+     * 빠진다.</b>
+     *
+     * <p>그리고 빠지는 방식이 나쁘다: 필드가 아니라 <b>조용히 사라지는</b> 쪽이라
+     * 예외가 나지 않고, GitHub 은 그것을 「draft 아님」으로 읽는다.
+     * {@link JsonProperty} 가 이름과 포함을, {@link JsonInclude.Include#ALWAYS} 가
+     * 전역 inclusion 설정을 각각 못 박는다. <b>필드를 되살리는 것이 아니므로</b>
+     * {@code false} 는 여전히 표현 불가능하다.
+     *
+     * <p>⚠️ 응답 검증({@code GitHubDraftPrPublisher} 가 {@code draft} 가 아니면 던진다)이
+     * 마지막 안전망이지만, 그것이 발화하는 시점에는 <b>이미 PR 이 만들어진 뒤</b>다.
+     *
+     * <p>⚠️ 필드를 더할 때 {@code reviewers}·{@code assignees}·{@code labels} 를 넣지 않는다 —
+     * 리뷰어 지정은 <b>존재 자체가 반려</b>다 (S-2).
+     */
+    @JsonInclude(JsonInclude.Include.ALWAYS)
+    static final class DraftPullRequestRequest {
+
+        private final String title;
+        private final String head;
+        private final String base;
+        private final String body;
+
+        DraftPullRequestRequest(String title, String head, String base, String body) {
+            this.title = title;
+            this.head = head;
+            this.base = base;
+            this.body = body;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        /** {@code owner:branch} — 교차 저장소 PR 의 head 표기. */
+        public String getHead() {
+            return head;
+        }
+
+        public String getBase() {
+            return base;
+        }
+
+        public String getBody() {
+            return body;
+        }
+
+        /**
+         * 🔴 <b>리터럴이다.</b> 필드도 파라미터도 설정도 아니다 — S-2.
+         *
+         * <p>{@link JsonProperty} 는 이름을 못 박는 동시에 <b>getter 가시성 설정과 무관하게</b>
+         * 포함되게 한다. 기본 동작에 기대지 않는 이유는 클래스 javadoc 에 있다.
+         */
+        @JsonProperty("draft")
+        public boolean isDraft() {
+            return true;
+        }
+
+        /** 🔴 제목·본문을 노출하지 않는다 (S-4). */
+        @Override
+        public String toString() {
+            return "DraftPullRequestRequest[head=%s, base=%s, draft=true, body=%d자]"
+                    .formatted(head, base, body == null ? 0 : body.length());
+        }
     }
 }

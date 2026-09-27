@@ -3,6 +3,7 @@ package com.ossagent.pullrequest.adapter.out.github;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.ossagent.pullrequest.domain.ForkRef;
 import com.ossagent.pullrequest.domain.UpstreamWriteAttemptException;
+import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.support.github.GitHubApiException;
 import com.ossagent.support.github.GitHubErrorTranslator;
 import com.ossagent.support.github.GitHubProperties;
@@ -69,6 +70,9 @@ public class GitHubWriteClient {
 
     /** 🔴 {@link #createFork} 가 쓰는 <b>리터럴</b>. 파라미터가 아니라서 다른 경로를 만들 수 없다. */
     private static final String FORKS_SUB_PATH = "forks";
+
+    /** 🔴 {@link #createDraftPullRequest} 가 쓰는 <b>리터럴</b>. 〃 */
+    private static final String PULLS_SUB_PATH = "pulls";
 
     /**
      * 🔴 하위 경로 세그먼트의 <b>허용</b> 문자 — 여집합 방어.
@@ -191,8 +195,53 @@ public class GitHubWriteClient {
      * <p>{@link Idempotency#UNSAFE} 고정이다. 재전송하면 fork 생성 요청이 중복된다.
      */
     public JsonNode createFork(String upstreamOwner, String upstreamName) {
-        // 🔴 어설션을 거치지 않고 send 를 직접 부르는 유일한 자리. 늘어나면 ArchUnit 이 잡는다.
+        // 🔴 어설션을 거치지 않고 send 를 직접 부르는 자리 — 둘 중 하나. 늘어나면 ArchUnit 이 잡는다.
         return send(HttpMethod.POST, upstreamOwner, upstreamName, FORKS_SUB_PATH, null,
+                Idempotency.UNSAFE);
+    }
+
+    /**
+     * 🔴 <b>owner 어설션을 거치지 않는 두 번째 메서드</b> — {@code POST /repos/{upstream}/pulls}.
+     *
+     * <p>Draft PR 은 <b>원리적으로</b> upstream 좌표로 간다. 「Fork 에만 쓴다」로는 표현할 수
+     * 없는 유일한 산출물이고, 그것이 이 제품이 만들려는 바로 그것이다(PRD §19).
+     *
+     * <table border="1">
+     *   <caption>{@link #createFork} 의 판정표와 <b>같은 형식</b>으로 — 셋 중 하나라도 다르면 면제를 주지 않는다</caption>
+     *   <tr><td>upstream 히스토리를 바꾸나</td>
+     *       <td>❌ <b>아니다.</b> 커밋·브랜치·태그를 하나도 건드리지 않는다. PR 은 「내 Fork 의
+     *           브랜치를 봐 달라」는 제안이고, 머지는 메인테이너가 한다</td></tr>
+     *   <tr><td>우회 경로가 되나</td>
+     *       <td>❌ {@code subPath} 가 <b>리터럴</b> {@value #PULLS_SUB_PATH} 다. 좌표는
+     *           {@code RepositoryCoordinates} 값 타입으로만 받으므로 임의 문자열이 들어올 수 없다.
+     *           본문 타입은 {@code draft} 를 <b>상수로</b> 든다</td></tr>
+     *   <tr><td>되돌릴 수 있나</td>
+     *       <td>🔴 <b>부분적으로만.</b> PR 은 닫을 수 있으나 <b>메일 알림은 회수되지 않는다</b></td></tr>
+     * </table>
+     *
+     * <p>🔴 <b>세 번째가 {@link #createFork} 와 다르다.</b> 그래서 이 메서드의 방어는 면제
+     * 근거가 아니라 <b>호출 위치</b>다 — 사람이 누르는 승인 게이트
+     * ({@code POST /api/candidates/{id}/pull-request}) 뒤에만 놓이고,
+     * {@code ApprovalGateArchitectureTest} 가 그것을 구조로 고정한다.
+     * <b>면제보다 게이트가 본체다.</b>
+     *
+     * <p>{@link Idempotency#UNSAFE} 고정이다 — 재전송하면 PR 이 두 개 열린다.
+     *
+     * @param upstream 원본 좌표. 값 타입이라 owner·name 이 {@code [A-Za-z0-9._-]+} 로 제한된다
+     * @param request  본문. {@code draft} 를 담을 자리가 없다
+     */
+    public JsonNode createDraftPullRequest(RepositoryCoordinates upstream,
+            GitDataPayloads.DraftPullRequestRequest request) {
+
+        if (upstream == null) {
+            throw new IllegalArgumentException("원본 저장소 좌표가 없습니다");
+        }
+        if (request == null) {
+            throw new IllegalArgumentException("PR 본문이 없습니다");
+        }
+        // 🔴 어설션을 거치지 않고 send 를 직접 부르는 자리 — 둘 중 둘.
+        //    이 목록이 셋이 되면 ForkPublishArchitectureTest 가 빨개진다
+        return send(HttpMethod.POST, upstream.owner(), upstream.name(), PULLS_SUB_PATH, request,
                 Idempotency.UNSAFE);
     }
 

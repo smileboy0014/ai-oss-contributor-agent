@@ -75,6 +75,25 @@ public record PolicyDocumentPath(String path, Role role) {
             new PolicyDocumentPath("README.md", Role.SUPPLEMENTARY),
             new PolicyDocumentPath("README.adoc", Role.SUPPLEMENTARY));
 
+    /**
+     * PR 본문 골격이 될 후보 — #23.
+     *
+     * <p>🔴 <b>{@link #SUPPLEMENTARY_PATHS} 에서 골라낸 것이지 새로 적은 목록이 아니다.</b>
+     * 두 벌을 두면 한쪽에만 경로가 추가되고, 그러면 「규약 수집은 읽었는데 PR 생성은 못 읽는」
+     * 상태가 조용히 생긴다.
+     *
+     * <p>⚠️ 대소문자 변종을 <b>둘 다</b> 둔다. GitHub 은 두 표기를 모두 인정하고, 우리는
+     * 대상 저장소가 어느 쪽을 썼는지 모른다 — 하나만 찾으면 404 를 「템플릿 없음」으로 읽는다.
+     *
+     * <p>⚠️ 순서가 우선순위다. 앞의 것을 찾으면 뒤는 보지 않는다 — GitHub 자신도
+     * {@code .github/} 를 먼저 본다.
+     */
+    public static final List<PolicyDocumentPath> PULL_REQUEST_TEMPLATE_PATHS =
+            SUPPLEMENTARY_PATHS.stream()
+                    .filter(candidate -> candidate.path().toLowerCase(java.util.Locale.ROOT)
+                            .contains("pull_request_template"))
+                    .toList();
+
     /** 수집할 경로 전체. */
     public static List<PolicyDocumentPath> all() {
         return java.util.stream.Stream

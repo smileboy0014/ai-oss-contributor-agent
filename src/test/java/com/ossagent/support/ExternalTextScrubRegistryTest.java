@@ -134,8 +134,9 @@ class ExternalTextScrubRegistryTest {
                     "위와 같다. 대상 저장소 본문이 DB 에 앉기 전에 스크럽된다 (#8·#28)")),
 
             Map.entry("SandboxResult.output", new Decision(Mechanism.PENDING,
-                    "#18·#19 — 소비자가 아직 없다. DB 에 앉는 자리는"
-                            + " GeneratedChange.testResult 이고 그쪽도 PENDING 이다."
+                    "#18 — #19 가 소비자 하나를 세웠다(StageResult.summary 가 VALUE_TYPE 으로"
+                            + " 받는다). 그러나 이 필드 자신은 여전히 원문이고, DB 에 앉는"
+                            + " 자리(GeneratedChange.testResult)의 강제 지점은 #18 이 만든다."
                             + " LLM 송신은 PromptScrubber 를 거친다 (#17)")),
 
             // ── #16 구현 계획 — 전부 VALUE_TYPE. 영속되지 않지만 하류(#18 코딩 프롬프트)로
@@ -148,6 +149,14 @@ class ExternalTextScrubRegistryTest {
                     "ImplementationPlan compact 생성자가 redact 한다 (#16)")),
             Map.entry("ImplementationPlan.testStrategy", new Decision(Mechanism.VALUE_TYPE,
                     "위와 같다. 비어 있을 수 있고 그 판정은 PlanValidator 가 한다 (#16)")),
+
+            // ── #19 검증 파이프라인 ────────────────────────────────────────────
+            Map.entry("StageResult.summary", new Decision(Mechanism.VALUE_TYPE,
+                    "StageResult compact 생성자가 redact 한다. String 을 그대로 받는 생성"
+                            + " 경로가 없다. 🔴 대상 저장소 빌드 출력이고 세 곳으로 나간다 —"
+                            + " 로그 · GeneratedChange.testResult(DB) · 재시도 프롬프트(Q-6"
+                            + " 루프가 실패 사유를 모델에 되먹인다). 빌드 스크립트가 환경변수를"
+                            + " 찍는 것이 흔하다 (#19)")),
 
             Map.entry("SelectedFile.content", new Decision(Mechanism.VALUE_TYPE,
                     "SelectedFile compact 생성자가 redact 한다. String 을 그대로 받는 생성"

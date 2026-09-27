@@ -3,13 +3,15 @@ package com.ossagent.candidate.application;
 import com.ossagent.agent.domain.LlmException;
 import com.ossagent.candidate.adapter.out.persistence.ContributionCandidateRepository;
 import com.ossagent.candidate.domain.AnalysisRejectedException;
+import com.ossagent.candidate.domain.CandidateNotification;
+import com.ossagent.candidate.domain.CandidateNotifier;
 import com.ossagent.candidate.domain.IssueAnalysis;
 import com.ossagent.candidate.domain.IssueAnalyst;
 import com.ossagent.issue.application.FindAnalyzableIssuesUseCase;
 import com.ossagent.issue.domain.AnalyzableIssue;
+import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
 import com.ossagent.support.observability.AnalysisOutcome;
 import com.ossagent.support.observability.PipelineMetrics;
-import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
 import java.util.List;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -65,6 +67,7 @@ public class AnalyzeIssuesUseCase {
     private final IssueAnalysisProperties properties;
     private final PipelineMetrics metrics;
     private final CandidateStatusGauge statusGauge;
+    private final CandidateNotifier notifier;
 
     public AnalyzeIssuesUseCase(FindAnalyzableIssuesUseCase analyzableIssues,
             AnalyzeRepositoryPolicyUseCase repositoryPolicy,
@@ -73,9 +76,11 @@ public class AnalyzeIssuesUseCase {
             IssueAnalyst analyst,
             IssueAnalysisProperties properties,
             PipelineMetrics metrics,
-            CandidateStatusGauge statusGauge) {
+            CandidateStatusGauge statusGauge,
+            CandidateNotifier notifier) {
         this.metrics = metrics;
         this.statusGauge = statusGauge;
+        this.notifier = notifier;
         this.analyzableIssues = analyzableIssues;
         this.repositoryPolicy = repositoryPolicy;
         this.candidates = candidates;
@@ -181,6 +186,7 @@ public class AnalyzeIssuesUseCase {
                         candidateId, analysis.implementationFeasible(), analysis.confidence());
             } else {
                 counter.analyzed++;
+                notifyAnalyzed(candidateId, issue);
             }
         } catch (AnalysisRejectedException e) {
             // 스키마 검증 실패 — 파싱 실패를 성공으로 처리하지 않는다 (FR-2).
@@ -199,6 +205,39 @@ public class AnalyzeIssuesUseCase {
             counter.failed++;
         } finally {
             MDC.remove("candidateId");
+        }
+    }
+
+    /**
+     * 새 후보가 쌓였음을 알린다 — FR-5. 🔴 <b>적재가 커밋된 뒤</b>다.
+     *
+     * <h2>🔴 알림이 분석 배치를 죽이지 못하게 한다 (FR-6)</h2>
+     *
+     * <p>구현({@code LoggingCandidateNotifier})이 이미 자기 예외를 삼키지만 그것으로는
+     * 부족하다 — <b>값을 만드는 것부터가 알림이다.</b> {@code githubIssueNumber} 가
+     * {@code null} 이면 값 타입 생성자가 NPE 를 던지고, 그것은 구현에 닿기도 전이라
+     * 어느 방어에도 걸리지 않는다. <b>이미 커밋된 후보가 「실패」로 보고된다.</b>
+     *
+     * <p>⚠️ 가정이 아니다 — 같은 함정이 이 저장소에서 실제로 터졌다(#23 의
+     * 「이슈 번호가 없을 때 PR 생성이 NPE 로 죽던 것」). {@code AnalyzableIssue} 는
+     * 그 값을 {@code Integer} 로 들고 <b>검증하지 않는다.</b>
+     *
+     * <p>그래서 번호가 없으면 <b>알리지 않고 {@code WARN} 만 남긴다.</b> 조용히 넘기지
+     * 않는 이유는 그것이 수집 경로의 결함을 뜻하기 때문이다.
+     */
+    private void notifyAnalyzed(Long candidateId, AnalyzableIssue issue) {
+        Integer issueNumber = issue.githubIssueNumber();
+        if (issueNumber == null) {
+            log.warn("이슈 번호가 없어 후보 알림을 건너뛴다 candidateId={} issueId={}",
+                    candidateId, issue.id());
+            return;
+        }
+        try {
+            notifier.notifyAnalyzed(
+                    new CandidateNotification(candidateId, issue.repositoryId(), issueNumber));
+        } catch (RuntimeException e) {
+            // 🔴 관찰이 대상을 죽이면 안 된다. 후보는 이미 커밋됐고 되돌아가지 않는다
+            log.warn("후보 알림에 실패했다 candidateId={} — 분석은 계속한다", candidateId, e);
         }
     }
 

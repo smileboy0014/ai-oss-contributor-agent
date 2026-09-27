@@ -1,6 +1,8 @@
 package com.ossagent.candidate.application;
 
 import com.ossagent.candidate.adapter.out.persistence.ContributionCandidateRepository;
+import com.ossagent.candidate.adapter.out.persistence.GeneratedChangeRepository;
+import com.ossagent.candidate.domain.GeneratedChange;
 import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.candidate.domain.ContributionCandidate;
 import com.ossagent.candidate.domain.ImplementationNotReadyException;
@@ -52,17 +54,20 @@ class CandidateImplementationWriter {
     private static final Logger log = LoggerFactory.getLogger(CandidateImplementationWriter.class);
 
     private final ContributionCandidateRepository candidates;
+    private final GeneratedChangeRepository changes;
     private final FindAnalyzableIssuesUseCase issues;
     private final AnalyzeRepositoryPolicyUseCase policies;
     private final ExecutionProperties properties;
     private final Clock clock;
 
     CandidateImplementationWriter(ContributionCandidateRepository candidates,
+            GeneratedChangeRepository changes,
             FindAnalyzableIssuesUseCase issues,
             AnalyzeRepositoryPolicyUseCase policies,
             ExecutionProperties properties,
             Clock clock) {
         this.candidates = candidates;
+        this.changes = changes;
         this.issues = issues;
         this.policies = policies;
         this.properties = properties;
@@ -138,8 +143,26 @@ class CandidateImplementationWriter {
                 candidate.startImplementing(clearance, properties.maxRetries(), clock);
 
         logAfterCommit(candidateId, transition);
-        return new ImplementationStart(candidateId, issue.repositoryId(),
-                issue.githubIssueNumber(), candidate.getAttempt(), transition);
+        return new ImplementationStart(candidateId, issue, candidate.getAttempt(), transition);
+    }
+
+    /**
+     * 🔴 생성 변경분을 남긴다 — <b>짧은 트랜잭션</b>이다 (#18).
+     *
+     * <p>{@code GeneratedChange.record(...)} 가 <b>유일한 생성 경로</b>이고 거기서 diff 를
+     * 스크럽한다 (S-4). 여기서는 저장만 한다.
+     *
+     * <p>⚠️ <b>덮어쓰지 않는다.</b> 재시도마다 새 행을 남긴다 — 덮어쓰면 무엇이 어떻게
+     * 바뀌었는지 추적이 사라진다.
+     *
+     * @param diff 🔴 <b>스크럽 전 원문</b>. 팩토리가 스크럽한다
+     * @return 저장된 행의 id — 로그 상관관계용
+     */
+    @Transactional
+    Long recordChange(Long candidateId, String branchName, String diff) {
+        GeneratedChange change = changes.save(
+                GeneratedChange.record(candidateId, branchName, diff, clock));
+        return change.getId();
     }
 
     /**
@@ -189,7 +212,15 @@ class CandidateImplementationWriter {
      * <p>🔴 <b>엔티티를 내보내지 않는다.</b> 트랜잭션 밖에서 엔티티를 들고 다니면
      * 지연 로딩이 터지거나(detached) 우연히 살아 있는 영속 컨텍스트에 기대게 된다.
      */
-    record ImplementationStart(Long candidateId, Long repositoryId, Integer issueNumber,
+    record ImplementationStart(Long candidateId, AnalyzableIssue issue,
             int attempt, StatusTransition transition) {
+
+        Long repositoryId() {
+            return issue.repositoryId();
+        }
+
+        Integer issueNumber() {
+            return issue.githubIssueNumber();
+        }
     }
 }

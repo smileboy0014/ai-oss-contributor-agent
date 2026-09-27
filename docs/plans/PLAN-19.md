@@ -2,6 +2,8 @@
 
 > 타입 `feature` · PRD §15. **이 게이트가 제품의 본질이다**(PRD §30).
 >
+> **rev.4 (구현 후)** — 구현하며 계획과 달라진 것 넷을 §3.1 에 적었다. 설계 축은 그대로다.
+>
 > **rev.3** — `gap-analyzer` 검토가 🔴 6건을 냈고 그중 하나는 **파이프라인을 전멸시키는
 > 설계**였다. 아래 §1 이 그것이다. rev.1→2 는 소유 도메인 정정(§0.1).
 
@@ -144,7 +146,9 @@ Q-3(전용 풀 1건)에서 **파이프라인 전체를 막는다.**
 ```
 candidate/domain/
   ChangeVerifier        능력 — 🔴 #18 이 선언 (이 PR 은 구현만)
-  VerificationRequest   값 — candidateId · attempt · workspacePath · ContributionConstraints · plannedPaths
+  VerificationRequest   값 — candidateId · coordinates · attempt · workspacePath
+                              · ContributionConstraints · plannedPaths        (rev.4)
+  VerificationSetupException  🔴 「검증을 시작조차 못 했다」 — 재시도 대상이 아니다  (rev.4)
   VerificationReport    값 — List<StageResult> + 전체 판정
   StageResult           값 — 🔴 compact 생성자가 요약을 redact
   VerificationStage     enum — COMPILE · TEST · DIFF
@@ -158,6 +162,17 @@ candidate/adapter/out/sandbox/
 
 ⚠️ `VerificationRequest` 에 **`attempt` 를 넣는다** — `AgentRun` 불변식이
 「같은 사이클의 행이 같은 `attempt`」라, 호출자가 넘겨야 한다.
+
+### 3.1 rev.4 — 구현하며 달라진 넷
+
+계획이 틀렸다기보다 **계획이 정하지 않은 자리**였다. 넷 다 구현하다 답이 강제됐다.
+
+| # | 무엇 | 왜 |
+|---|---|---|
+| 1 | `VerificationRequest` 에 **`coordinates` 추가** | 의존성 캐시 볼륨이 **저장소별**이다(`SandboxCacheVolume.forRepository`). 좌표 없이 만들면 전역 공유 볼륨이 되고, 한 저장소의 워밍이 남긴 것이 **다른 저장소의 실행을 오염**시킨다 (S-3 · Q-4) |
+| 2 | **`VerificationSetupException` 신설** | 「테스트가 깨졌다」와 「명령이 없다·쉘 메타문자·Maven」을 같은 것으로 다루면 **재시도 루프가 고칠 수 없는 것을 3바퀴 돈다**(Q-6 예산 3×3). 전자는 코딩이 고치고 후자는 **사람**이 고친다. ⚠️ 「빌드 실패는 예외가 아니다」와 어긋나지 않는다 — 그 규율은 **게이트가 작동한 모습**을 예외로 내보내지 말라는 것이고, 이것은 **게이트를 돌리지도 못한 것**이다 |
+| 3 | **`DIFF` 가 샌드박스를 2회 부른다** | `--numstat`(파일당 한 줄)로 **범위·바이너리·크기**를 먼저 보고, 통과한 뒤에만 본문(`--unified=0`)을 받는다. 한 덩어리로 받았으면 **큰 diff 하나가 범위 검사까지 `UNDETERMINED`** 로 만들고, 그러면 **가장 자주 쓰이는 게이트가 가장 자주 무력**해진다. 곁가지 이득 — 범위 검사를 통과한 시점엔 변경이 계획 파일 안이라 **본문이 잘릴 여지도 함께 줄어든다** |
+| 4 | **`testCommand` 부재 → `TEST` 가 `UNDETERMINED`** | rev.3 은 `UNDETERMINED` 를 「출력 파싱에 의존하는 판정」으로 좁혔는데, 이것은 파싱과 무관하면서 **판정 근거가 없는** 경우다. 축을 「파싱 의존」이 아니라 **「판정할 근거가 있는가」**로 한 겹 넓혔다. 🔴 `SKIPPED` 로 두면 안 된다 — 그쪽은 「앞이 멈춰서」라 **앞의 실패가 이미 설명**하지만, 이것은 아무도 설명하지 않는 공백이다.<br>⚠️ **대가**: `spring-kafka` 의 `testCommand` 를 #7 이 못 뽑으면 후보가 통과하지 못한다. 그래도 **돌리지 않은 테스트를 「통과」로 적는 것**보다 낫다 — 그 순간 이 제품의 게이트가 사라진다 |
 
 ---
 

@@ -124,6 +124,13 @@ tasks.withType<Test>().configureEach {
             .withPropertyName("harnessScripts")
             .withPathSensitivity(PathSensitivity.RELATIVE)
 
+    // 🔴 CI 워크플로우도 같은 이유로 선언한다 (#61). CiWorkflowTest 가 이 파일을 **텍스트로**
+    //   읽으므로, 선언하지 않으면 워크플로우만 고친 커밋에서 UP-TO-DATE 로 건너뛴다 —
+    //   요구 0(「돌기는 하는가」).
+    inputs.files(fileTree("$rootDir/.github/workflows") { include("**/*.yml") })
+            .withPropertyName("ciWorkflows")
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+
     // Testcontainers 가 물고 오는 docker-java 는 API 버전을 협상하지 않고 기본값(v1.32)으로
     // 요청하는데, 최신 Docker 엔진이 이를 400 으로 거부한다. 증상이
     // 「Could not find a valid Docker environment」라 Docker 가 안 떠 있는 것처럼 보이지만

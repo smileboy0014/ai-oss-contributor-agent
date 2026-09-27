@@ -425,3 +425,16 @@ Q-4 가 「실행 단계 `network=none` 이라 정상 코드인데 테스트가 
 |------|--------|----------|
 | 2026-09-27 | smileboy0014 | 초안 생성 |
 | 2026-09-27 | smileboy0014 | 계획 검토 반영 — 가드 3곳이 함께 바뀐다는 것과 화이트리스트 입력 도달 구멍을 §4·§6·§10 에 반영 |
+
+---
+
+## 사후 기록 (2026-09-28)
+
+🔴 **12행의 전제 「#22 가 Fork 확보·동기화·commit·push 를 끝내 `PublishedBranch` 까지 돌려준다」가 거짓이었다.**
+#22 는 능력만 만들고 배선을 이 이슈에 넘겼는데(PLAN-22 §2 S-6), 이 계획서는 그것을 「이미 됐다」로 읽어
+`resolveHead` 가 `GeneratedChange.commitSha` 를 「push 한 기록」으로 읽게 했다. 그 컬럼에 대입하는 코드는
+어디에도 없었으므로 이 게이트는 머지 시점부터 항상 실패했다.
+
+2026-09-28 에 push 를 이 UseCase 안에 배선했다(사유와 순서는 `CreateDraftPrUseCase` javadoc).
+같은 날 `GeneratedChange.testResult`·`reviewResult` 의 대입 경로도 만들었다 — PLAN-19·PLAN-20 이 각각
+「컬럼에 앉히는 것은 다른 이슈」로 넘겨 PR 본문의 검증 절이 늘 빈 값을 받고 있었다.

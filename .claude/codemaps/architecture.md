@@ -2,15 +2,16 @@
 
 > 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §6 System Architecture · §21 Redis Job Architecture · §25 Security Architecture (v1.2 Draft).
 > 내부 레이어링 규율은 [`../rules/conventions/architecture.md`](../rules/conventions/architecture.md), 넘으면 안 되는 선은 [`../rules/context/safety-boundaries.md`](../rules/context/safety-boundaries.md).
-> ⚠️ **대부분 비어 있다.** 아래 구조는 설계이고, 지금 존재하는 코드는 § 「구현 현황」의 ✅ 뿐이다.
+> ✅ **2026-09-28 기준 파이프라인 전 단계가 코드로 존재한다** — 등록 → 규약 → 수집 → 필터 → 분석 → (사람) 선정 → (사람) 착수 → 계획 → 코딩 → 검증 → 리뷰 → (사람) PR 생성 → Fork push → Draft PR.
+> 「코드가 있다」와 「`spring-kafka` 로 끝까지 돌아 봤다」는 다른 말이다 — **End-to-End 실측은 아직 없다**(§ 「구현 현황」 마지막 행).
 
 ## 시스템 구성 — 모듈러 모놀리스 · 인스턴스 1개
 
 ```
 ┌──────────────────────────── 진입 ─────────────────────────────┐
-│   개발자 (HTTP)                      Scheduler (예정)          │
-│   POST /api/repositories/{id}/scan   일 1회 스캔 트리거         │
-│   POST /api/candidates/{id}/...                               │
+│   개발자 (HTTP)                      Scheduler (기본 꺼짐)      │
+│   POST /api/repositories/{id}/scan   scan.schedule.enabled     │
+│   POST /api/candidates/{id}/{select·reject·implement·pull-request}  │
 └───────────────┬───────────────────────────┬───────────────────┘
                 ▼                           ▼
 ┌──────────────────────────────────────────────────────────────┐
@@ -77,15 +78,21 @@ com.ossagent.{도메인}
 | 4 | Filter | `issue` | 규칙 배제 — 종료됨 · 활성 PR · 요구 불명확 · 대규모 변경 | — |
 | 5 | Analysis | `candidate` ← `agent` | 기여 가능성 판정 → `DISCOVERED` → `ANALYZED` | LLM |
 | 6 | **Selection** | `candidate` | **사람이** 고른다 → `SELECTED` | — |
-| 7 | Repo Analysis | `agent` | 키워드 → 코드·테스트 검색으로 컨텍스트 축소 | GitHub |
-| 8 | Planning | `agent` | 구현 계획 수립 + 계획 검증 | LLM |
-| 9 | Coding | `agent` | Fork·브랜치·코드 수정·테스트 작성 | LLM · Sandbox |
-| 10 | Verification | `agent` | 컴파일 → 유닛 → 통합 → 포맷 → diff | **Sandbox** |
-| 11 | AI Review | `agent` | diff 리뷰. 실패 시 9로 회귀 | LLM |
-| 12 | Draft PR | `pullrequest` | Fork 에 push → **draft** PR 생성 | GitHub |
+| 7 | Repo Analysis | `repository` | 키워드 → 트리·파일 검색으로 컨텍스트 축소 (#15) | GitHub |
+| **8a** | **Implement 게이트** | `candidate` | **사람이** 착수를 누른다 → `IMPLEMENTING` (#18) | — |
+| 8 | Planning | `candidate` ← `agent` | 구현 계획 수립 + 계획 검증 (#16). 🔴 전이 **앞**에서 돈다 — 레이트리밋이면 후보는 `SELECTED` 그대로 | LLM · GitHub |
+| 9 | Coding | `candidate` ← `agent` | 호스트 워크스페이스에 코드 수정 (#18). **push 없음** | LLM |
+| 10 | Verification | `candidate` ← `agent` | 컴파일 → 테스트 → diff — `VerificationStage` **셋** (#19). 유닛/통합·포맷 칸은 입력이 없어 뺐다(glossary) | **Sandbox** |
+| 11 | AI Review | `candidate` ← `agent` | diff 리뷰 (#20). 실패 시 9 로 회귀 — 최대 3바퀴 (#21) | LLM |
+| **12a** | **PR 게이트** | `candidate` | **사람이** PR 생성을 누른다 (#23) | — |
+| 12 | Fork push + Draft PR | `pullrequest` | upstream 재clone + 저장된 diff 적용 → **Fork 에 push** → **draft** PR (#22·#23) | GitHub |
 | 13 | Human Review | — | 자동화 범위 밖 | — |
 
-6번과 13번이 **사람의 자리**다. 코드로 우회하지 않는다 — S-6.
+6 · 8a · 12a · 13 이 **사람의 자리**다. 코드로 우회하지 않는다 — S-6.
+
+⚠️ 12 의 push 는 **오랫동안 아무도 부르지 않았다.** #22 가 능력을 만들고 배선을 #23 에 넘겼는데
+#23 은 「#22 가 push 를 끝낸다」로 읽어, `commitSha` 가 영영 NULL 이었고 PR 게이트가 항상 실패했다.
+2026-09-28 에 `CreateDraftPrUseCase` 가 게이트 뒤에서 동기화 → push → PR 을 잇도록 배선했다.
 
 ## 외부 경계 4개 — 능력 인터페이스
 
@@ -111,16 +118,24 @@ com.ossagent.{도메인}
 ### GitHub 접근의 읽기/쓰기 분리 — S-1 을 구조로 지킨다
 
 ```
-support/github/GitHubApiClient       ← 공개 메서드는 get(...) 하나. 쓰기 동사가 존재하지 않는다
-        │                              RestClient 는 빈으로 노출하지 않는다 (post() 우회 차단)
-        ├── repository/adapter/out/github/GitHubRepositorySource   읽기
-        └── issue/adapter/out/github/GitHubIssueSource             읽기
+support/github/GitHubApiClient              ← 읽기. 공개 메서드는 get(...) 하나
+        ├── repository/adapter/out/github/GitHubRepositorySource · GitHubPolicyDocumentSource
+        └── issue/adapter/out/github/GitHubIssueSource
 
-(#22 · #23 에서 추가될 쓰기 경로는 별도 타입이고, push 직전 Fork owner 어설션을 갖는다)
+pullrequest/adapter/out/github/GitHubWriteClient   ← 🔴 쓰기. com.ossagent 전체에서 이 타입 하나 (#22)
+        │   (owner, name, subPath) 로 받아 매 호출 직전 Fork owner 를 단언하고 경로를 자기가 조립한다
+        ├── GitHubForkPublisher      fork 확보 · merge-upstream · blob/tree/commit/ref  (S-1)
+        └── GitHubDraftPrPublisher   POST /repos/{upstream}/pulls — draft 상수 고정     (S-2)
+
+둘은 GitHubRateLimitBudget 을 공유한다 — 갈리면 읽기가 태운 예산을 쓰기가 모른다
 ```
 
 classic PAT 은 저장소별 권한 제한이 불가능해 토큰 권한으로 원본 write 를 막을 수 없다(Q-1).
-그래서 **코드 표면이 방어선**이다 — 읽기 클라이언트에 쓰기 메서드를 더하지 않는다.
+그래서 **push 직전 owner 어설션이 유일한 방어**다. 「쓰기 메서드가 없다」는 방어가 아니다 —
+`spring-boot-starter-web` 이 `RestClient.Builder` 를 자동설정 빈으로 올려 누구나 `post()` 를
+할 수 있다(S-1). 실질 탐지는 `ForkPublishArchitectureTest` 의 **여집합 ArchUnit** 이다 —
+「쓰기 HTTP 를 하는 타입이 정확히 하나」. 어설션 면제는 `createFork`·`createDraftPullRequest` 둘이고
+후자의 실질 방어는 **호출 위치**(승인 게이트 뒤)다.
 
 자격증명은 값이 아니라 **공급자**(`GitHubCredentials`)로 주입한다. 다중 사용자 확장 경로인
 GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야 하기 때문이다 — Q-1 「남은 것」.
@@ -146,28 +161,33 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | 영역 | 상태 | 비고 |
 |---|---|---|
 | `repository` 등록·조회 API | ✅ | `RegisterRepositoryUseCase` |
-| `repository` 스캔 요청 접수 | ⚠️ 경계만 | **요청 사실만 기록**한다. 실제 수집 없음 |
-| `candidate` 상태 enum | ✅ | `CandidateStatus` 11종 |
-| `candidate` 조회 API | ✅ 구현 | 목록(필터·페이지네이션) · 상세 |
-| `candidate` 적재 경로 | ✅ 구현 | `AnalyzeIssuesUseCase`(#11) — 필터 통과 이슈를 LLM 으로 판정해 후보 생성. **트리거(#14)는 아직 없다** |
-| HTTP 예외 매핑 | ✅ | `support/web/ApiExceptionHandler` |
-| **파이프라인 메트릭** | ✅ | `support/observability` (#25) — 🔴 **태그를 만드는 유일한 지점**이 `PipelineMetrics` 이고 시그니처가 enum 만 받는다. 카디널리티 폭발과 식별자 유출이 같은 방향이라 한 곳에 가뒀다 (S-4). 잰다: LLM 토큰(입·출력)·단계 소요 시간·게이트 통과/차단·후보 상태 분포.<br>⚠️ 구현·테스트·리뷰·PR 지표는 **그 단계가 없어** 재지 않는다 — 0 고정 카운터는 「재고가 0」과 「아직 없다」를 구분하지 못한다 |
+| **`repository` 스캔 파이프라인** | ✅ | `POST /{id}/scan` → `202` + `GET /{id}/scan` 진행 조회 (#14). `ScanPipelineUseCase` 가 규약 → 수집 → 필터 → 분석을 잇고 🔴 **`ANALYZED` 에서 멈춘다**(S-6). 전용 풀 1스레드 · 중복 방어는 **프로세스 메모리**(`InMemoryScanExecutionRegistry`) — 다중 인스턴스에서 깨진다(#26) |
+| `repository` 규약 문서 변경 탐지 | ✅ | 지문(SHA-256)으로 「못 읽음」과 「그대로」를 가른다 (#68). 변경 + 영구 실패면 `NULL` 로 강등 |
+| `repository` 컨텍스트 축소 | ✅ | `BuildRepositoryContextUseCase` (#15) — 키워드 → 트리 → 파일. `SecretFilePolicy` 가 경로를 배제한다 |
+| `candidate` 상태 enum | ✅ | `CandidateStatus` 11종 · `SELECTED → FAILED`(계획 상한 소진 · #16) 포함 |
+| `candidate` 조회 API | ✅ | 목록(필터·페이지네이션) · 상세 |
+| `candidate` 적재 경로 | ✅ | `AnalyzeIssuesUseCase`(#11) — 스캔 파이프라인의 마지막 단계로 불린다 |
+| **승인 게이트 셋** | ✅ | `select`·`reject`(#24) · `implement`(#18) · `pull-request`(#23). `ApprovalGateArchitectureTest` 가 「web 어댑터만 부른다」를 고정 |
+| **구현 루프** | ✅ | `ImplementCandidateUseCase` — 계획(#16) → 코딩(#18) → 검증(#19) → 리뷰(#20) 를 **최대 3바퀴**(#21). 🔴 계획·clone 은 전이 **앞**(레이트리밋 → 503, 후보 불변). 바퀴별 벽시계 상한 `agent.execution.timeout-seconds` |
+| HTTP 예외 매핑 | ✅ | `support/web/ApiExceptionHandler` — `GitHubRateLimitException` → **503 + `Retry-After`**(지연, 실패 아님) |
+| **파이프라인 메트릭** | ✅ | `support/observability` (#25) — 🔴 **태그를 만드는 유일한 지점**이 `PipelineMetrics` 이고 시그니처가 enum 만 받는다. 카디널리티 폭발과 식별자 유출이 같은 방향이라 한 곳에 가뒀다 (S-4). 잰다: LLM 토큰·비용(#71)·단계 소요 시간·게이트 통과/차단·후보 상태 분포.<br>`PipelineStage` 는 스캔 넷(POLICY·SCAN·FILTER·ANALYZE) + 구현 넷(PLAN·CODE·VERIFY·REVIEW) + `PULL_REQUEST`. 뒤 다섯은 단계가 생긴 뒤에도 한동안 계측이 없어 대시보드가 0 을 보였다 — 2026-09-28 에 배선.<br>⚠️ PLAN-25 의 비율 지표(`implementation_success_rate` 등)는 **여전히 없다** — 단계 타이머의 `outcome` 태그로 파생한다 |
 | `Clock` 주입 | ✅ | `config/ClockConfig` |
 | **GitHub 읽기 클라이언트** | ✅ | `support/github` — 타임아웃·재시도 명시 · **403 을 권한/1차/2차 리밋으로 구분** · 레이트리밋 헤더 노출 · 자격증명 공급자 이음매. **쓰기 메서드 없음(S-1)** |
 | **GitHub 능력 인터페이스** | ✅ | `RepositorySource`(repository) · `IssueSource`(issue) + 어댑터 2 + 테스트 페이크 2 |
-| **시크릿 스크럽** | ⚠️ 동작함 | `support/secret` — `TokenRedactor`(토큰 5종 · `Authorization` 값 · URL 자격증명 · **PEM 블록**) + `SecretFilePolicy`(경로 배제, **소비자는 #15**). 강제 지점은 `IssueSnapshot`·`AgentRun.fail`·`ScrubbedRules`·어댑터 생성자. 드리프트·등록표·프롬프트 경계를 테스트가 고정 (#28)<br>⚠️ **`✅` 로 올리지 않았다** — 패턴 스크럽은 원리적으로 「알려진 모양」만 잡는다. 형식 하나가 빠지면 그 키는 통째로 나가고, 실제로 PGP·들여쓰기 본문이 그렇게 샜다(#28 리뷰). **닫혔다고 적으면 다음 사람이 확인하지 않는다** |
+| **시크릿 스크럽** | ⚠️ 동작함 | `support/secret` — `TokenRedactor`(토큰 5종 · `Authorization` 값 · URL 자격증명 · **PEM 블록**) + `SecretFilePolicy`(경로 배제 — 소비자는 `BuildRepositoryContextUseCase`(#15) · `GeneratedFile`(#18) · `FileChange`(#22/#23)). 강제 지점은 `IssueSnapshot`·`AgentRun.fail`·`ScrubbedRules`·`GeneratedChange.record/recordVerification/recordReview`·어댑터 생성자. 드리프트·등록표·프롬프트 경계를 테스트가 고정 (#28)<br>⚠️ **`✅` 로 올리지 않았다** — 패턴 스크럽은 원리적으로 「알려진 모양」만 잡는다. 형식 하나가 빠지면 그 키는 통째로 나가고, 실제로 PGP·들여쓰기 본문이 그렇게 샜다(#28 리뷰). **닫혔다고 적으면 다음 사람이 확인하지 않는다** |
 | **`RepositoryPolicy` 수집·판정** | ✅ | `AnalyzeRepositoryPolicyUseCase` — 「읽었는가」 3분류(READ·ABSENT·UNREADABLE) · 확장자 변종 8경로 · 일시적 실패는 **기록 없이 중단** · 보류·금지는 **엔티티가 재분석을 거부** · `assertContributionAllowed` 단언 (#7) |
-| `issue` 수집 UseCase | ❌ | 능력(`IssueSource`)은 있다. 커서·지연·멱등 저장이 없다 — #8 |
+| `issue` 수집·필터 | ✅ | `ScanIssuesUseCase`(#8) — `updated_at` 커서 + ETag · 레이트리밋은 `delayedUntil` 로 **지연** · 멱등 `UNIQUE(repository_id, github_issue_number)`. `FilterIssuesUseCase`(#9) — 3상태(`PASSED`·`UNDECIDED`·`REJECTED`) · 대외 호출 없음 |
 | **LLM 능력·어댑터** | ✅ | `LanguageModel`(agent/domain) + `AnthropicLanguageModel` — 송신 전 스크럽 필수(S-4) · 타임아웃·전송 재시도 명시 · 절단·거부는 예외 · **노출 빈은 기록 데코레이터 하나뿐** (#10) |
 | **LLM 토큰·비용 기록** | ✅ | `AgentRunRecorder`(agent/domain) ← `RecordAgentRunUseCase`(candidate/application). 실패도 남긴다 |
 | `agent` 샌드박스 | ✅ | `CodeSandbox` + `DockerCodeSandbox`(#17) · 3단계 오케스트레이터 `SandboxPipeline`(#18). 🔴 **명령은 화이트리스트 argv** — 대상 저장소 문자열이 그대로 실행되지 않는다 |
-| **`pullrequest` 도메인** | 부분 | ✅ Fork 확보·commit·push (#22) — **이 저장소에 처음 생긴 쓰기 경로**다. owner 어설션이 두 겹(`ForkRef` 값 타입 + `GitHubWriteClient` 쓰기 직전)이고, 후자가 유일한 방어다.<br>❌ Draft PR 생성은 #23.<br>🔴 **레이트리밋 예산을 읽기 클라이언트와 공유**한다(`GitHubRateLimitBudget`) — 갈리면 한쪽이 태운 예산을 다른 쪽이 모른다 |
-| Scheduler | ❌ | 없음 |
-| Redis 사용 | ❌ | `docker-compose.yml` 에만 존재 |
-| 스키마 마이그레이션 | ✅ | **Flyway** · `ddl-auto: validate` · `db/migration/V1` (테이블 1개) |
-| CI | ❌ | 유일한 게이트는 로컬 `./gradlew build` — **Q-10** |
+| **`pullrequest` 도메인** | ✅ | Fork 확보·동기화·commit·push (#22) — **이 저장소의 유일한 쓰기 경로**. owner 어설션이 두 겹(`ForkRef` 값 타입 + `GitHubWriteClient` 쓰기 직전)이고, 후자가 유일한 방어다. Draft PR 생성(#23) — `draft` 를 상수로 들고 `merge`·`ready_for_review` 호출은 **없는 것이 방어**.<br>🔴 **push 배선은 2026-09-28** — 그 전까지 `publish()` 의 호출자가 0 개였다(위 파이프라인 12 참조).<br>🔴 **레이트리밋 예산을 읽기 클라이언트와 공유**한다(`GitHubRateLimitBudget`) |
+| Scheduler | ✅ 기본 꺼짐 | `ScanScheduler`(#14) — `scan.schedule.enabled=false` 가 기본. 켜는 것은 배포 결정. `@Profile("worker")` 는 Q-3 을 닫을 때 |
+| Redis 사용 | ❌ | `docker-compose.yml`·`.env.example` 에만 존재. 잡 큐·분산 락은 Q-3 · #26 |
+| 스키마 마이그레이션 | ✅ | **Flyway** `V1`~`V9` · `ddl-auto: validate` · 7테이블 — [`data.md`](./data.md) |
+| CI | ✅ | `.github/workflows/build.yml` — `./gradlew build` + `secret-scan.sh` · `safety-boundary-check.sh` 재실행 (Q-10 · #27). branch protection 은 아직 |
+| **`spring-kafka` End-to-End 실측** | ❌ | 한 후보가 Draft PR 까지 도달한 기록이 없다 — Q-4 종결 조건이자 MVP 정의(PRD §28). push 가 배선되기 전에는 원리적으로 불가능했다 |
 
-**「경계만」을 「구현됨」으로 읽지 않는다.** 스캔 API 가 200 을 돌려준다고 이슈가 수집된 것이 아니다.
+**「코드가 있다」를 「돌아 봤다」로 읽지 않는다.** 위 ✅ 는 전부 대역(페이크·MockRestServiceServer·WireMock)으로 검증된 것이고, 실 GitHub·실 LLM·실 샌드박스를 이어 돌린 기록은 아직 없다.
 
 ## 모듈 승격 기준
 
@@ -186,3 +206,4 @@ GitHub App user-to-server 토큰은 단수명이라 요청마다 갱신되어야
 | 일자 | 작성자 | 변경 내용 |
 |------|--------|----------|
 | 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 · 헥사고날 라이트 기준 |
+| 2026-09-28 | gt.park | 구현 현황을 #14~#23·#68·#71 이후로 갱신 — 파이프라인 표에 게이트 8a·12a 추가 · 검증 3단계 · 쓰기 클라이언트 절 · Fork push 미배선 발견과 배선 · CI/스케줄러/마이그레이션 행 정정 · E2E 실측 미완 행 신설 |

@@ -2,8 +2,8 @@
 
 > 기준 — [PRD](../../docs/ai-oss-contributor-agent-prd.md) §9 Issue Discovery · §10 Candidate State Machine · §11 Issue Analysis · §15 Verification Pipeline · §17 Retry Strategy (v1.2 Draft).
 > 비즈니스 규칙과 상태머신. **구현 전에 이 맵을 확인하고 일치시킬 것.**
-> ⚠️ **상태머신은 구현됐다**(#12) — 전이 규칙·불변식 ①②⑧·재시도 상한이 `candidate/domain` 에 있다.
-> **필터·검증 파이프라인은 여전히 미구현**이고, 전이를 부르는 UseCase·엔드포인트도 아직 없다(#13 · #24).
+> ✅ **상태머신·필터·검증·재시도 루프·승인 게이트 셋이 전부 구현됐다**(#12 · #9 · #19 · #21 · #24 · #18 · #23).
+> 2026-09-28 기준 이 문서의 전이 표는 `CandidateStatus` 와 일치한다. 남은 것은 **`spring-kafka` End-to-End 실측**이다.
 
 ## 파이프라인
 
@@ -77,20 +77,21 @@
 | From | To | 트리거 | 주체 |
 |---|---|---|---|
 | — | `DISCOVERED` | **배제되지 않은** 이슈로 후보 생성 | 스캐너 |
-| `DISCOVERED` | `ANALYZING` | 분석 배치가 집어 든다 — `AnalyzeIssuesUseCase`(#11). ⚠️ **`POST /candidates/{id}/analyze` 는 만들지 않는다** — PRD v1.2 가 §23 에서 지웠다(#30). 분석은 스캔 파이프라인의 한 단계이지 사람이 거는 호출이 아니다. 지금도 저장소 단위 배치뿐이고 트리거는 #14 | 시스템 |
+| `DISCOVERED` | `ANALYZING` | 분석 배치가 집어 든다 — `AnalyzeIssuesUseCase`(#11). 트리거는 스캔 파이프라인의 마지막 단계(#14). ⚠️ **`POST /candidates/{id}/analyze` 는 만들지 않는다** — PRD v1.2 가 §23 에서 지웠다(#30). 분석은 스캔 파이프라인의 한 단계이지 사람이 거는 호출이 아니다 | 시스템 |
 | `ANALYZING` | `ANALYZED` | LLM 분석 산출물 저장 | 시스템 |
 | `ANALYZING` | `FAILED` ● | **분석 실패 — 즉시 종단** (Q-6: `ANALYZE`·`PLAN` 은 재시도 없음) | 시스템 |
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` · `breaking_change=true` · **`confidence < agent.analysis.min-confidence`**(#11) | 시스템 |
 | `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
 | `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject`. 🔴 `cancelSelection` 이 출발 상태를 **직접** 본다 — 전이표에는 `ANALYZED → REJECTED` 도 있어서 맡겨 두면 `rejectAsInfeasible`(시스템 판정)과 같은 것이 된다 | **사람** |
-| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`) | **사람이 트리거** |
+| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`, #18). 🔴 계획·컨텍스트·clone 은 **이 전이 앞**에서 돈다 — 그 구간의 레이트리밋은 503 + `Retry-After` 이고 후보는 `SELECTED` 그대로다(지연 ≠ 실패) | **사람이 트리거** |
+| `SELECTED` | `FAILED` ● | **구현 계획을 세우지 못했다** — `agent.plan.max-attempts` 소진 (#16). `REJECTED` 가 아니다: 그쪽은 사람의 선택 취소다 | 시스템 |
 | `IMPLEMENTING` | `TESTING` | 코드 생성 완료 | 시스템 |
 | `TESTING` | `REVIEWING` | 빌드·테스트 통과 | 시스템 |
 | `TESTING` | `IMPLEMENTING` | 테스트 실패 → 에러 분석 후 재시도 | 시스템 |
 | `REVIEWING` | `READY_FOR_PR` | AI 리뷰 통과 | 시스템 |
 | `REVIEWING` | `IMPLEMENTING` | 리뷰 실패 → 재시도 | 시스템 |
 | `IMPLEMENTING`·`TESTING`·`REVIEWING` | `FAILED` ● | **재시도 상한 소진** | 시스템 |
-| `READY_FOR_PR` | `PR_CREATED` ● | PR 생성 요청 (`POST /candidates/{id}/pull-request`) → Fork push + **draft** PR | **사람이 트리거** |
+| `READY_FOR_PR` | `PR_CREATED` ● | PR 생성 요청 (`POST /candidates/{id}/pull-request`, #23) → 정책 재확인 → Fork 동기화 → **upstream 재clone + 저장 diff 적용 → Fork push**(S-1) → **draft** PR(S-2). push 는 게이트 **뒤**에서만 일어난다 | **사람이 트리거** |
 
 ● = **종단 상태**. `PR_CREATED` · `REJECTED` · `FAILED` 셋이다.
 
@@ -101,8 +102,8 @@ S-6 이 요구하는 승인 지점이다. **스케줄러·워커가 이 선을 �
 | 게이트 | 엔드포인트 | 구현 | 넘으면 |
 |---|---|---|---|
 | 선정 | `POST /candidates/{id}/select` | ✅ #24 | 자동 선정 — 제품 정의 붕괴 |
-| 착수 | `POST /candidates/{id}/implement` | ⬜ #18 | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
-| **PR 생성** | `POST /candidates/{id}/pull-request` | ✅ #23 | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
+| 착수 | `POST /candidates/{id}/implement` | ✅ #18 (루프는 #21) | 비용이 통제 없이 나간다 (LLM · 샌드박스 30분) |
+| **PR 생성** | `POST /candidates/{id}/pull-request` | ✅ #23 (push 배선 2026-09-28) | **검증 안 된 코드가 메인테이너 큐로** — S-2 |
 
 ⚠️ **`implement` 가 PR 까지 흘려보내지 않는다.** PRD §24 시퀀스가 `implement` 한 번으로
 Draft PR 까지 그려 두었던 것이 결함이었고, **PRD v1.2 에서 게이트 셋으로 정정됐다**(#30).
@@ -112,25 +113,25 @@ Draft PR 까지 그려 두었던 것이 결함이었고, **PRD v1.2 에서 게�
 지우는 것이 아니라 **종단 상태로 전이시키는 행위**이고, 후보 행은 그대로 남아
 「골랐다가 물렸다」는 기록이 된다.
 
-### 🔴 남은 하나를 「아직 안 만든 것」으로 읽지 않는다 (2026-09-27 개정 · #23)
+### 셋이 다 열렸다 — 그러나 「열렸다」와 「끝까지 통한다」는 다르다 (2026-09-28 개정)
 
-#24 는 셋 중 **하나만** 열었다. 나머지 둘을 미룬 것은 일정 문제가 아니라 **지금 열면 후보가
-빠져나올 수 없는 상태에 갇히기 때문**이었다. **#23 이 그중 하나를 해소했다.**
+#24 는 셋 중 **하나만** 열었고, 나머지 둘을 미룬 것은 **지금 열면 후보가 빠져나올 수 없는 상태에
+갇히기 때문**이었다. #18 과 #23 이 각각 실행기·생성기와 **같은 PR 에서** 열어 그 조건을 없앴다.
 
-| 엔드포인트 | 열면 어땠나 | 지금 |
+| 엔드포인트 | 열면 어땠나 | 어떻게 해소했나 |
 |---|---|---|
-| `implement` | `IMPLEMENTING` 에서 **나갈 트리거가 없다.** 실행기(#18)가 없으니 후보가 거기 영원히 멈춘다 | ⬜ **여전히 404** |
-| `pull-request` | PR 을 만들 코드가 없으니 **PR 없이 종단 `PR_CREATED`** 가 된다 | ✅ **#23 이 PR 생성기와 함께 열었다** |
+| `implement` | `IMPLEMENTING` 에서 **나갈 트리거가 없다** | ✅ #18 이 코딩·검증 실행기와 함께, #21 이 루프·상한 소진을 붙여 열었다 |
+| `pull-request` | PR 을 만들 코드가 없으니 **PR 없이 종단 `PR_CREATED`** | ✅ #23 이 PR 생성기와 함께 열었다 — ① 대외 호출이 **성공한 뒤에만** 쓰기 트랜잭션 ② `markPrCreated` 가 **`PullRequest` 를 인자로 요구** |
 
-🔴 **#23 이 그 조건을 어떻게 없앴나** — 둘이 함께 서야 한다.
+🔴 **그런데 `pull-request` 는 열린 채 항상 실패했다.** #22 가 만든 `ForkPublisher.publish` 를
+아무도 부르지 않아 `GeneratedChange.commitSha` 가 영영 NULL 이었고, `CreateDraftPrUseCase` 는
+그것을 「push 한 기록이 없다」로 읽어 예외로 끝났다. PLAN-22 는 「배선은 #23」, PLAN-23 은
+「#22 가 push 를 끝낸다」로 **서로에게 넘긴 채 머지**됐다. 2026-09-28 에 게이트 뒤에서
+동기화 → 재clone + diff 적용 → push → sha 기록 → PR 순서로 배선했다.
+**「엔드포인트가 409 를 낸다」는 문이 열렸다는 증거지, 문 뒤에 길이 있다는 증거가 아니다.**
 
-1. **순서** — 대외 호출이 **성공한 뒤에만** 쓰기 트랜잭션을 연다. 뒤집으면 종단이 먼저 커밋된다
-2. **타입** — `markPrCreated` 가 **`PullRequest` 를 인자로 요구**한다. PR 없이 전이하는 것이
-   표현 불가능하고, 같은 메서드가 양방향을 채워 같은 트랜잭션에서도 애그리거트가 자기 PR 을 본다
-
-`CandidateApprovalApiTest` 는 이제 **`implement` 만** 404 로 고정하고, `pull-request` 는
-**409**(`READY_FOR_PR` 이 아니다)인 것을 고정한다 — **404 가 아니라 409 라는 것이
-「문이 열렸다」의 증거**다.
+`CandidateApprovalApiTest` 는 세 게이트의 **거부 상태 코드**(403·409)를 고정한다. 404 회귀는
+문이 열리며 지웠다 — 열린 문에 404 를 계속 요구하면 회귀가 아니라 거짓말이 된다.
 
 ### 승인 게이트를 구조로 고정한 것 — #24
 
@@ -344,24 +345,30 @@ LLM 출력은 **구조화해서 저장한다.** 원문을 정본으로 삼으면
 
 ## 검증 파이프라인 (PRD §15)
 
-**전부 샌드박스 안에서** 순서대로 수행한다. 앞 단계가 실패하면 뒤를 실행하지 않는다.
+**전부 샌드박스 안에서** 순서대로 수행한다. 앞 단계가 실패하면 뒤를 실행하지 않는다 — `SandboxChangeVerifier`(#19).
 
 ```
-Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff Inspection ─▶ AI Review
-   │           │               │
-   └───────────┴───────────────┴──▶ Error Analysis ──▶ (재시도)
+COMPILE ─▶ TEST ─▶ DIFF ─▶ (AI Review — 검증 밖, REVIEW 단계)
+   │        │       │
+   └────────┴───────┴──▶ RetryPolicy ──▶ Retry(IMPLEMENTING 회귀) · Stop(FAILED)
 ```
 
-| 단계 | 판정 | 실패 시 |
+| 단계 (`VerificationStage`) | 판정 | 실패 시 |
 |---|---|---|
-| Compile | 빌드 성공 여부 | 에러 분석 → `IMPLEMENTING` 회귀 |
-| Unit / Integration Test | `RepositoryPolicy.test_command` 로 실행 | 〃 |
-| Format / Lint | 대상 저장소의 포맷터 규칙 | 〃 |
-| Diff Inspection | 의도 외 변경 혼입 검사 — 무관 파일 · 디버그 잔재 · 대량 포맷 노이즈 | 〃 |
-| AI Review | LLM diff 리뷰 | `IMPLEMENTING` 회귀 |
+| `COMPILE` | `RepositoryPolicy.build_command` 종료 코드 | `Retry` → `IMPLEMENTING` 회귀 |
+| `TEST` | `RepositoryPolicy.test_command` 종료 코드. 규약에 명령이 없으면 **`UNDETERMINED`** | `Retry` / `UNDETERMINED` 면 `Stop` |
+| `DIFF` | 의도 외 변경 혼입 검사 — 계획 밖 파일 · 디버그 잔재 · 대량 포맷 노이즈. 출력이 `sandbox.max-output-chars` 에서 잘리면 **`UNDETERMINED`** | 〃 |
+| AI Review (`REVIEW`) | LLM diff 리뷰 — 판정 셋(`PASS`·`CHANGES_REQUESTED`·`UNDETERMINED`) (#20) | `CHANGES_REQUESTED` → 회귀 · `UNDETERMINED` → `Stop` |
+
+⚠️ PRD §15 의 「Unit → Integration → Format/Lint」 다섯 칸은 **셋으로 줄였다**(glossary 「Verification」).
+포맷 명령은 `RepositoryPolicy` 에 필드가 없어 하드코딩하면 대상 저장소 규약을 우리 어휘로 대체하는
+것이고(S-5), 통합 테스트는 `testCommand` 가 하나뿐인데다 실행 단계가 `network=none` 이라 정상 코드가
+실패한다(Q-4). **이름만 있는 칸을 두지 않는다.**
 
 **빌드 판정은 출력 문자열이 아니라 종료 코드로 한다.** 파이프로 자른 출력만 보고 성공 판정하면
 파이프 종료 코드가 마지막 명령으로 덮여 실패를 통과로 읽는다.
+**결과는 그 바퀴의 `generated_change.test_result`·`review_result` 에 남는다** — 2026-09-28 까지는
+값 타입만 있고 컬럼에 앉히는 코드가 없어 PR 본문의 검증 절이 늘 비어 있었다.
 
 ---
 
@@ -380,7 +387,7 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 | 항목 | 값 |
 |---|---|
 | 상한 | `agent.execution.max-attempts: 3` (`application.yml`) |
-| 단계 타임아웃 | `agent.execution.timeout-seconds: 1800` (30분) |
+| **바퀴** 타임아웃 | `agent.execution.timeout-seconds: 1800` (30분) — `CODE→VERIFY→REVIEW` 한 바퀴의 벽시계 상한. 단계마다 확인하고 넘었으면 다음 단계로 가지 않고 `Stop`(재시도 아님 — 같은 입력에 같은 시간이 든다). ⚠️ 2026-09-28 까지는 값만 검증되고 **아무도 읽지 않는 키**였다. 단계 안은 `agent.llm.timeout`·`SANDBOX_TIMEOUT_SECONDS` 가 각자 막는다 |
 | 상한 소진 | `FAILED` — **그 자체가 사람에게 넘기는 신호다** |
 
 ✅ **「3회」의 단위는 `CODE → VERIFY → REVIEW` 한 바퀴다** — Q-6 확정 (2026-09-25).
@@ -428,10 +435,10 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 #### 🔴 루프의 성공 종착은 `READY_FOR_PR` 이다 — S-2
 
 `PR_CREATED` 로 가지 않는다. 그 다음은 **세 번째 승인 게이트**(#23)다.
-`ApprovalGateArchitectureTest` 가 **여집합**으로 고정한다 —
-「`com.ossagent` 전체에서 `markPrCreated` 를 부르는 타입이 **0개**」.
-⚠️ 허용목록이 아니다: 정당한 호출자는 #23 이고 지금은 아무도 아니다.
-**#23 이 여는 날 그 테스트가 함께 빨개지는 것**이 장치다.
+`ApprovalGateArchitectureTest` 가 고정한다 — 「`markPrCreated` 를 부르는 타입은
+`CandidatePrWriter` 하나」(허용목록 · #23 이 열며 0 개에서 하나로 바뀌었다) 와
+「그 UseCase(`CreateDraftPrUseCase`)를 부르는 것은 web 어댑터뿐」. 미끼(`AutoPrCreateProbe`)를
+두어 규칙이 실제로 무는지 함께 단언한다.
 
 #### 실패 사유가 DB 에 남는다 (S-4)
 
@@ -446,8 +453,9 @@ Compile ─▶ Unit Test ─▶ Integration Test ─▶ Format/Lint ─▶ Diff 
 |---|---|
 | **같은 실패 2회 조기 중단이 발화하지 않을 수 있다** | 지문 재료가 빌드 출력이라 타임스탬프·경로가 섞이면 같은 오류라도 갈린다. 실측 전에는 정규화하지 않는다(거부목록이 된다). 물지 못해도 **상한이 뒤를 받친다** |
 | 🔴 **Q-4 — 네트워크를 요구하는 테스트가 3바퀴를 태운다** | 정상 코드가 `FAILED` 로 떨어진다. #21 이 그 비용을 **1회에서 3회로 증폭**시켰다. 고칠 주체는 Q-4 다 |
-| **루프 전체 상한이 없다** | 바퀴별 상한(1800s)만 있다. 최악 90분. 실행 프로필 분리(Q-3)와 함께 본다 |
-| **바퀴마다 통행증을 다시 받지 않는다** | 루프가 도는 동안 대상 저장소가 AI 기여 금지로 바뀌어도 **막는 것이 없다**(S-5). #23 에 인계 |
+| **루프 전체 상한이 없다** | 바퀴별 벽시계 상한(`agent.execution.timeout-seconds`)만 있다. 최악 90분. 실행 프로필 분리(Q-3)와 함께 본다 |
+| **바퀴마다 통행증을 다시 받지 않는다** | 루프가 도는 동안 대상 저장소가 AI 기여 금지로 바뀌어도 루프 안에서는 막는 것이 없다. ✅ **PR 게이트가 재확인한다**(`CreateDraftPrUseCase` → `assertContributionAllowed`, #23) — 나가는 문에서 걸리므로 S-5 는 지켜진다. 루프가 태우는 비용은 막지 못한다 |
+| 🔴 **Q-4 종결 조건 — `spring-kafka` 실측 미완** | 워밍 → 씨딩 → 오프라인 실행 → push → PR 을 실 대상으로 한 번도 통과시키지 않았다. push 가 배선되기 전에는 원리적으로 불가능했다 |
 
 ---
 
@@ -474,7 +482,8 @@ oss-agent/issue-{issueNumber}-{short-description}
 [`../rules/conventions/architecture.md`](../rules/conventions/architecture.md) 규율 ④.
 
 ⚠️ 불변식 ⑧(재시도 상한)은 `AgentRun` 컬렉션을 세어 판정하지 않는다.
-경계가 다르므로 **후보 루트가 자기 상태로** 들고 있어야 한다. 형태는 Q-6 확정 후(#21).
+경계가 다르므로 **후보 루트가 자기 상태로** 들고 있다 — `contribution_candidate.attempt`(V4 · #12),
+절대 상한은 도메인 상수 `MAX_ALLOWED_ATTEMPTS = 3`. `retryImplementation` 이 판정한다(#21).
 
 ## 변경 이력
 
@@ -482,3 +491,4 @@ oss-agent/issue-{issueNumber}-{short-description}
 |------|--------|----------|
 | 2026-09-18 | smileboy0014 | 초안 생성 — PRD v1.1 §9~§17 기준 · 불변식 10개 신설 |
 | 2026-09-27 | smileboy0014 | PRD v1.2 반영 — `POST /candidates/{id}/analyze` 는 **만들지 않는다**로 확정(§23 에서 삭제) · §24 참조 갱신 (#30) |
+| 2026-09-28 | gt.park | 코드와 재대조 — 착수 게이트 ✅(#18) · `SELECTED → FAILED` 행 추가(#16) · 검증 5단계 → 3단계 · `markPrCreated` 허용목록 · 바퀴 타임아웃 배선 · **Fork push 미배선 발견·배선** · E2E 실측 미완 명시 |

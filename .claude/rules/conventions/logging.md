@@ -106,9 +106,9 @@ logging:
 | 키 | 값 | 넣는 곳 |
 |---|---|---|
 | `repositoryId` | 식별자 | `ScanExecutor` |
-| `candidateId` | 식별자 | `AnalyzeIssuesUseCase` · `RecordingLanguageModel` |
-| `stage` | **enum** | `ScanPipelineUseCase`(파이프라인) · `RecordingLanguageModel`(LLM) |
-| `attempt` | 숫자 | `RecordingLanguageModel` |
+| `candidateId` | 식별자 | `AnalyzeIssuesUseCase` · `RecordingLanguageModel` · `ImplementCandidateUseCase` · `SandboxChangeVerifier` · `CandidatePrWriter` |
+| `stage` | **enum 이름 리터럴** | `ScanPipelineUseCase`(파이프라인) · `RecordingLanguageModel`(LLM) · `ImplementCandidateUseCase`(`PLAN`·`CODE`·`VERIFY`·`REVIEW`) · `SandboxChangeVerifier` |
+| `attempt` | 숫자 | `RecordingLanguageModel` · `ImplementCandidateUseCase` · `SandboxChangeVerifier` |
 
 **로그 포맷은 모든 줄에 붙으므로 여기가 오염되면 전부 오염된다.**
 이슈 제목·본문·LLM 응답·예외 메시지를 넣지 않는다 — `MdcLogPatternTest` 가 소스를 훑어 막는다.

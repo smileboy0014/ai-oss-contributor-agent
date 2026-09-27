@@ -49,19 +49,19 @@
 
 | # | 요구 | 어디서 다루나 | 이 PR |
 |---|---|---|---|
-| 1 | 계획 목록대로 수정 · **계획 밖 파일을 건드리면 중단** | D-2 · **D-7** · 검증 2·3 | ⬜ 예외 타입만 · **던지는 코드 0건** |
-| 2 | 규약이 테스트 요구하면 테스트 생성 | §4 C2 (`ContributionConstraints.testsRequired`) | ⬜ `testsRequired()` 호출자 0건 |
-| 3 | 포맷터 적용 | 🔴 **D-12 — 못 한다. `SKIPPED` + 사유를 기록한다** | 🟡 의도적 잔여. **기록 코드도 D 에서** |
-| 4 | diff → `generated_change` 영속화 | §4 D3 · **D-8(스크럽)** | 🟡 `record(...)` ○ · **부르는 코드 0건** |
-| 5 | 모든 실행 샌드박스 경유 | §4 D1 · **B4(오케스트레이터)** | ⬜ B4·B5·B6 전부 미구현 |
-| 6 | `AgentRun` stage·attempt·토큰 기록 | §4 C3 | ⬜ `LlmCallSite.CODE` 운영 사용처 0건 |
+| 1 | 계획 목록대로 수정 · **계획 밖 파일을 건드리면 중단** | D-2 · **D-7** · 검증 2·3 | ✅ diff 경로 집합 게이트 · 물림 1+1 RED |
+| 2 | 규약이 테스트 요구하면 테스트 생성 | §4 C2 (`ContributionConstraints.testsRequired`) | 🟡 프롬프트에 실린다 · **생성 여부는 검증하지 않는다**(#19) |
+| 3 | 포맷터 적용 | 🔴 **D-12 — 못 한다. `SKIPPED` + 사유를 기록한다** | 🟡 의도적 잔여 · **기록 자리는 `recordVerification`(#19)** |
+| 4 | diff → `generated_change` 영속화 | §4 D3 · **D-8(스크럽)** | ✅ `recordChange(...)` 가 파이프라인에서 불린다 |
+| 5 | 모든 실행 샌드박스 경유 | §4 D1 · **B4(오케스트레이터)** | 🟡 B4·B5·B6 ✅ · **부르는 코드는 #19** |
+| 6 | `AgentRun` stage·attempt·토큰 기록 | §4 C3 | 🟡 `CODE` 호출은 기록된다 · **후보 단위 실패 사유는 미기록**(#21) |
 | 7 | `POST /implement` 개방 + 404 회귀 **수정** | §4 A3·A4 | ✅ |
 | 8 | `implement` 가 PR 까지 안 간다 | §4 A2 · 검증 6 | ✅ |
 | 9 | `PolicyClearance` 로 `startImplementing` | §4 A2 | ✅ |
-| 10 | 후보→이슈→`repositoryId` 조회 | D-5 · §4 A1 | 🟡 `repositoryId` ○ · 🔴 **좌표 조달 경로 없음** |
+| 10 | 후보→이슈→`repositoryId` 조회 | D-5 · §4 A1 | ✅ `coordinatesOf(...)` 로 조달 — 엔티티 import 없음 |
 | 11 | **통행증과 후보가 같은 저장소** — 호출자가 보장 | **D-5 불변식 · 검증 4** | ✅ 물림 2 RED |
 | 12 | 통행증은 스냅샷(TOCTOU) · 샌드박스는 트랜잭션 밖 | §4 A2 · 검증 10 | ✅ |
-| 13 | `PolicyClearance` 가 `adapter/in` 안 넘음 | 검증 5 | ⚠️ 기존 가드가 **새 경로를 덮는지 미확인** |
+| 13 | `PolicyClearance` 가 `adapter/in` 안 넘음 | 검증 5 | ✅ 새 경로에도 통행증이 `adapter/in` 에 나타나지 않는다 |
 | 14 | 재시도 바퀴마다 통행증 재확인 여부 **결정** | **D-6** | ✅ 결정 + 잔여 위험 기록 |
 | 15 | `SelectedFile` 재구성 안 함 | D-3 | ✅ |
 | 16 | 새 경로 만들면 스크럽 강제 + 돌연변이 | D-3 · 검증 9 | ✅ 물림 2 RED |
@@ -69,16 +69,22 @@
 | 18 | 보류·금지 후보가 구현 단계 못 감 (403) | 검증 1 | ✅ |
 | 19 | 보류는 사람이 해소 (Q-8) | §7 — 기존 경로를 **깨지 않는다** | ✅ |
 
-**집계 — ✅ 11 · 🟡 4 · ⬜ 4 · ⚠️ 1.** 남은 것은 전부 **C 구현·D** 에 걸려 있다.
+**집계 — ✅ 15 · 🟡 4 · ⬜ 0 · ⚠️ 0** (2026-09-27 · C·D 완료 후 갱신).
 
-### 🔴 10번의 잔여가 가장 위험하다 — 계획서가 스스로 경고한 자리다
+🟡 4건은 전부 **소비자가 이 이슈 밖**이라는 같은 모양이다 — 2·3·5 는 #19(검증),
+6 의 잔여는 #21(재시도 루프)이다. 「계약은 섰는데 부르는 코드가 없다」이지
+「안 만들었다」가 아니다. 그 구분이 흐려지면 다음 사람이 ✅ 로 읽는다.
 
-D-5 가 「좌표 조달 경로를 §4 에 **행으로 둔다 — 없으면 구현 중 「그냥 import 하자」가 나온다**」고
-적었는데, **그 행(A1)이 미구현인 채로 D 로 넘어간다.**
+### ✅ 10번(좌표 조달)은 닫혔다 — 계획서의 경고가 맞았다
 
-`JGitWorkspaceSource.fetch(RepositoryCoordinates, …)` 는 좌표를 **요구**하는데
-`ImplementationStart` 가 나르는 것은 `repositoryId`·`issueNumber` 뿐이다.
-🔴 **D 를 채우는 사람이 규율 ④ 를 깨뜨릴 가장 유력한 지점**이다.
+D-5 가 「좌표 조달 경로가 없으면 구현 중 **「그냥 import 하자」가 나온다**」고 적어 뒀고,
+D 에 들어갈 때 실제로 그 자리에 섰다 — `JGitWorkspaceSource.fetch` 는 좌표를 요구하는데
+`ImplementationStart` 가 나르는 것은 `repositoryId` 뿐이었다.
+
+`AnalyzeRepositoryPolicyUseCase.coordinatesOf(repositoryId)` 를 열어 **값으로** 받는다.
+`OssRepository` 엔티티는 `candidate` 에 들어오지 않는다 — 규율 ④.
+`ApprovalGateArchitectureTest` 의 「`candidate` 가 `repository.domain` 에서 보는 것은
+값 타입뿐」 규칙이 **허용 목록 방식**이라, 엔티티를 끌어오면 그 자리에서 빨개진다.
 
 ---
 

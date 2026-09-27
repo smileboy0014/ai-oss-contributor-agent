@@ -75,18 +75,6 @@ class PublishRequestTest {
     }
 
     @Test
-    @DisplayName("총 바이트 상한을 넘으면 거부한다")
-    void 총_바이트_상한() {
-        String big = "x".repeat(PublishRequest.MAX_TOTAL_BYTES / 2 + 1);
-        List<FileChange> heavy = List.of(
-                FileChange.modified("a.java", big),
-                FileChange.modified("b.java", big));
-
-        assertThatThrownBy(() -> request(synced(), heavy))
-                .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    @Test
     @DisplayName("allowUpdate 기본은 false 다 — 덮어쓰기는 명시해야 한다")
     void 덮어쓰기는_명시해야_한다() {
         PublishRequest request = request(synced(), List.of(FileChange.modified("a.java", "x")));

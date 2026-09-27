@@ -24,9 +24,14 @@ import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
 import com.ossagent.repository.application.BuildRepositoryContextUseCase;
 import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.RepositoryCoordinates;
+import com.ossagent.support.observability.PipelineMetrics;
+import com.ossagent.support.observability.PipelineStage;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -62,10 +67,23 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
  * {@link CandidateImplementationWriter} 를 통해 부른다. <b>같은 빈 안에서 부르면
  * 프록시가 적용되지 않는다</b>는 함정(self-invocation)을 구조로 피한 것이다.
  *
- * <h2>⚠️ 지금은 1바퀴만 돈다</h2>
+ * <h2>순서 — 대외 읽기는 전이 <b>앞</b>이다</h2>
  *
- * <p>{@code CODE → VERIFY → REVIEW} 루프와 {@code attempt} 상한 소진 판정은 <b>#21</b> 이다.
- * 여기서는 검증을 한 번 부르고, 실패하면 {@code FAILED} 로 떨어뜨린다.
+ * <pre>
+ * admit(판정만)  →  PLAN · 컨텍스트 · clone  →  start(전이 SELECTED→IMPLEMENTING)  →  루프
+ *                   ↑ GitHub·LLM 을 읽는다. 여기서 레이트리밋이면 후보는 SELECTED 그대로 (503)
+ * </pre>
+ *
+ * <p>원래는 전이가 먼저였고 계획이 그 뒤였다. 그러면 계획 단계의 레이트리밋 한 번이 후보를
+ * {@code IMPLEMENTING → FAILED} 로 보냈다 — 「리밋은 실패가 아니라 지연」(glossary)의 위반이고,
+ * PLAN-15 가 #16 에 넘긴 번역이 빠져 있던 자리다. 지금은 대외 읽기가 끝난 뒤에만 전이한다.
+ *
+ * <h2>{@code CODE → VERIFY → REVIEW} 루프 (#21)</h2>
+ *
+ * <p>바퀴마다 {@code GeneratedChange} 행을 남기고 검증·리뷰 결과를 그 행에 기록한다.
+ * 상한 소진 판정은 후보 루트가 한다({@code retryImplementation}).
+ * 바퀴 하나의 벽시계 상한은 {@code agent.execution.timeout-seconds} 다 — 단계마다 확인하고
+ * 넘었으면 다음 단계로 가지 않고 {@code FAILED} 로 끊는다.
  */
 @Service
 public class ImplementCandidateUseCase {
@@ -85,6 +103,9 @@ public class ImplementCandidateUseCase {
     private final ChangeVerifier verifier;
     private final DiffReviewer reviewer;
     private final CandidateRetryWriter retries;
+    private final ExecutionProperties execution;
+    private final PipelineMetrics metrics;
+    private final Clock clock;
 
     /**
      * 🔴 {@link ChangeVerifier} 를 {@link ObjectProvider} 로 받는다.
@@ -104,9 +125,15 @@ public class ImplementCandidateUseCase {
             ObjectProvider<CodingAgent> codingAgents,
             ObjectProvider<ChangeVerifier> verifiers,
             ObjectProvider<DiffReviewer> reviewers,
-            CandidateRetryWriter retries) {
+            CandidateRetryWriter retries,
+            ExecutionProperties execution,
+            PipelineMetrics metrics,
+            Clock clock) {
         this.writer = writer;
         this.retries = retries;
+        this.execution = execution;
+        this.metrics = metrics;
+        this.clock = clock;
         this.planner = planner;
         this.contexts = contexts;
         this.policies = policies;
@@ -141,19 +168,65 @@ public class ImplementCandidateUseCase {
         // 🔴 판정은 여기서 하고 **막는 것은 writer 가** 한다 — 통행증 확인 뒤여야 하기 때문이다.
         //    여기서 바로 던지면 정책이 막았어야 할 요청이 503 으로 가려져 S-5 게이트가
         //    한 번도 돌지 않는다. 그러면 「막는다」를 검증할 수 없다
-        CandidateImplementationWriter.ImplementationStart start =
-                writer.start(candidateId, executorReady());
+        CandidateImplementationWriter.Admission admission =
+                writer.admit(candidateId, executorReady());
 
         MDC.put(MDC_CANDIDATE_ID, String.valueOf(candidateId));
-        MDC.put(MDC_ATTEMPT, String.valueOf(start.attempt()));
         try {
-            runOutsideTransaction(start);
+            // 🔴 전이 **앞**에서 대외를 읽는다 — 여기서 나는 예외는 후보를 건드리지 않는다.
+            //    레이트리밋은 ApiExceptionHandler 가 503 + Retry-After 로 번역하고(지연),
+            //    계획 상한 소진은 PlanImplementationUseCase 가 SELECTED → FAILED 로 닫는다.
+            //    나머지(clone 실패 등)는 그대로 올라가고 사람이 다시 누른다 — 태운 것은 계획 LLM 호출뿐이다
+            Prepared prepared = prepare(admission);
+
+            // 🔴 같은 판정을 다시 한다 — 준비 단계가 분 단위라 그 사이 정책이 바뀔 수 있다 (S-5)
+            CandidateImplementationWriter.ImplementationStart start =
+                    writer.start(candidateId, executorReady());
+            MDC.put(MDC_ATTEMPT, String.valueOf(start.attempt()));
+            runOutsideTransaction(start, prepared);
+            return start.transition();
         } finally {
             MDC.remove(MDC_CANDIDATE_ID);
             MDC.remove(MDC_STAGE);
             MDC.remove(MDC_ATTEMPT);
         }
-        return start.transition();
+    }
+
+    /**
+     * 전이 앞의 준비 — 계획(#16) · 규약 · 컨텍스트(#15) · 워크스페이스 clone(#18).
+     *
+     * <p>🔴 전부 <b>대외 읽기</b>다(LLM · GitHub · git clone). 후보가 아직 {@code SELECTED} 라
+     * 여기서 실패해도 종단으로 가지 않는다 — 실패의 방향이 되돌릴 수 있는 쪽이다.
+     */
+    private Prepared prepare(CandidateImplementationWriter.Admission admission) {
+        Long candidateId = admission.candidateId();
+        MDC.put(MDC_STAGE, "PLAN");
+        Instant planStart = clock.instant();
+        ImplementationPlan plan;
+        try {
+            plan = planner.plan(candidateId);
+        } catch (RuntimeException e) {
+            stageDone(PipelineStage.PLAN, false, planStart);
+            throw e;
+        }
+        stageDone(PipelineStage.PLAN, true, planStart);
+
+        RepositoryCoordinates coordinates = policies.coordinatesOf(admission.repositoryId());
+        ContributionConstraints constraints = policies.constraintsOf(admission.repositoryId());
+        String branch = branchName(admission.issueNumber());
+        // ⚠ 실패해도 워크스페이스를 지우지 않는다 — #18 이 남긴 선택이다.
+        //   같은 좌표로 다시 fetch 하면 JGitWorkspaceSource 가 통째로 지우고 새로 만드니
+        //   저장소당 1개가 상한이다. 실패한 후보의 트리 수명은 #26 이 본다
+        SandboxWorkspace workspace = workspaces.fetch(coordinates, branch);
+        CodingInput input = new CodingInput(plan, contexts.build(admission.issue()), constraints);
+
+        return new Prepared(plan, coordinates, constraints, branch, workspace, input);
+    }
+
+    /** {@link #prepare} 의 산출 — 루프가 바퀴마다 다시 만들지 않는 것들. */
+    private record Prepared(ImplementationPlan plan, RepositoryCoordinates coordinates,
+            ContributionConstraints constraints, String branch, SandboxWorkspace workspace,
+            CodingInput input) {
     }
 
     /**
@@ -194,23 +267,17 @@ public class ImplementCandidateUseCase {
      * <p>🔴 <b>판정 자체는 안전한 쪽이다</b>(막는다). 틀리는 것은 <b>사유</b>뿐이라 안고 간다.
      * 워크스페이스 수명의 주인은 #26 이다.
      */
-    private void runOutsideTransaction(CandidateImplementationWriter.ImplementationStart start) {
+    private void runOutsideTransaction(CandidateImplementationWriter.ImplementationStart start,
+            Prepared prepared) {
         Long candidateId = start.candidateId();
         int attempt = start.attempt();
         try {
-            MDC.put(MDC_STAGE, "PLAN");
-            ImplementationPlan plan = planner.plan(candidateId);
-
-            RepositoryCoordinates coordinates = policies.coordinatesOf(start.repositoryId());
-            ContributionConstraints constraints = policies.constraintsOf(start.repositoryId());
-            String branch = branchName(start.issueNumber());
-            // ⚠ 실패해도 워크스페이스를 지우지 않는다 — #18 이 남긴 선택이다.
-            //   같은 좌표로 다시 fetch 하면 JGitWorkspaceSource 가 통째로 지우고 새로 만드니
-            //   저장소당 1개가 상한이다. 실패한 후보의 트리 수명은 #26 이 본다
-            SandboxWorkspace workspace = workspaces.fetch(coordinates, branch);
-
-            CodingInput input =
-                    new CodingInput(plan, contexts.build(start.issue()), constraints);
+            ImplementationPlan plan = prepared.plan();
+            RepositoryCoordinates coordinates = prepared.coordinates();
+            ContributionConstraints constraints = prepared.constraints();
+            String branch = prepared.branch();
+            SandboxWorkspace workspace = prepared.workspace();
+            CodingInput input = prepared.input();
             // 🔴 직전 바퀴의 지문. 같은 실패가 반복되면 조기 중단한다 (FR-5).
             //    🕳 발화하지 않을 수 있다 — FailureFingerprint javadoc 의 한계
             Optional<FailureFingerprint> previous = Optional.empty();
@@ -268,6 +335,12 @@ public class ImplementCandidateUseCase {
             SandboxWorkspace workspace, CodingInput input, int attempt) {
 
         Long candidateId = start.candidateId();
+        // 🔴 바퀴 하나의 벽시계 상한 — agent.execution.timeout-seconds.
+        //    샌드박스(SANDBOX_TIMEOUT_SECONDS)·LLM(agent.llm.timeout)이 단계 안을 각자 막지만,
+        //    한 바퀴 전체를 세는 것은 이것뿐이다. 오랫동안 값만 검증되고 아무도 읽지 않았다
+        Instant deadline = clock.instant().plusSeconds(execution.timeoutSeconds());
+        PipelineStage current = PipelineStage.CODE;
+        Instant stageStart = clock.instant();
         try {
             MDC.put(MDC_STAGE, "CODE");
             List<GeneratedFile> generated = codingAgent.write(candidateId, attempt, input);
@@ -276,8 +349,14 @@ public class ImplementCandidateUseCase {
             WorkspaceDiff diff = workspaces.diff(workspace);
             assertWithinPlan(candidateId, diff, plan);
             Long changeId = writer.recordChange(candidateId, branch, diff.unifiedDiff());
+            stageDone(current, true, stageStart);
+            if (overdue(deadline)) {
+                return timedOut(AgentRun.Stage.CODE);
+            }
 
             retries.startTesting(candidateId);
+            current = PipelineStage.VERIFY;
+            stageStart = clock.instant();
             MDC.put(MDC_STAGE, "VERIFY");
             VerificationReport report = verifier.verify(VerificationRequest.of(
                     candidateId, coordinates, attempt, workspace.path(),
@@ -285,29 +364,64 @@ public class ImplementCandidateUseCase {
             // 🔴 로그에 요약을 싣지 않는다 — 스크럽됐어도 빌드 출력이다 (#18 이 그은 선)
             log.info("검증 결과 candidateId={} changeId={} outcomes={}",
                     candidateId, changeId, report.outcomes());
+            // 🔴 결과를 그 바퀴의 행에 남긴다 — PR 본문의 검증 절이 여기서 온다 (#19 · S-4)
+            writer.recordVerification(changeId, report);
+            stageDone(current, report.passed(), stageStart);
 
             RetryDecision afterVerify = RetryPolicy.after(report);
             if (!(afterVerify instanceof RetryDecision.Proceed)) {
                 return afterVerify;
             }
+            if (overdue(deadline)) {
+                return timedOut(AgentRun.Stage.VERIFY);
+            }
 
             retries.startReview(candidateId);
+            current = PipelineStage.REVIEW;
+            stageStart = clock.instant();
             MDC.put(MDC_STAGE, "REVIEW");
             DiffReview review = reviewer.review(
                     new AgentRunContext(candidateId, LlmCallSite.REVIEW, attempt),
                     new DiffReviewRequest(diff.unifiedDiff(), start.issue(), constraints));
             log.info("리뷰 결과 candidateId={} verdict={} findings={}",
                     candidateId, review.verdict(), review.findings().size());
+            writer.recordReview(changeId, review);
+            stageDone(current, review.passed(), stageStart);
 
-            return RetryPolicy.after(review);
+            RetryDecision afterReview = RetryPolicy.after(review);
+            if (afterReview instanceof RetryDecision.Proceed && overdue(deadline)) {
+                return timedOut(AgentRun.Stage.REVIEW);
+            }
+            return afterReview;
 
         } catch (RuntimeException e) {
+            stageDone(current, false, stageStart);
             // 🔴 판정을 RetryPolicy 에 맡긴다 — 여기서 「이건 재시도, 저건 종단」을 나누면
             //    화이트리스트가 두 군데가 되고 한쪽이 거부목록으로 자란다
             log.warn("바퀴 실패 candidateId={} attempt={} type={}",
                     candidateId, attempt, e.getClass().getSimpleName());
             return RetryPolicy.after(e);
         }
+    }
+
+    private boolean overdue(Instant deadline) {
+        return clock.instant().isAfter(deadline);
+    }
+
+    /**
+     * 🔴 시간 상한은 <b>재시도 대상이 아니다</b> — 같은 입력에 같은 시간이 든다. 다음 바퀴를 돌리면
+     * 예산만 3배로 태운다. {@code RetryPolicy} 의 화이트리스트에 없으니 {@code Stop} 이다.
+     */
+    private RetryDecision timedOut(AgentRun.Stage stage) {
+        return new RetryDecision.Stop(stage,
+                "바퀴 시간 상한 초과 (agent.execution.timeout-seconds=" + execution.timeoutSeconds() + ")");
+    }
+
+    private void stageDone(PipelineStage stage, boolean succeeded, Instant from) {
+        metrics.pipelineStage(stage,
+                succeeded ? com.ossagent.support.observability.StageOutcome.SUCCEEDED
+                        : com.ossagent.support.observability.StageOutcome.FAILED,
+                Duration.between(from, clock.instant()));
     }
 
     /** 상한 소진 시 {@code AgentRun} 에 실을 사유 — 마지막 실패가 무엇이었는지. */

@@ -171,6 +171,8 @@ class ImplementCandidatePipelineTest {
                 List.of(), "https://example.invalid/i/42", FilterOutcome.PASSED, null);
 
         CandidateImplementationWriter writer = mock(CandidateImplementationWriter.class);
+        given(writer.admit(eq(CANDIDATE_ID), eq(true))).willReturn(
+                new CandidateImplementationWriter.Admission(CANDIDATE_ID, issue));
         given(writer.start(eq(CANDIDATE_ID), eq(true))).willReturn(
                 new CandidateImplementationWriter.ImplementationStart(CANDIDATE_ID, issue, 1,
                         new StatusTransition(CandidateStatus.SELECTED,
@@ -198,7 +200,11 @@ class ImplementCandidatePipelineTest {
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
                 contexts, policies, provider(workspaces), provider(new FakeCodingAgent(generatedPath)),
-                provider(verifier), provider(reviewer), retries);
+                provider(verifier), provider(reviewer), retries,
+                new ExecutionProperties(3, 1800),
+                new com.ossagent.support.observability.PipelineMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
+                java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
 
         return new Fixture(useCase, writer, workspaces, verifier, retries);
     }
@@ -259,6 +265,11 @@ class ImplementCandidatePipelineTest {
         @Override
         public WorkspaceDiff diff(SandboxWorkspace workspace) {
             return new WorkspaceDiff("--- a/A\n+++ b/A\n", changedPaths);
+        }
+
+        @Override
+        public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+            throw new UnsupportedOperationException("착수 경로는 diff 를 입히지 않는다 — PR 게이트의 일이다");
         }
     }
 

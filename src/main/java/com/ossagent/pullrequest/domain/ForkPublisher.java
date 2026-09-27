@@ -20,12 +20,25 @@ import com.ossagent.repository.domain.RepositoryCoordinates;
  * 「브랜치를 올리고 싶어 부른 호출이 PR 생성을 부산물로」 쥐게 되고, 그 순간 게이트가 사라진다 —
  * #16 이 {@code PolicyClearance} 와 {@code ContributionConstraints} 를 가른 것과 같은 논리다.
  *
- * <h2>🔴 이 인터페이스에 호출자가 없다 — 의도다</h2>
+ * <h2>🔴 호출자는 세 번째 승인 게이트 뒤의 {@code CreateDraftPrUseCase} 하나다 — S-6</h2>
  *
- * <p>배선은 #23 이 승인 게이트 <b>뒤에</b> 놓는다. 지금 스케줄러나 {@code implement} 경로에서
- * 부르게 하면 그 시점에 S-6 위반이다. #16 의 {@code PlanImplementationUseCase.build()} 와 같은 처리다.
+ * <p>#22 는 이 능력을 <b>호출자 없이</b> 만들었고 배선을 #23 에 넘겼는데, #23 은 「#22 가 push 까지
+ * 끝낸다」고 읽어 서로 상대에게 넘긴 채 머지됐다. 그 결과 {@code publish()} 의 운영 호출자가 0 개였고
+ * {@code GeneratedChange.commitSha} 가 영영 {@code null} 이라 PR 게이트가 항상 실패했다.
+ * 지금은 {@code CreateDraftPrUseCase} 가 게이트 <b>뒤에서</b> 동기화 → publish → PR 순서로 부른다.
+ * 스케줄러나 {@code implement} 경로에서 부르게 하면 그 시점에 S-6 위반이다 —
+ * {@code ApprovalGateArchitectureTest} 가 「승인 게이트 UseCase 는 web 어댑터만 부른다」로 고정한다.
  */
 public interface ForkPublisher {
+
+    /**
+     * 커밋 author·DCO sign-off 서명자. 설정({@code github.fork.author-*})이 비어 있으면 빈 값이다.
+     *
+     * <p>커밋 <b>메시지</b>의 sign-off 줄은 호출자가 {@link CommitMessage#from} 으로 만들고, 커밋
+     * <b>객체</b>의 author 는 어댑터가 같은 값으로 채운다 — 둘이 다른 이름을 쓰면 DCO 검사가 깨진다.
+     * 그래서 설정을 두 곳에서 읽지 않고 능력이 하나로 내준다.
+     */
+    java.util.Optional<CommitIdentity> commitIdentity();
 
     /**
      * Fork 를 확보한다 — 없으면 만들고, 있으면 <b>그것이 정말 이 upstream 의 fork 인지 확인한 뒤</b>

@@ -28,6 +28,22 @@ public record RepositoryDocuments(List<FetchedDocument> documents) {
     }
 
     /**
+     * 영구적으로 못 읽은 <b>필수</b> 경로들 — 이슈 #68.
+     *
+     * <p>{@link #hasPermanentlyUnreadableRequired()} 가 「있는가」라면 이것은 「어느 것인가」다.
+     * 🔴 <b>변경이 관측된 경로와 교집합을 내려면 목록이 필요하다</b> —
+     * 「바뀌었다」와 「못 읽는다」가 <b>같은 경로에서</b> 겹칠 때만 강등하기 때문이다.
+     * 서로 다른 경로에서 따로 일어난 것을 겹친 것으로 세면 오탐이 된다.
+     */
+    public java.util.Set<String> permanentlyUnreadableRequiredPaths() {
+        return documents.stream()
+                .filter(d -> d.path().isRequired())
+                .filter(d -> d.isUnreadable() && !d.isTransientFailure())
+                .map(d -> d.path().path())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /**
      * 판정 필수 경로 중 <b>일시적</b> 실패가 있는가 — 있으면 <b>아무것도 쓰지 않고 중단</b>한다.
      *
      * <p>다음 스캔에서 자연히 재시도된다. 정책이 없으므로 구현 단계는 어차피 막히고(FR-4),

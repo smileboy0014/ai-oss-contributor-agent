@@ -30,6 +30,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RepositoryPolicy {
 
+    /** {@code V9} 의 {@code VARCHAR(4000)} 과 같아야 한다 — 어긋나면 저장 시점에 잘린다. */
+    static final int MAX_FINGERPRINTS_LENGTH = 4000;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -146,6 +149,34 @@ public class RepositoryPolicy {
     @Column(length = 1024)
     private String resolutionNote;
 
+    /**
+     * 판정을 세울 때 본 <b>규약 문서들의 지문</b> — 이슈 #68. 다음 관측의 <b>비교 기준</b>이다.
+     *
+     * <p>🔴 <b>{@code null} 이 「바뀌지 않았다」가 아니다.</b> 지문 기록 이전에 만들어진 행은
+     * 비교 기준이 없고, 그것을 「같다」로 읽으면 변경이 영영 탐지되지 않는다. 반대로
+     * 「다르다」로 읽으면 이 기능을 배포하는 순간 모든 저장소가 일괄 보류로 떨어진다.
+     * {@link PolicyDocumentFingerprints#changedRequiredPaths} 가 한쪽만 있는 경로를
+     * <b>세지 않는</b> 이유가 이것이다.
+     *
+     * <p>⚠️ {@code @ExternalText} 가 아니고 {@code TEXT} 도 아니다 — SHA-256 은 단방향이라
+     * 대상 저장소 원문이 복원되지 않고, 경로는 {@link PolicyDocumentPath} 의 우리 상수
+     * 목록에서만 온다 (S-4). {@code pendingReason}(V5)·{@code resolutionNote}(V8)와 같은 취급이다.
+     */
+    @Column(length = MAX_FINGERPRINTS_LENGTH)
+    private String documentFingerprints;
+
+    /**
+     * 규약 문서를 <b>실제로 다시 읽어 본</b> 시각 — 이슈 #68.
+     *
+     * <p>🔴 {@link #analyzedAt} 과 <b>다른 것</b>이다. 지문이 같으면 LLM 을 부르지 않으므로
+     * {@code analyzedAt} 은 전진하지 않는데, 그때 그것을 갱신하면 「분석했다」가 거짓말이 된다.
+     *
+     * <p>🔴 <b>응답을 못 받는 경우(5xx·레이트리밋)의 유일한 증거다.</b> 그때는 지문을 구할 수
+     * 없어 「바뀌었는가」를 원리적으로 알 수 없고, 대신 이 값이 <b>멈춰 있다</b> —
+     * 「모르는 상태가 얼마나 오래됐는가」가 여기서만 보인다.
+     */
+    private Instant documentsCheckedAt;
+
     /** 판정이 서지 않았는가. NULL 은 「허용」이 아니라 「보류」다 — S-5. */
     public boolean isAiContributionUndetermined() {
         return aiContributionAllowed == null;
@@ -168,6 +199,102 @@ public class RepositoryPolicy {
     /** 사람이 판단한 정책인가. 비어 있으면 기계 판정이다 — Q-8 · #24. */
     public boolean isHumanResolved() {
         return resolvedAt != null;
+    }
+
+    /**
+     * 비교 기준이 되는 지문 — 이슈 #68. 기록이 없으면 {@link PolicyDocumentFingerprints#none()}.
+     *
+     * <p>「기록이 없다」는 <b>「바뀌지 않았다」가 아니다.</b> 비교가 성립하지 않는다는 뜻이고,
+     * 그때는 변경을 주장하지 않는다.
+     */
+    public PolicyDocumentFingerprints fingerprints() {
+        return PolicyDocumentFingerprints.parse(documentFingerprints);
+    }
+
+    /**
+     * 문서를 확인했고 <b>바뀐 것이 없다</b> — 이슈 #68. 판정을 건드리지 않는다.
+     *
+     * <p>🔴 {@link #analyzedAt} 을 전진시키지 않는 것이 핵심이다. LLM 을 부르지 않았으므로
+     * 「분석했다」고 쓰면 거짓말이고, 그러면 「마지막으로 판정한 때」를 영영 알 수 없게 된다.
+     *
+     * <p>어떤 상태에서도 부를 수 있다 — 「우리가 봤다」는 사실의 기록이라 안전 성질을
+     * 바꾸지 않는다.
+     */
+    public void markVerified(PolicyDocumentFingerprints prints, Clock clock) {
+        recordDocuments(prints, clock);
+        this.updatedAt = clock.instant();
+    }
+
+    /**
+     * 🔴 <b>규약이 바뀐 것을 관측했는데 판정이 서지 않는다</b> — {@code TRUE → NULL} (S-5 · #68).
+     *
+     * <h2>왜 판정을 유지하지 않나</h2>
+     *
+     * <p>유지하면 <b>#68 이 지적한 상태에 이름만 붙인 것</b>이다. 아무도 조회하지 않는
+     * 플래그 옆에서 Draft PR 은 계속 나간다. 이슈가 「「판정이 안 바뀐다」가 아니라
+     * <b>「아무도 모르는 채로 남지 않는다」</b>를 단언한다」고 쓴 것이 이 구분이다.
+     *
+     * <h2>왜 금지({@code FALSE})가 아니라 보류({@code NULL})인가</h2>
+     *
+     * <p>{@code FALSE} 는 {@link #resolvePending} 이 409 로, {@link #reanalyze} 가 예외로
+     * 거부하는 <b>설계상 되돌릴 수 없는 종단</b>이다. 오탐 하나가 저장소를 영구히 죽인다 —
+     * {@code external-deps.md} 가 경계한 「방어가 스스로를 잠그는 구조」 그 자체다.
+     * 보류는 사람이 푼다({@code POST /api/repositories/&#123;id&#125;/policy/resolution}, #24).
+     *
+     * <p>⚠️ #7 이 「일시적 실패로 보류를 만들지 않는다」를 택한 근거는 명시적으로
+     * <b>「되돌릴 수단이 없다(#24 미구현)」</b>였다. #24 가 머지되어 그 전제가 바뀌었다.
+     * 그렇다고 #7 의 규칙을 뒤집는 것은 아니다 — 일시적 실패는 여전히 아무것도 쓰지 않고,
+     * 여기로 오는 것은 <b>바뀐 것을 양성으로 관측한</b> 경우뿐이다.
+     *
+     * <h2>🔴 {@code resolvedAt} 을 비운다</h2>
+     *
+     * <p>사람이 허용으로 풀었던 행이 강등되면 그 판단은 <b>새 증거로 무효가 된 것</b>이다.
+     * 남겨 두면 {@link #isHumanResolved()} 가 「지금 판정이 사람 것」이라고 거짓말한다 —
+     * 안전 판정에 쓰이는 술어라 거짓말을 남길 수 없다.
+     *
+     * <p>⚠️ 이력은 잃지 않는다 — {@link #resolutionNote} 는 <b>보존</b>한다. #24 가
+     * 「해소해도 {@code pendingReason} 을 비우지 않는다」고 정한 것과 대칭이다.
+     *
+     * @param reason 어느 경로가 왜 그런지. <b>우리 어휘만</b> — 경로 + 사유 코드 (S-4)
+     * @throws IllegalStateException 허용이 아닌 상태
+     */
+    public void markUnverifiable(String reason, PolicyDocumentFingerprints prints, Clock clock) {
+        if (isAiContributionForbidden()) {
+            // 🔴 금지 → 보류는 게이트를 **푸는** 방향이다. 열면 FR-2 가 자동으로 뚫린다
+            throw new IllegalStateException(
+                    "AI 기여 금지 판정을 보류로 되돌리지 않는다 (S-5 · FR-2)");
+        }
+        if (isAiContributionUndetermined()) {
+            // 이미 보류다. 덮어쓰면 원래 왜 보류였는지가 사라진다 — pendingReason 의 존재 이유
+            throw new IllegalStateException("이미 보류다 — 보류 사유를 덮어쓰지 않는다");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new IllegalArgumentException("강등 사유는 필수다 — 사람이 판단할 근거가 없다");
+        }
+        this.aiContributionAllowed = null;
+        this.pendingReason = truncate(reason);
+        // 🔴 사람의 판단이 새 증거로 무효가 됐다. note 는 이력으로 남긴다
+        this.resolvedAt = null;
+        recordDocuments(prints, clock);
+        this.updatedAt = clock.instant();
+    }
+
+    private void recordDocuments(PolicyDocumentFingerprints prints, Clock clock) {
+        if (prints == null) {
+            throw new IllegalArgumentException("지문은 필수다 — 다음 비교의 기준이 된다");
+        }
+        // 🔴 비어 있으면 기록하지 않는다. 빈 문자열을 넣으면 「기록은 했는데 기준이 없다」가
+        //    되어 「아직 안 봤다」와 구분되지 않는다
+        String serialized = prints.isEmpty() ? null : prints.serialize();
+        if (serialized != null && serialized.length() > MAX_FINGERPRINTS_LENGTH) {
+            // 🔴 자르지 않는다. 잘린 지문은 다음 비교에서 「달라졌다」로 읽혀 오탐 강등을 만든다.
+            //    경로를 늘렸다면 컬럼을 함께 늘리는 것이 맞다 — 조용히 넘어갈 일이 아니다
+            throw new IllegalStateException(
+                    "지문이 컬럼 상한을 넘었다 — 경로를 늘렸다면 V9 컬럼도 함께 늘린다: "
+                            + serialized.length() + " > " + MAX_FINGERPRINTS_LENGTH);
+        }
+        this.documentFingerprints = serialized;
+        this.documentsCheckedAt = clock.instant();
     }
 
     /**
@@ -279,11 +406,23 @@ public class RepositoryPolicy {
      * 행이 생긴다.
      */
     public static RepositoryPolicy analyzed(OssRepository repository, RuleReading reading, Clock clock) {
+        return analyzed(repository, reading, PolicyDocumentFingerprints.none(), clock);
+    }
+
+    /**
+     * 판정과 <b>그 판정이 무엇을 보고 선 것인지</b>를 함께 기록한다 — 이슈 #68.
+     *
+     * <p>⚠️ 지문 없는 3인자 형태는 <b>비교 기준이 없는 행</b>을 만든다. 지문 기록 이전에
+     * 생긴 행과 같은 상태이고, 그런 행에서는 변경을 주장하지 않는다(NFR-4).
+     * 운영 경로({@code RepositoryPolicyWriter})는 항상 이쪽을 쓴다.
+     */
+    public static RepositoryPolicy analyzed(OssRepository repository, RuleReading reading,
+            PolicyDocumentFingerprints prints, Clock clock) {
         if (reading == null || reading.isUndetermined()) {
             throw new IllegalArgumentException("판정이 서지 않았다 — pending() 을 쓴다");
         }
         RepositoryPolicy policy = newFor(repository, clock);
-        policy.apply(reading, clock);
+        policy.apply(reading, prints, clock);
         return policy;
     }
 
@@ -294,12 +433,19 @@ public class RepositoryPolicy {
      * 팩토리를 가르지 않고 setter 를 열면 「보류인데 allowed=true」라는 불법 상태를 만들 수 있다.
      */
     public static RepositoryPolicy pending(OssRepository repository, String reason, Clock clock) {
+        return pending(repository, reason, PolicyDocumentFingerprints.none(), clock);
+    }
+
+    /** 보류도 <b>무엇을 봤는지</b>는 남긴다 — 다음에 그것이 바뀌었는지 알아야 한다 (#68). */
+    public static RepositoryPolicy pending(OssRepository repository, String reason,
+            PolicyDocumentFingerprints prints, Clock clock) {
         if (reason == null || reason.isBlank()) {
             throw new IllegalArgumentException("보류 사유는 필수다 — 사람이 판단할 근거가 없다");
         }
         RepositoryPolicy policy = newFor(repository, clock);
         policy.pendingReason = truncate(reason);
         policy.analyzedAt = clock.instant();
+        policy.recordDocuments(prints, clock);
         return policy;
     }
 
@@ -339,6 +485,11 @@ public class RepositoryPolicy {
      * {@code external-deps.md} 의 「모르면 되돌릴 수 없는 쪽을 피한다」에 어긋난다.
      */
     public void reanalyze(RuleReading reading, Clock clock) {
+        reanalyze(reading, PolicyDocumentFingerprints.none(), clock);
+    }
+
+    /** 갱신된 판정과 <b>그 근거가 된 지문</b>을 함께 기록한다 — 이슈 #68. */
+    public void reanalyze(RuleReading reading, PolicyDocumentFingerprints prints, Clock clock) {
         if (isAiContributionUndetermined()) {
             throw new IllegalStateException(
                     "보류는 재분석으로 풀리지 않는다 — 사람이 해소한다 (Q-8 · #24)");
@@ -356,7 +507,7 @@ public class RepositoryPolicy {
             throw new IllegalStateException(
                     "사람이 해소한 판정을 재분석이 허용으로 되돌리지 않는다 (Q-8 · #24)");
         }
-        apply(reading, clock);
+        apply(reading, prints, clock);
     }
 
     private static RepositoryPolicy newFor(OssRepository repository, Clock clock) {
@@ -370,7 +521,7 @@ public class RepositoryPolicy {
         return policy;
     }
 
-    private void apply(RuleReading reading, Clock clock) {
+    private void apply(RuleReading reading, PolicyDocumentFingerprints prints, Clock clock) {
         this.aiContributionAllowed = reading.aiContributionAllowed();
         this.javaVersion = reading.javaVersion();
         this.buildCommand = reading.buildCommand();
@@ -382,6 +533,7 @@ public class RepositoryPolicy {
         this.contributionRules = reading.rules().value();
         this.pendingReason = null;
         this.analyzedAt = clock.instant();
+        recordDocuments(prints, clock);
         this.updatedAt = clock.instant();
     }
 

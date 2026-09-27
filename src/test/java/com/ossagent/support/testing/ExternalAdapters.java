@@ -72,6 +72,18 @@ public final class ExternalAdapters {
     private ExternalAdapters() {
     }
 
+    /**
+     * 네트워크 클라이언트 타입 이름 — <b>다른 가드가 같은 출처를 쓰도록</b> 노출한다.
+     *
+     * <p>🔴 {@code ForkPublishArchitectureTest}(S-1)가 「쓰기 HTTP 호출을 하는 타입은 하나뿐」을
+     * 검사할 때 이 목록을 쓴다. 거기에 목록을 따로 적으면 <b>둘이 갈라지고</b>, 갈라진 순간
+     * 새 클라이언트가 한쪽에만 등록돼 다른 쪽이 조용히 못 본다 —
+     * {@code SecretPatternDriftTest} 가 막으려던 어긋남과 같은 모양이다.
+     */
+    public static Set<String> networkClientTypes() {
+        return NETWORK_CLIENTS;
+    }
+
     /** 두 신호 중 하나라도 걸리면 대외 어댑터다. */
     public static boolean isExternalAdapter(Class<?> type) {
         if (type == null || !isOurs(type.getName())) {

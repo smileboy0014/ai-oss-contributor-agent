@@ -85,6 +85,25 @@ github:
   #    호출자는 이 예외를 실패가 아니라 「지연」으로 다룬다
   rate-limit-threshold: 100
 
+  # Fork 쓰기 — S-1. 쓰기 대상은 사용자 Fork 뿐이고 원본으로 가는 경로는 읽기만 존재한다.
+  fork:
+    # 🔴 쓰기 대상 판정의 유일한 기준이다. classic PAT 은 저장소별 권한 제한이 불가능해
+    #    (Q-1) 토큰 권한으로는 원본 write 를 막을 수 없다 — 어설션이 유일한 방어다.
+    #    ⚠ 비어 있으면 「비교할 것이 없으니 통과」가 아니라 모든 쓰기가 거부된다.
+    #      막아서 잃는 것은 push 실패(되돌릴 수 있다)이고, 통과시켜 잃는 것은
+    #      남의 저장소 히스토리 오염(되돌릴 수 없다)이다
+    owner: ${GITHUB_FORK_OWNER:}
+    # POST /repos/{o}/{r}/forks 는 202 라 저장소가 아직 없을 수 있다. 무한 대기를 만들지 않는다
+    ready-timeout: 30s
+    ready-poll-interval: 2s
+    # 대상 저장소에 나가는 커밋의 author·committer 이자 DCO sign-off 의 서명자 — S-5.
+    # ⚠ GET /user 로 받지 않는다. public_repo 스코프로는 비공개 이메일을 받지 못해
+    #   sign-off 가 noreply 주소로 나가고 대상 저장소의 DCO 검사에서 걸린다.
+    # ⚠ 둘 중 하나라도 비면 서명자가 없는 것으로 본다 — 반쪽짜리 트레일러는
+    #   DCO 봇이 「서명 없음」으로 읽어서, 서명했는데 안 한 것으로 처리되는 상태가 된다
+    author-name: ${GITHUB_COMMIT_AUTHOR_NAME:}
+    author-email: ${GITHUB_COMMIT_AUTHOR_EMAIL:}
+
   scan:
     # 스캔 1회의 페이지 상한. 상한 없이 hasNext 를 따라가면 첫 스캔이 리밋을 통째로 태운다
     # (spring-kafka 는 open 이슈가 수백 건이다). 잘리면 ScanResult.hasMore 로 드러난다

@@ -61,21 +61,38 @@ class GitHubApiClientTest {
     private ListAppender<ILoggingEvent> logs;
     private ch.qos.logback.classic.Logger clientLogger;
 
+    /**
+     * 🔴 레이트리밋 경고는 {@link GitHubRateLimitBudget} 이 남긴다 — 예산이 <b>토큰 단위 전역</b>이라
+     * 쓰기 클라이언트(#22)와 공유하려고 클라이언트 밖으로 뺐기 때문이다.
+     *
+     * <p>이 로거를 함께 붙이지 않으면 아래 두 단언이 <b>조용히 0건을 검사</b>하게 된다 —
+     * 「리밋 임박 경고가 있다」는 빨개져서 드러나지만, <b>「토큰이 없다」(S-4)는 초록으로 남는다.</b>
+     * 검사 대상이 사라진 것을 통과로 읽는 쪽이 위험하다.
+     */
+    private ch.qos.logback.classic.Logger budgetLogger;
+
     @BeforeEach
     void setUp() {
         // 백오프 0 — 재시도 동작을 검증하되 테스트가 실제로 자지는 않게 한다
         client = clientWith(properties(FAKE_TOKEN, 2, Duration.ZERO, 100));
 
-        clientLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(GitHubApiClient.class);
         logs = new ListAppender<>();
         logs.start();
+
+        clientLogger = (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(GitHubApiClient.class);
         clientLogger.addAppender(logs);
         clientLogger.setLevel(Level.DEBUG);
+
+        budgetLogger = (ch.qos.logback.classic.Logger)
+                LoggerFactory.getLogger(GitHubRateLimitBudget.class);
+        budgetLogger.addAppender(logs);
+        budgetLogger.setLevel(Level.DEBUG);
     }
 
     @AfterEach
     void tearDown() {
         clientLogger.detachAppender(logs);
+        budgetLogger.detachAppender(logs);
     }
 
     // ── 전송 실패 번역 ──────────────────────────────────────────────────

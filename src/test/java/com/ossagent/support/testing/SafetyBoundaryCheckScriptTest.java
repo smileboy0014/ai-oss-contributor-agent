@@ -191,6 +191,8 @@ class SafetyBoundaryCheckScriptTest {
     private static ScanResult run(Path workingDir, Map<String, String> extraEnv, String... command)
             throws Exception {
         Path log = Files.createTempFile("safety-boundary-out", ".log");
+        // 🔴 try 밖에 선언해 finally 가 반드시 데려가게 한다 — 아래 finally 주석
+        Process process = null;
         try {
             // 🕳 사유는 한 줄이어야 한다 — 훅은 위반 라인의 「바로 윗줄」만 본다
             // safety-ok: 임시 디렉토리에서 git 플러밍과 우리 저장소의 .claude/scripts 만 돌린다. 대상 저장소 코드가 아니라 S-3 대상이 아니다
@@ -201,9 +203,8 @@ class SafetyBoundaryCheckScriptTest {
             isolateGitConfig(builder.environment(), workingDir);
             builder.environment().putAll(extraEnv);
 
-            Process process = builder.start();
+            process = builder.start();
             if (!process.waitFor(60, TimeUnit.SECONDS)) {
-                process.destroyForcibly();
                 throw new IllegalStateException("스크립트가 끝나지 않았습니다: " + String.join(" ", command));
             }
             // 🔴 readString 을 쓰지 않는다 — MalformedInputException 으로 터진다.
@@ -213,6 +214,13 @@ class SafetyBoundaryCheckScriptTest {
             return new ScanResult(process.exitValue(),
                     new String(Files.readAllBytes(log), StandardCharsets.UTF_8));
         } finally {
+            // 🔴 타임아웃 경로에만 두면 샌다. JVM 이 죽거나 이 스레드가 인터럽트되면
+            //    (Gradle 이 걸려 누가 죽일 때가 정확히 그렇다) waitFor 가 예외로 빠져나가고
+            //    자식 셸은 **JVM 과 함께 죽지 않는다** — 고아가 된다.
+            //    2026-09-27 에 같은 모양의 고아 8개가 1일 21시간째 도는 것을 발견했다.
+            if (process != null && process.isAlive()) {
+                process.destroyForcibly();
+            }
             Files.deleteIfExists(log);
         }
     }

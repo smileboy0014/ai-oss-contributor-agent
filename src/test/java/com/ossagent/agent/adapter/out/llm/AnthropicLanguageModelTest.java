@@ -157,6 +157,56 @@ class AnthropicLanguageModelTest {
                 .isEqualTo(1);
     }
 
+    // ── #104 · #105 ──────────────────────────────────────────────────────
+
+    /** 🔴 {@code Retry-After} 를 버리면 0.5초·1초 뒤 재전송 — 세 번이 1.5초 안에 끝나 배치가 통째로 죽는다. */
+    @Test
+    void 레이트리밋의_Retry_After_를_싣는다() {
+        var http = new StubHttpClient().respondStatus(429, java.util.Map.of("retry-after", "7"));
+
+        assertThatThrownBy(() -> modelWith(http, props(0))
+                .complete(CTX, new LlmRequest(null, "질문", 100)))
+                .isInstanceOfSatisfying(LlmTransientException.class, e ->
+                        assertThat(e.retryAfter()).contains(Duration.ofSeconds(7)));
+    }
+
+    /** 🔴 Sonnet 5 는 미지정이면 adaptive thinking 이 켜져 그 토큰이 max_tokens 를 먹는다 — POLICY 2,000 이면 잘린다. */
+    @Test
+    void thinking_을_명시적으로_끈다() {
+        var http = new StubHttpClient().respondJson(messageJson("ok", "end_turn", 1, 1));
+
+        modelWith(http, props(0)).complete(CTX, new LlmRequest(null, "질문", 100));
+
+        assertThat(http.sentBodies().get(0))
+                .as("thinking 이 요청에 없으면 모델 기본(adaptive)이 켜진다 (#105)")
+                .contains("\"thinking\"")
+                .contains("\"disabled\"");
+    }
+
+    /** 초안은 이것을 성공으로 돌려 잘린 JSON 이 「파싱 실패」로 보고됐다 — 상한을 올려야 할 자리를 못 봤다. */
+    @Test
+    void 컨텍스트_창_초과도_절단이다() {
+        var http = new StubHttpClient()
+                .respondJson(messageJson("잘린", "model_context_window_exceeded", 9, 100));
+
+        assertThatThrownBy(() -> modelWith(http, props(2))
+                .complete(CTX, new LlmRequest(null, "질문", 100)))
+                .isInstanceOfSatisfying(LlmPermanentException.class, e ->
+                        assertThat(e.reason()).isEqualTo(LlmFailureReason.TRUNCATED));
+        assertThat(http.sentCount()).as("절단은 재전송 대상이 아니다").isEqualTo(1);
+    }
+
+    @Test
+    void 모르는_stop_reason_은_텍스트를_살린다() {
+        var http = new StubHttpClient().respondJson(messageJson("본문", "some_future_reason", 1, 1));
+
+        LlmResponse response = modelWith(http, props(0)).complete(CTX, new LlmRequest(null, "질문", 100));
+
+        assertThat(response.text())
+                .as("모델 쪽 어휘 하나에 모든 호출이 죽으면 안 된다 — 텍스트가 왔으면 쓴다")
+                .isEqualTo("본문");
+    }
+
     @Test
     void 레이트리밋은_상한까지만_재시도한다_S6() {
         var http = new StubHttpClient()

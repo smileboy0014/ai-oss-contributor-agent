@@ -56,6 +56,25 @@ public class LlmRetryPolicy {
         return backoff.multipliedBy(completedRetries + 1L);
     }
 
+    /**
+     * 🔴 서버가 {@code Retry-After} 를 줬으면 <b>그것을 지킨다</b> (#104). 우리 백오프(0.5초·1초)보다
+     * 짧을 리 없고, 무시하면 세 번이 1.5초 안에 끝나 배치 전체가 종단으로 떨어진다.
+     * 상한을 둔다 — 서버가 준 값이 터무니없으면 스레드를 그만큼 잠재우지 않는다.
+     */
+    public Duration backoffFor(LlmException failure, int completedRetries) {
+        Duration base = backoffFor(completedRetries);
+        if (failure instanceof LlmTransientException transientFailure) {
+            Duration hinted = transientFailure.retryAfter().orElse(Duration.ZERO);
+            if (hinted.compareTo(base) > 0) {
+                return hinted.compareTo(MAX_RETRY_AFTER) > 0 ? MAX_RETRY_AFTER : hinted;
+            }
+        }
+        return base;
+    }
+
+    /** {@code Retry-After} 를 이 이상 기다리지 않는다 — 그 뒤는 미룸(#98)이 맞다. */
+    static final Duration MAX_RETRY_AFTER = Duration.ofMinutes(2);
+
     public int maxRetries() {
         return maxRetries;
     }

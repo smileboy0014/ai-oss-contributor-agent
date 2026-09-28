@@ -65,7 +65,8 @@ public class GitHubRateLimitBudget {
             return;
         }
         log.warn("GitHub 레이트리밋 임박 path={} remaining={} limit={} resetAt={} threshold={}",
-                path, rateLimit.remaining(), rateLimit.limit(), rateLimit.resetAt(), threshold);
+                path, rateLimit.remaining(), rateLimit.limit(), rateLimit.resetAt(),
+                rateLimit.effectiveThreshold(threshold));
     }
 
     /**
@@ -99,8 +100,9 @@ public class GitHubRateLimitBudget {
         if (!clock.instant().isBefore(resetAt)) {
             return;   // 리셋이 지났다 — 예산이 다시 찼다
         }
-        log.warn("GitHub 레이트리밋 임계 미만 — 호출하지 않고 지연 path={} remaining={} threshold={} resetAt={}",
-                path, observed.remaining(), threshold, resetAt);
+        // ⚠ 임계는 버킷 크기에 맞춰 깎인 값이다 (#103) — 미인증 60/h 에 100 을 그대로 대면 자물쇠다
+        log.warn("GitHub 레이트리밋 임계 미만 — 호출하지 않고 지연 path={} remaining={} limit={} threshold={} resetAt={}",
+                path, observed.remaining(), observed.limit(), observed.effectiveThreshold(threshold), resetAt);
         throw new GitHubRateLimitException(GitHubApiException.NO_STATUS,
                 GitHubRateLimitException.Scope.PRIMARY, resetAt, null,
                 "GitHub 레이트리밋 임계 미만이라 호출하지 않았습니다 path=" + path

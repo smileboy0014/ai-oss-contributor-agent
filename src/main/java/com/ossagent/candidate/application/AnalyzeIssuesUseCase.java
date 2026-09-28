@@ -94,6 +94,11 @@ public class AnalyzeIssuesUseCase {
      *         🔴 규약을 읽지 못했거나(보류) AI 기여가 금지된 저장소 — S-5
      */
     public AnalysisResult analyze(Long repositoryId) {
+        return analyze(repositoryId, () -> { });
+    }
+
+    /** @param heartbeat 배치마다 부른다 — 스캔 리스를 미는 자리다 (#109). 1,000건 분석이 2h 를 넘길 수 있다 */
+    public AnalysisResult analyze(Long repositoryId, Runnable heartbeat) {
         if (repositoryId == null) {
             throw new IllegalArgumentException("저장소 식별자는 필수다");
         }
@@ -109,6 +114,7 @@ public class AnalyzeIssuesUseCase {
         boolean hasMore = false;
 
         for (int batch = 0; batch < properties.maxBatchesPerRun(); batch++) {
+            heartbeat.run();
             List<AnalyzableIssue> page = analyzableIssues.findAnalyzable(
                     repositoryId, afterPriority, afterId, properties.batchSize());
             if (page.isEmpty()) {
@@ -202,6 +208,22 @@ public class AnalyzeIssuesUseCase {
             log.warn("분석 호출이 실패했다 candidateId={} reason={} — FAILED",
                     candidateId, e.reason());
             writer.failAnalysis(candidateId);
+            counter.failed++;
+        } catch (RuntimeException e) {
+            // 🔴 그 밖의 무엇이든 — 후보는 이미 ANALYZING 으로 커밋돼 있다 (#113). 여기서 빠져나가면
+            //    failAnalysis 를 아무도 부르지 않고 다음 실행은 findExistingIssueIds 로 건너뛰어
+            //    영구 ANALYZING 이다. 키가 없을 때의 DisabledLanguageModel(IllegalStateException)이
+            //    실제로 그 경로였다. 타입만 남긴다 — 예외 본문은 S-4 대상이다
+            log.warn("분석이 예외로 끝났다 candidateId={} type={} — FAILED",
+                    candidateId, e.getClass().getSimpleName());
+            try {
+                writer.failAnalysis(candidateId);
+            } catch (RuntimeException failFailed) {
+                // DB 자체가 죽은 경우다 — 다음 실행이 같은 이슈를 다시 보지 못하는 것은 남지만,
+                // 배치를 죽여서 얻는 것이 없다
+                log.error("후보를 FAILED 로 닫지 못했다 candidateId={} type={}",
+                        candidateId, failFailed.getClass().getSimpleName(), failFailed);
+            }
             counter.failed++;
         } finally {
             MDC.remove("candidateId");

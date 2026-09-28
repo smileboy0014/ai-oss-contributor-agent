@@ -1,6 +1,7 @@
 package com.ossagent.candidate.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -11,6 +12,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ossagent.agent.domain.SandboxPermanentException;
+import com.ossagent.agent.domain.SandboxTransientException;
 import com.ossagent.agent.domain.SandboxWorkspace;
 import com.ossagent.agent.domain.TargetWorkspaceSource;
 import com.ossagent.agent.domain.WorkspaceDiff;
@@ -23,6 +26,7 @@ import com.ossagent.candidate.domain.DiffReviewer;
 import com.ossagent.candidate.domain.FakeChangeVerifier;
 import com.ossagent.candidate.domain.FakeDiffReviewer;
 import com.ossagent.candidate.domain.GeneratedFile;
+import com.ossagent.candidate.domain.ImplementationDeferredException;
 import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.PlannedFile;
 import com.ossagent.candidate.domain.PlannedFile.ChangeKind;
@@ -82,7 +86,28 @@ class ImplementCandidateRetryLoopTest {
 
         assertThat(f.verifier().requests()).hasSize(1);
         assertThat(f.reviewer().calls()).hasSize(1);
+        assertThat(f.verifier().prepared())
+                .as("워밍은 코딩 전에 한 번 — 바퀴마다가 아니다 (#99)")
+                .containsExactly(CANDIDATE_ID);
         verify(f.retries()).readyForPr(CANDIDATE_ID);
+        verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
+    }
+
+    /**
+     * 🔴 워밍 실패는 <b>전이 앞</b>이다 (#99). 후보는 {@code SELECTED} 그대로이고 아무 바퀴도 돌지 않는다.
+     * 초안은 verify 안에서 처음 워밍해 생성 코드의 컴파일 실패가 첫 바퀴 종단이 됐다.
+     */
+    @Test
+    @DisplayName("워밍이 실패하면 전이 전에 올라간다 — 바퀴를 돌지 않고 후보는 SELECTED 그대로다")
+    void 워밍_실패는_전이_앞이다(@TempDir Path root) throws Exception {
+        Fixture f = fixture(root);
+        f.verifier().thenFailPrepareWith(new SandboxPermanentException("워밍이 0 아닌 종료코드로 끝났다"));
+
+        assertThatThrownBy(() -> f.useCase().implement(CANDIDATE_ID))
+                .isInstanceOf(SandboxPermanentException.class);
+
+        assertThat(f.verifier().requests()).as("검증 바퀴가 돌지 않는다").isEmpty();
+        verify(f.writer(), never()).start(anyLong(), org.mockito.ArgumentMatchers.anyBoolean());
         verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
     }
 
@@ -145,6 +170,30 @@ class ImplementCandidateRetryLoopTest {
         assertThat(f.verifier().requests())
                 .as("상한(%d)을 넘겨 돌면 비용이 예산을 벗어난다", MAX_ATTEMPTS)
                 .hasSize(MAX_ATTEMPTS);
+        verify(f.retries(), never()).readyForPr(anyLong());
+    }
+
+    // ── 일시 장애는 미룬다 — 태우지 않는다 (#98) ─────────────────────────────
+
+    /**
+     * 🔴 이미지 없음·데몬 다운은 후보의 코드와 무관하다. 초안은 {@code Stop} 으로 보내
+     * 인프라 장애 한 번이 후보를 영구히 {@code FAILED} 로 지웠다.
+     *
+     * <p>「{@code fail} 이 불리지 않았다」만 보면 루프가 아예 안 돌아도 초록이다 —
+     * {@code defer} 가 <b>불렸는지</b>와 예외가 <b>웹 층까지 올라오는지</b>를 함께 본다.
+     */
+    @Test
+    @DisplayName("샌드박스 일시 장애면 FAILED 가 아니라 SELECTED 로 되돌리고 503 으로 올린다 — S-6")
+    void 일시_장애는_미룬다_S6(@TempDir Path root) throws Exception {
+        Fixture f = fixture(root);
+        f.verifier().thenFailWith(new SandboxTransientException("이미지가 로컬에 없다"));
+
+        assertThatThrownBy(() -> f.useCase().implement(CANDIDATE_ID))
+                .isInstanceOf(ImplementationDeferredException.class);
+
+        assertThat(f.verifier().requests()).as("한 바퀴만 돈다 — 재시도가 아니다").hasSize(1);
+        verify(f.retries()).defer(eq(CANDIDATE_ID), anyInt(), eq(AgentRun.Stage.VERIFY), anyString());
+        verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
         verify(f.retries(), never()).readyForPr(anyLong());
     }
 
@@ -248,7 +297,8 @@ class ImplementCandidateRetryLoopTest {
             FakeChangeVerifier verifier,
             FakeDiffReviewer reviewer,
             RecordingCodingAgent coder,
-            CandidateRetryWriter retries) {
+            CandidateRetryWriter retries,
+            CandidateImplementationWriter writer) {
     }
 
     private static Fixture fixture(Path root) throws Exception {
@@ -277,7 +327,8 @@ class ImplementCandidateRetryLoopTest {
         given(writer.recordChange(anyLong(), anyString(), anyString())).willReturn(99L);
 
         PlanImplementationUseCase planner = mock(PlanImplementationUseCase.class);
-        given(planner.plan(CANDIDATE_ID)).willReturn(plan);
+        given(planner.plan(CANDIDATE_ID)).willReturn(
+                new PlanImplementationUseCase.PlannedImplementation(plan, context()));
 
         BuildRepositoryContextUseCase contexts = mock(BuildRepositoryContextUseCase.class);
         given(contexts.build(any())).willReturn(context());
@@ -309,14 +360,14 @@ class ImplementCandidateRetryLoopTest {
         RecordingCodingAgent coder = new RecordingCodingAgent();
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
-                contexts, policies, provider(new FixedWorkspaceSource(workspace)),
+                policies, provider(new FixedWorkspaceSource(workspace)),
                 provider(coder), provider(verifier), provider(reviewer), retries,
                 new ExecutionProperties(MAX_ATTEMPTS, 1800),
                 new com.ossagent.support.observability.PipelineMetrics(
                         new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
                 java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
 
-        return new Fixture(useCase, verifier, reviewer, coder, retries);
+        return new Fixture(useCase, verifier, reviewer, coder, retries, writer);
     }
 
     private static RepositoryCoordinates coordinates() {
@@ -390,7 +441,7 @@ class ImplementCandidateRetryLoopTest {
         }
 
         @Override
-        public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+        public Set<String> apply(SandboxWorkspace workspace, String unifiedDiff) {
             throw new UnsupportedOperationException("착수 경로는 diff 를 입히지 않는다 — PR 게이트의 일이다");
         }
     }

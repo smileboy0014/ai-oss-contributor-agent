@@ -29,11 +29,16 @@ class GeneratedChangeScrubTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-09-27T00:00:00Z"), ZoneOffset.UTC);
 
+    /**
+     * 🔴 <b>가리지 않고 거부한다</b> (#96). 초안은 가려서 저장했고 그 diff 를 PR 게이트가 upstream 에
+     * 다시 입혔다 — 컨텍스트 줄이 바뀌면 hunk 가 맞지 않고, PEM 스크럽은 여러 줄을 한 토큰으로 접어
+     * 패치 구조가 깨진다. 후보가 {@code READY_FOR_PR} 에 영구 고착되는 경로였다.
+     */
     @Test
-    @DisplayName("diff 에 섞인 토큰이 가려진다 — S-4")
-    void diff_에_섞인_토큰이_가려진다_S4() {
+    @DisplayName("diff 에 시크릿 패턴이 있으면 기록을 거부한다 — 가려서 저장하면 패치가 깨진다 S-4")
+    void diff_에_시크릿_패턴이_있으면_기록을_거부한다_S4() {
         // 🔴 조립한다 — 스크럽이 **실제로 무는 모양**이라야 이 검사가 의미를 갖는다.
-        //    물리지 않는 문자열로 테스트하면 「가려졌다」가 스크럽 덕인지 애초에 없어서인지
+        //    물리지 않는 문자열로 테스트하면 「거부됐다」가 스크럽 덕인지 애초에 없어서인지
         //    구분되지 않는다 (testing-philosophy.md 요구 3 · 샘플의 대표성).
         //    소스에 리터럴로 두면 이 파일이 커밋되지 않는 것도 같은 이유다.
         String tokenShaped = "ghp_" + "NOTAREALTOKENFORTESTSONLY" + "A".repeat(11);
@@ -45,14 +50,28 @@ class GeneratedChangeScrubTest {
                 +github.token: %s
                 """.formatted(tokenShaped);
 
+        assertThatThrownBy(() -> GeneratedChange.record(7L, "oss-agent/issue-13-typo", diff, CLOCK))
+                .as("대상 저장소가 커밋해 둔 토큰이 DB 로 그대로 가서도, 가려진 채 정본이 되어서도 안 된다")
+                .isInstanceOf(DiffContainsSecretException.class)
+                .satisfies(e -> assertThat(e.getMessage())
+                        .as("메시지에 걸린 조각을 싣지 않는다 — 그것이 곧 시크릿이다")
+                        .doesNotContain(tokenShaped));
+    }
+
+    @Test
+    @DisplayName("시크릿 패턴이 없는 diff 는 원문 그대로 저장된다 — 정본 패치는 변조되지 않는다")
+    void 시크릿_없는_diff_는_원문_그대로다() {
+        String diff = """
+                --- a/src/main/java/A.java
+                +++ b/src/main/java/A.java
+                @@ -1,1 +1,1 @@
+                -class A {}
+                +class A { int x; }
+                """;
+
         GeneratedChange change = GeneratedChange.record(7L, "oss-agent/issue-13-typo", diff, CLOCK);
 
-        assertThat(change.getDiff())
-                .as("대상 저장소가 커밋해 둔 토큰이 DB 로 그대로 간다 — 이 엔티티는 영속된다")
-                .doesNotContain(tokenShaped);
-        assertThat(change.getDiff())
-                .as("diff 의 나머지는 남아야 한다 — 과차단하면 사람이 변경을 읽을 수 없다")
-                .contains("application.yml");
+        assertThat(change.getDiff()).isEqualTo(diff);
     }
 
     @Test

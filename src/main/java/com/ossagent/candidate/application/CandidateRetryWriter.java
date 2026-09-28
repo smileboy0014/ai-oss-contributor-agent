@@ -139,6 +139,22 @@ class CandidateRetryWriter {
     }
 
     /**
+     * 🔴 후보를 {@code SELECTED} 로 되돌린다 — <b>일시 장애다. 태우지 않는다</b> (#98).
+     *
+     * <p>{@link #fail} 과 같은 모양으로 {@code AgentRun} 행을 남긴다 — 「왜 미뤘는가」가
+     * DB 에 있어야 사람이 다시 누를지 판단한다. 행은 실패로 기록된다(그 바퀴는 실제로 실패했다).
+     * 후보만 종단이 아니다.
+     */
+    @Transactional
+    void defer(Long candidateId, int attempt, AgentRun.Stage stage, String reason) {
+        ContributionCandidate candidate = load(candidateId);
+        candidate.deferImplementation(clock);
+        recordFailure(candidateId, attempt, stage, reason);
+        log.warn("착수 미룸 candidateId={} stage={} attempt={} reason={} — SELECTED 로 되돌린다 (S-6)",
+                candidateId, stage, attempt, reason);
+    }
+
+    /**
      * {@code AgentRun} 실패 행을 남긴다.
      *
      * <p>⚠️ {@code attempt} 가 0 일 수 있다 — {@code IMPLEMENTING} 전이 <b>전</b>에 죽은

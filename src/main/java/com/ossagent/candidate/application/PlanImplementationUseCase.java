@@ -85,7 +85,17 @@ public class PlanImplementationUseCase {
      *         규약 보류·금지 — #15 의 게이트가 던진다 (S-5)
      * @throws com.ossagent.agent.domain.LlmException 호출 자체가 실패했다
      */
-    public ImplementationPlan plan(Long candidateId) {
+    /**
+     * 계획과 <b>그 계획이 본 컨텍스트</b>.
+     *
+     * <p>🔴 컨텍스트를 함께 돌려주는 이유 — 착수가 코딩 입력을 만들려고 같은 컨텍스트를 <b>한 번 더</b>
+     * 만들었다(#116). 한 번에 GitHub 호출 최대 26회라 착수당 ~52회였고, 두 번째가 리밋에 걸리면
+     * 계획과 clone 을 버렸다. 영속화하지 않는 값(PLAN-15 D-2)이라 돌려주는 것이 유일한 재사용 경로다.
+     */
+    public record PlannedImplementation(ImplementationPlan plan, RepositoryContext context) {
+    }
+
+    public PlannedImplementation plan(Long candidateId) {
         if (candidateId == null) {
             throw new IllegalArgumentException("후보 식별자는 필수다");
         }
@@ -116,7 +126,7 @@ public class PlanImplementationUseCase {
                     log.info("구현 계획 확정 candidateId={} attempt={}/{} files={} loc={} paths={}",
                             candidateId, attempt, properties.maxAttempts(), plan.fileCount(),
                             plan.estimatedLoc(), plan.paths());
-                    return plan;
+                    return new PlannedImplementation(plan, context);
                 }
                 lastVerdict = verdict;
             } else {

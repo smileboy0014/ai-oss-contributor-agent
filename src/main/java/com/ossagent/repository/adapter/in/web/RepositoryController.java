@@ -33,17 +33,46 @@ public class RepositoryController {
     private final LaunchScanUseCase launchScan;
     private final ScanExecutionRegistry scanExecutions;
     private final ResolvePolicyPendingUseCase resolvePolicyPending;
+    private final com.ossagent.repository.application.ConfigurePolicyCommandsUseCase configurePolicyCommands;
+    private final com.ossagent.repository.application.ConfigureScanIntervalUseCase configureScanInterval;
 
     public RepositoryController(RegisterRepositoryUseCase registerRepository,
             RequestScanUseCase requestScanUseCase,
             LaunchScanUseCase launchScan,
             ScanExecutionRegistry scanExecutions,
-            ResolvePolicyPendingUseCase resolvePolicyPending) {
+            ResolvePolicyPendingUseCase resolvePolicyPending,
+            com.ossagent.repository.application.ConfigurePolicyCommandsUseCase configurePolicyCommands,
+            com.ossagent.repository.application.ConfigureScanIntervalUseCase configureScanInterval) {
         this.registerRepository = registerRepository;
         this.requestScanUseCase = requestScanUseCase;
         this.launchScan = launchScan;
         this.scanExecutions = scanExecutions;
         this.resolvePolicyPending = resolvePolicyPending;
+        this.configurePolicyCommands = configurePolicyCommands;
+        this.configureScanInterval = configureScanInterval;
+    }
+
+    /**
+     * 빌드·테스트 명령을 사람이 직접 넣는다 — #102 · S-5.
+     *
+     * <p>규약 문서가 침묵하면 LLM 추출값이 {@code null} 이고, 검증기는 그것을 「검증할 것이 없다」로
+     * 접지 않아(S-5) 모든 후보가 시작조차 못 했다. 규약이 침묵하는 것을 사람이 채우는 경로다.
+     * 정책 행이 없으면 404 — 만들어 주지 않는다(「읽지 않고 허용」이 된다).
+     */
+    @PostMapping("/{id}/policy/commands")
+    public com.ossagent.repository.adapter.in.web.dto.PolicyCommandsResponse configurePolicyCommands(
+            @PathVariable Long id,
+            @Valid @RequestBody com.ossagent.repository.adapter.in.web.dto.PolicyCommandsRequest request) {
+        Instant overriddenAt = configurePolicyCommands.configure(id, request.javaVersion(),
+                request.buildCommand(), request.testCommand());
+        return new com.ossagent.repository.adapter.in.web.dto.PolicyCommandsResponse(id, overriddenAt);
+    }
+
+    /** 저장소별 스캔 주기 — #108. {@code minutes} 가 없으면 기본 주기로 되돌린다. */
+    @org.springframework.web.bind.annotation.PatchMapping("/{id}/scan-interval")
+    public RepositoryResponse configureScanInterval(@PathVariable Long id,
+            @Valid @RequestBody com.ossagent.repository.adapter.in.web.dto.ScanIntervalRequest request) {
+        return RepositoryResponse.from(configureScanInterval.configure(id, request.minutes()));
     }
 
     @PostMapping

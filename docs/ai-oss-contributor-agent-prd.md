@@ -614,6 +614,8 @@ GET    /api/repositories
 POST   /api/repositories/{id}/scan              # 202 Accepted — 비동기
 GET    /api/repositories/{id}/scan              # 진행 상태 조회
 POST   /api/repositories/{id}/policy/resolution # 규약 보류를 사람이 해소한다
+POST   /api/repositories/{id}/policy/commands   # 규약이 침묵하는 빌드·테스트 명령을 사람이 넣는다 (#102)
+PATCH  /api/repositories/{id}/scan-interval     # 저장소별 스캔 주기(분) — 없으면 기본 주기 (#108)
 ```
 
 ### Candidate
@@ -623,7 +625,8 @@ GET    /api/candidates
 GET    /api/candidates/{id}
 POST   /api/candidates/{id}/select              # 게이트 1 — 사람이 고른다
 POST   /api/candidates/{id}/reject              # 선택 취소 (사람 행위로만)
-POST   /api/candidates/{id}/implement           # 게이트 2 — 계획 → 코딩 → 검증 → 리뷰 (최대 3바퀴) · READY_FOR_PR 에서 끝난다
+POST   /api/candidates/{id}/implement           # 게이트 2 — 202 Accepted. 전이(SELECTED→IMPLEMENTING)만 끝내고 계획 → 코딩 → 검증 → 리뷰 (최대 3바퀴)는 백그라운드 · READY_FOR_PR 에서 끝난다 (#106)
+GET    /api/candidates/{id}/implement           # 착수 진행 조회 (프로세스 메모리 — 후보 상태의 정본은 GET /api/candidates/{id})
 POST   /api/candidates/{id}/pull-request        # 게이트 3 — Fork 동기화 · push · Draft PR
 #      /api/candidates/{id}/verify            ← 🔴 열지 않는다 (아래)
 ```

@@ -8,7 +8,6 @@ import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.repository.domain.ContributionRuleInterpreter;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.PolicyClearance;
-import com.ossagent.repository.domain.PolicyClearance;
 import com.ossagent.repository.domain.PolicyDocumentFingerprints;
 import com.ossagent.repository.domain.PolicyDocumentPath;
 import com.ossagent.repository.domain.PolicyDocumentSource;

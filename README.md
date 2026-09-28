@@ -11,8 +11,10 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
   규약 분석 → 이슈 증분 수집 → 규칙 필터 → LLM 분석까지 잇고 🔴 **`ANALYZED` 에서 멈춥니다**(S-6).
   정기 스캔은 기본 꺼짐(`SCAN_SCHEDULE_ENABLED`)
 - 기여 후보 조회 API: `GET /api/candidates` (상태·난이도·신뢰도 필터 + 페이지네이션) · `GET /api/candidates/{id}`
-- **사람의 승인 지점 셋**(S-6): `POST /api/candidates/{id}/select`(선정) · `…/implement`(착수) ·
+- **사람의 승인 지점 셋**(S-6): `POST /api/candidates/{id}/select`(선정) · `…/implement`(착수 — `202`, 루프는 백그라운드 · `GET …/implement` 진행 조회) ·
   `…/pull-request`(Draft PR 생성). 취소는 `…/reject`, 규약 보류 해소는 `POST /api/repositories/{id}/policy/resolution`.
+  규약 문서가 침묵하는 빌드·테스트 명령은 사람이 `POST /api/repositories/{id}/policy/commands` 로 넣고(#102),
+  저장소별 스캔 주기는 `PATCH /api/repositories/{id}/scan-interval` 로 정합니다(#108).
   🔴 **스케줄러·워커가 이 선을 넘지 않습니다** — ArchUnit 이 「web 어댑터만 부른다」를 고정합니다
 - **구현 루프**: 계획 → 코딩 → 샌드박스 검증(컴파일·테스트·diff) → AI 리뷰를 **최대 3바퀴**. 상한 소진은 `FAILED`
 - **Fork push · Draft PR**: 게이트 뒤에서 upstream 을 재clone 해 저장된 diff 를 입히고 **사용자 Fork 에만** push 한 뒤
@@ -61,7 +63,8 @@ docker compose --profile app up --build     # postgres + redis + app (:8080)
   샌드박스 컨테이너 자체에는 소켓이 들어가지 않습니다(S-3) — 바인드 목록을 코드가 워크스페이스·캐시 볼륨 둘로 고정합니다.
 - `SANDBOX_WORKSPACE_ROOT` 는 **호스트와 컨테이너에서 같은 절대경로**여야 합니다. 앱이 넘기는 바인드 소스를 데몬이 호스트 경로로 해석하기 때문입니다.
   기본값은 `$PWD/build/sandbox-workspaces` 이고 compose 가 같은 경로로 마운트합니다.
-- 샌드박스 이미지(`eclipse-temurin:21-jdk`)는 앱이 pull 하지 않습니다. `docker pull eclipse-temurin:21-jdk` 로 미리 받아 두세요.
+- 샌드박스 이미지(`oss-agent-sandbox:<java>`)는 앱이 pull 도 build 도 하지 않습니다. `docker/sandbox/build.sh` 로 미리 빌드해 두세요.
+  stock `eclipse-temurin` 에는 `git` 이 없어 검증의 DIFF 단계가 컨테이너 기동에서 죽습니다(#97) — 그래서 우리 이미지입니다.
 - 이미지 빌드는 테스트를 돌리지 않습니다(`-x test`). 테스트 게이트는 CI 입니다.
 
 ```bash
@@ -81,6 +84,7 @@ curl -X POST http://localhost:8080/api/repositories \
 ├── gradle/libs.versions.toml  의존성 버전 단일 관리
 ├── docker-compose.yml         postgres · redis · app(`--profile app`, 로컬 전체 기동)
 ├── Dockerfile                 앱 이미지 — 로컬 compose 전용 · 테스트 미실행
+├── docker/sandbox/            샌드박스 이미지(oss-agent-sandbox:<java>) — temurin + git · build.sh 로 미리 빌드 (#97)
 ├── .dockerignore
 ├── .env.example               환경변수 예시 (실제 값은 커밋 금지)
 ├── .githooks/pre-commit       커밋 차단 검사 2종 (core.hooksPath 로 등록)

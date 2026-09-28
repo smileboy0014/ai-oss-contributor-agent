@@ -398,7 +398,7 @@ class SandboxContainerSpecTest {
         assertThat(command.argv())
                 .as("붙이지 않으면 network=none 에서 해석 시도가 즉시 실패가 아니라 "
                         + "DNS/connect 타임아웃으로 나타나 30분 예산을 조용히 태운다")
-                .containsExactly("./gradlew", "--offline", "test");
+                .containsExactly("./gradlew", "--offline", "--no-daemon", "test");
     }
 
     @Test
@@ -416,7 +416,9 @@ class SandboxContainerSpecTest {
         ExecuteCommand command = ExecuteCommand.of(workspace, cache, BuildTool.GRADLE, "21",
                 props.defaultImage(), List.of("./gradlew", "--offline", "test"), props.executeLimits());
 
-        assertThat(command.argv()).containsExactly("./gradlew", "--offline", "test");
+        assertThat(command.argv())
+                .as("--offline 은 한 번만, --no-daemon 은 없으면 붙는다 (#115)")
+                .containsExactly("./gradlew", "--no-daemon", "--offline", "test");
     }
 
     @Test
@@ -472,12 +474,41 @@ class SandboxContainerSpecTest {
                         "바인드를 찾지 못했다: " + source + " · 실제=" + Arrays.toString(binds.toArray())));
     }
 
+    // ─────────────────────────────────────────────────────────
+    // 컨테이너 사용자 — 워크스페이스 소유자 (#115)
+    // ─────────────────────────────────────────────────────────
+
+    @Test
+    void 컨테이너는_워크스페이스_소유자_uid_로_돈다() throws IOException {
+        Object uid;
+        try {
+            uid = Files.getAttribute(workspace.path(), "unix:uid");
+        } catch (UnsupportedOperationException | IllegalArgumentException e) {
+            Assumptions.abort("POSIX 속성을 읽을 수 없는 파일시스템이다");
+            return;
+        }
+        Object gid = Files.getAttribute(workspace.path(), "unix:gid");
+        Assumptions.assumeTrue(!Integer.valueOf(0).equals(uid), "root 로 돌리는 환경에서는 판정할 수 없다");
+
+        assertThat(SandboxContainerSpec.user(execute(), props))
+                .as("root 로 돌면 Linux 에서 build/·.gradle/ 이 root 소유가 되어 다음 fetch 가 죽는다")
+                .isEqualTo(uid + ":" + gid);
+    }
+
+    @Test
+    void 운영_스위치를_끄면_이미지_기본_사용자로_돈다() {
+        SandboxProperties off = new SandboxProperties(root, null, null,
+                null, null, null, null, null, null, null, null, false);
+
+        assertThat(SandboxContainerSpec.user(execute(), off)).isNull();
+    }
+
     private static SandboxProperties properties(Path root) {
         return properties(root, null);
     }
 
     private static SandboxProperties properties(Path root, String warmNetwork) {
         return new SandboxProperties(root, null, warmNetwork,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
     }
 }

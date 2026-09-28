@@ -189,14 +189,17 @@ public class GitHubWriteClient {
      *   <tr><td>되돌릴 수 있나</td><td>✅ 내 Fork 를 지우면 된다</td></tr>
      * </table>
      *
-     * <p>🔴 <b>응답의 {@code full_name} 을 호출자가 써야 한다.</b> 같은 이름이 이미 있으면
-     * GitHub 은 fork 를 {@code {name}-1} 로 만든다 — 이름을 우리가 조립하면 영원히 못 찾는다.
+     * <p>🔴 <b>응답의 {@code full_name} 을 호출자가 써야 한다.</b> 이름을 우리가 조립하면 응답과
+     * 어긋날 수 있다. 같은 이름의 무관한 저장소가 있으면 호출자가 {@code name} 을 명시한다 —
+     * REST API 는 웹 UI 와 달리 {@code {name}-1} 로 알아서 바꿔 주지 않는다 (#107).
      *
      * <p>{@link Idempotency#UNSAFE} 고정이다. 재전송하면 fork 생성 요청이 중복된다.
+     *
+     * @param body {@code name}(선택) · {@code default_branch_only}. 기준 브랜치만 복사해 준비 시간을 줄인다
      */
-    public JsonNode createFork(String upstreamOwner, String upstreamName) {
+    public JsonNode createFork(String upstreamOwner, String upstreamName, GitDataPayloads.ForkRequest body) {
         // 🔴 어설션을 거치지 않고 send 를 직접 부르는 자리 — 둘 중 하나. 늘어나면 ArchUnit 이 잡는다.
-        return send(HttpMethod.POST, upstreamOwner, upstreamName, FORKS_SUB_PATH, null,
+        return send(HttpMethod.POST, upstreamOwner, upstreamName, FORKS_SUB_PATH, body,
                 Idempotency.UNSAFE);
     }
 

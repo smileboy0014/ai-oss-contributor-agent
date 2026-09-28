@@ -43,7 +43,9 @@ public class ScanExecutor {
             MDC.put("repositoryId", String.valueOf(repositoryId));
             registry.markRunning(repositoryId);
 
-            ScanPipelineResult result = pipeline.run(repositoryId);
+            // 🔴 단계·배치 경계마다 리스를 민다 (#109) — 스캔이 리스보다 길어도 뺏기지 않는다
+            ScanPipelineResult result = pipeline.run(repositoryId,
+                    () -> registry.heartbeat(repositoryId));
             if (result.isSkipped()) {
                 registry.markSkipped(repositoryId, result);
             } else {

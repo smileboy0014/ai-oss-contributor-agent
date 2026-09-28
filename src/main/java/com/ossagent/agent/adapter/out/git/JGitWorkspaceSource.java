@@ -16,10 +16,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.lib.StoredConfig;
+import org.eclipse.jgit.patch.FileHeader;
+import org.eclipse.jgit.patch.Patch;
 import org.eclipse.jgit.treewalk.FileTreeIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,10 +70,25 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
      */
     private static final int SHALLOW_DEPTH = 1;
 
+    /**
+     * clone 의 소켓 타임아웃(초). spring-kafka 얕은 clone 은 수십 초 안이다 — 10분이면 느린 회선도
+     * 넉넉하고, 넘기면 연결이 죽은 것이다. {@code WorkspaceException} 으로 올라가고 착수 흐름에서는
+     * 전이 앞이라 후보를 건드리지 않는다.
+     */
+    private static final int CLONE_TIMEOUT_SECONDS = 600;
+
+    /** JGit {@code DiffFormatter} 가 바이너리 항목에 남기는 줄 — 본문이 없어 재적용이 불가능하다. */
+    private static final String BINARY_MARKER = "Binary files differ";
+
     private final Path workspaceRoot;
 
     public JGitWorkspaceSource(SandboxProperties properties) {
-        this.workspaceRoot = properties.workspaceRoot();
+        this(properties.workspaceRoot());
+    }
+
+    /** 테스트용 — 설정 객체 없이 루트만 준다. 실 JGit 을 로컬 저장소에 돌리는 검사가 쓴다. */
+    JGitWorkspaceSource(Path workspaceRoot) {
+        this.workspaceRoot = workspaceRoot;
         // 🔴 기동 시 한 번 — 이 빈이 올라온 이상 JGit 이 바깥 설정을 읽지 않는다.
         //    호출 시점에 걸면 「첫 호출 전에 다른 JGit 사용처가 먼저 돈다」는 경로가 남는다
         JGitSystemConfig.suppressNativeGitLookup();
@@ -105,6 +123,9 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
         try (Git git = Git.cloneRepository()
                 .setURI(url)                       // 🔴 익명 — 자격증명을 싣지 않는다 (S-4)
                 .setDirectory(workspace.path().toFile())
+                // 🔴 기본값은 무제한이다 (#115). 반쯤 열린 연결 하나가 착수 스레드를 영영 잡는다 —
+                //    「타임아웃·재시도를 어댑터에서 명시한다」(external-deps.md)
+                .setTimeout(CLONE_TIMEOUT_SECONDS)
                 .setDepth(SHALLOW_DEPTH)
                 .setCloneSubmodules(false)         // 🔴 임의 URL 을 따라가지 않는다
                 .call()) {
@@ -186,6 +207,12 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 DiffFormatter formatter = new DiffFormatter(out)) {
 
+            // 🔴 인덱스를 HEAD 로 먼저 되돌린다 (#100). 이 diff 는 「인덱스 대 작업 트리」라
+            //    인덱스에 무엇이 앉아 있느냐에 판정이 좌우된다 — 샌드박스 DIFF 단계가 `git add -A`
+            //    를 하고(#100), apply() 는 인덱스까지 갱신한다(#95). 여기서 되돌리면 어느 쪽이
+            //    먼저 돌았든 결과는 항상 「upstream(HEAD) 대 지금 작업 트리」다. MIXED 는 작업
+            //    트리를 건드리지 않는다
+            git.reset().setMode(ResetCommand.ResetType.MIXED).call();
             formatter.setRepository(git.getRepository());
             // 인덱스 대 작업 트리 — 얕은 clone 에서도 부모 커밋이 필요 없다
             List<DiffEntry> entries = formatter.scan(
@@ -201,9 +228,17 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
                 addIfReal(paths, entry.getOldPath());
                 addIfReal(paths, entry.getNewPath());
             }
-            return new WorkspaceDiff(out.toString(StandardCharsets.UTF_8), paths);
+            String unifiedDiff = out.toString(StandardCharsets.UTF_8);
+            // 🔴 바이너리 변경은 착수 때 끊는다 (#111). 저장된 diff 가 정본인데 바이너리는 본문 없이
+            //    「Binary files differ」 한 줄이라 PR 게이트가 재적용할 수 없다 — 토큰을 다 태운 뒤
+            //    마지막 게이트에서 알기보다 여기서 알린다
+            if (unifiedDiff.contains(BINARY_MARKER)) {
+                throw new WorkspaceException(
+                        "변경분에 바이너리 파일이 있다 — 텍스트 변경만 정본이 된다");
+            }
+            return new WorkspaceDiff(unifiedDiff, paths);
 
-        } catch (IOException e) {
+        } catch (IOException | GitAPIException e) {
             throw new WorkspaceException("변경분을 읽지 못했다", e);
         }
     }
@@ -215,27 +250,65 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
      * 예외를 던지고, 그 시점까지 쓴 파일이 작업 트리에 남을 수 있다. 예외를 그대로 올리므로 호출자는
      * 이 워크스페이스를 <b>버려야</b> 한다 — 다음 {@link #fetch} 가 디렉토리를 비우고 다시 받는다.
      *
-     * <p>⚠️ 인덱스는 건드리지 않는다. 뒤이어 {@link #diff} 가 「인덱스 대 작업 트리」로 바뀐 경로를
-     * 세므로, 적용된 변경분이 그대로 diff 로 다시 나온다. 그것이 push 에 실릴 파일 목록이다.
+     * <h2>🔴 적용 뒤 {@link #diff} 를 다시 부르지 않는다 — #95</h2>
+     *
+     * <p>초안은 「인덱스는 건드리지 않는다」고 적고 적용 뒤 {@link #diff} 로 바뀐 경로를 다시
+     * 셌다. <b>그 전제가 거짓이었다.</b> JGit 7 의 {@code ApplyCommand} 는 {@code PatchApplier}
+     * 로 가고, 그것은 패치를 입힌 파일마다 <b>인덱스 항목까지 갱신</b>한다
+     * ({@code lockDirCache → DirCacheBuilder.commit}). 그래서 「인덱스 대 작업 트리」 diff 가
+     * <b>항상 비었고</b>, PR 게이트는 변경분을 입혀 놓고 「바뀐 파일이 없다」로 매번 죽었다.
+     * 페이크가 {@code apply} 와 무관하게 고정 diff 를 돌려줘 테스트는 초록이었다 —
+     * {@code JGitWorkspaceSourceApplyTest} 가 실 JGit 으로 그 자리를 잡는다.
+     *
+     * <p>바뀐 경로는 <b>패치 자체</b>에서 읽는다. 삭제는 {@code newPath} 가 {@code /dev/null}
+     * 이라 양쪽을 다 담아야 push 에서 빠지지 않는다 — {@link #diff} 와 같은 규칙이다.
+     *
+     * @return 패치가 건드린 저장소 상대경로 — 추가·수정·삭제 전부
      */
     @Override
-    public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+    public Set<String> apply(SandboxWorkspace workspace, String unifiedDiff) {
         if (workspace == null) {
             throw new WorkspaceException("워크스페이스는 필수다");
         }
         if (unifiedDiff == null || unifiedDiff.isBlank()) {
             throw new WorkspaceException("입힐 변경분이 없다 — 빈 diff 로 push 하지 않는다");
         }
+        byte[] bytes = unifiedDiff.getBytes(StandardCharsets.UTF_8);
+
+        // 🔴 경로는 패치에서 읽는다. ApplyResult 는 갱신한 파일만 돌려주고 삭제가 빠질 수 있다
+        Patch patch = new Patch();
+        patch.parse(bytes, 0, bytes.length);
+        if (!patch.getErrors().isEmpty()) {
+            // ⚠ 오류 본문을 싣지 않는다 — 대상 저장소 텍스트가 섞여 있다 (S-4)
+            throw new WorkspaceException("저장된 변경분의 형식이 깨졌다 (오류 " + patch.getErrors().size() + "건)");
+        }
+        Set<String> paths = new HashSet<>();
+        for (FileHeader header : patch.getFiles()) {
+            // 🔴 바이너리 항목은 조용히 탈락한다 (#111) — JGit 의 apply 는 「Binary files differ」를
+            //    오류 없이 건너뛰어, 검증된 것과 다른 부분 커밋이 Fork 에 올라갔다. 거부한다
+            if (header.getPatchType() != FileHeader.PatchType.UNIFIED) {
+                throw new WorkspaceException(
+                        "바이너리 변경분은 재적용할 수 없다 — 텍스트 diff 만 정본이 된다 (파일 수 "
+                                + patch.getFiles().size() + ")");
+            }
+            addIfReal(paths, header.getOldPath());
+            addIfReal(paths, header.getNewPath());
+        }
+        if (paths.isEmpty()) {
+            throw new WorkspaceException("저장된 변경분에 파일 헤더가 없다 — 입힐 것이 없다");
+        }
+
         try (Git git = Git.open(workspace.path().toFile())) {
             git.apply()
-                    .setPatch(new java.io.ByteArrayInputStream(
-                            unifiedDiff.getBytes(StandardCharsets.UTF_8)))
+                    .setPatch(new java.io.ByteArrayInputStream(bytes))
                     .call();
         } catch (GitAPIException | IOException e) {
             throw new WorkspaceException(
                     "저장된 변경분이 현재 upstream 에 적용되지 않는다 — 다시 착수한다", e);
         }
-        log.info("변경분 적용 완료 workspace={} diffChars={}", workspace.path(), unifiedDiff.length());
+        // ⚠ 호스트 절대경로를 싣지 않는다 — fetch 의 로그와 같은 판단
+        log.info("변경분 적용 완료 files={} diffChars={}", paths.size(), unifiedDiff.length());
+        return Set.copyOf(paths);
     }
 
     private static void addIfReal(Set<String> paths, String path) {

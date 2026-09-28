@@ -102,30 +102,41 @@ public class GitHubForkPublisher implements ForkPublisher {
         }
 
         // 🔴 여기에는 두 경우가 온다 — 「없다」와 「같은 이름인데 이 upstream 의 fork 가 아니다」.
-        //    둘 다 fork 생성으로 간다. 후자에서 GitHub 은 {name}-1 을 만들어 주므로,
-        //    이름을 우리가 조립하면 영원히 못 찾는다 — 응답의 full_name 을 쓴다.
+        //    둘 다 fork 생성으로 간다. 후자는 이름을 우리가 명시한다 (#107) — REST API 는 웹 UI 와
+        //    달리 {name}-1 로 알아서 바꿔 주지 않는다. 어느 쪽이든 응답의 full_name 을 쓴다.
+        String requestedName = null;
         if (existing.isPresent()) {
+            requestedName = upstream.name() + CONFLICT_SUFFIX;
             log.warn("Fork owner 아래 같은 이름의 저장소가 있으나 이 upstream 의 fork 가 아니다 "
-                    + "— 새 fork 를 만든다 upstream={} conflicting={}/{}",
-                    upstream.fullName(), forkOwner, upstream.name());
+                    + "— 새 fork 를 {} 이름으로 만든다 upstream={} conflicting={}/{}",
+                    requestedName, upstream.fullName(), forkOwner, upstream.name());
         }
-        return createAndAwait(upstream, forkOwner);
+        return createAndAwait(upstream, forkOwner, requestedName);
     }
 
-    private ForkRef createAndAwait(RepositoryCoordinates upstream, String forkOwner) {
-        JsonNode created = writeClient.createFork(upstream.owner(), upstream.name());
+    /** 같은 이름의 무관한 저장소가 있을 때 fork 에 붙이는 접미어. */
+    static final String CONFLICT_SUFFIX = "-oss-agent";
+
+    private ForkRef createAndAwait(RepositoryCoordinates upstream, String forkOwner,
+            String requestedName) {
+        JsonNode created = writeClient.createFork(upstream.owner(), upstream.name(),
+                // 🔴 기준 브랜치만 복사한다 — 브랜치 전부를 복사하면 비동기 준비가 그만큼 길다 (#107)
+                new GitDataPayloads.ForkRequest(requestedName, true));
         String fullName = text(created, "full_name");
         if (fullName == null) {
             throw new ForkPublishException(
                     "Fork 생성 응답에 full_name 이 없습니다 upstream=" + upstream.fullName());
         }
         ForkRef fork = ForkRef.of(RepositoryCoordinates.parse(fullName), forkOwner);
+        String defaultBranch = text(created, "default_branch");
 
         // 🔴 POST /forks 는 202 다 — 저장소가 아직 없을 수 있다. 바로 push 하면 404 가 난다.
         //    무한 대기를 만들지 않는다: 상한 안에 안 되면 실패로 드러낸다.
+        //    ⚠ 준비 판정은 저장소 레코드가 아니라 **git ref** 다 (#107). 레코드는 객체 복사보다 먼저
+        //      200 이 되고, 그때 push 하면 409 「Git Repository is empty」로 죽었다.
         Instant deadline = clock.instant().plus(properties.readyTimeout());
         while (true) {
-            if (findRepository(fork.owner(), fork.name()).isPresent()) {
+            if (gitObjectsReady(fork, defaultBranch)) {
                 log.info("Fork 생성 완료 upstream={} fork={}", upstream.fullName(), fork.fullName());
                 return fork;
             }
@@ -135,6 +146,28 @@ public class GitHubForkPublisher implements ForkPublisher {
                                 .formatted(properties.readyTimeout(), fork.fullName()));
             }
             sleep(properties.readyPollInterval().toMillis());
+        }
+    }
+
+    /**
+     * 기준 브랜치의 ref 가 읽히는가 — git 객체까지 복사됐다는 뜻이다.
+     * 응답에 {@code default_branch} 가 없으면 저장소 레코드로 후퇴한다(이전 판정).
+     */
+    private boolean gitObjectsReady(ForkRef fork, String defaultBranch) {
+        if (defaultBranch == null || defaultBranch.isBlank()) {
+            return findRepository(fork.owner(), fork.name()).isPresent();
+        }
+        try {
+            GitHubResponse response = readClient.get(GitHubRequest.of(
+                    "/repos/%s/%s/git/ref/heads/%s".formatted(fork.owner(), fork.name(), defaultBranch)));
+            return response.hasBody() && text(response.body().path("object"), "sha") != null;
+        } catch (GitHubResourceNotFoundException e) {
+            return false;   // 아직 저장소가 없다
+        } catch (GitHubApiException e) {
+            if (e.status() == 409) {
+                return false;   // 「Git Repository is empty」 — 레코드는 있고 객체는 아직이다
+            }
+            throw e;
         }
     }
 
@@ -305,11 +338,17 @@ public class GitHubForkPublisher implements ForkPublisher {
             if (e.status() != 422) {
                 throw e;
             }
-            // 🔴 조용히 force 로 덮지 않는다. 같은 브랜치에 두 번 올리는 것은 재시도라는 뜻이고,
-            //    그 판단은 호출자가 allowUpdate 로 명시해야 한다 (FR-7).
-            throw new ForkPublishException(
-                    "브랜치가 이미 있습니다 fork=%s branch=%s — 재시도라면 호출자가 allowUpdate 를 명시합니다"
-                            .formatted(fork.fullName(), branch), e);
+            // 🔴 브랜치가 이미 있는데 호출자는 「처음」이라고 했다 (#110). 가장 흔한 원인은 지난번
+            //    POST git/refs 가 GitHub 엔 반영됐는데 응답이 유실돼 commitSha 를 기록하지 못한
+            //    것이다. 사람이 allowUpdate 를 줄 방법이 없어 초안은 여기서 영구 422 였다 —
+            //    유일한 탈출이 DB 수정·브랜치 삭제였고, 그것은 게이트가 우회법을 강요하는 모양이다.
+            //    이 브랜치는 우리 Fork 안의 우리 이름공간(oss-agent/*)이라 덮어써도 남의 것이 아니다.
+            //    조용히 넘기지 않는다 — WARN 을 남기고 갱신으로 보고한다(updated=true)
+            log.warn("브랜치가 이미 있다 — 지난 push 의 응답이 유실됐을 수 있다. force 로 갱신한다 "
+                    + "fork={} branch={}", fork.fullName(), branch);
+            writeClient.patch(fork, "git/refs/heads/" + branch.value(),
+                    new UpdateRefRequest(commitSha, true), Idempotency.UNSAFE);
+            return true;
         }
     }
 

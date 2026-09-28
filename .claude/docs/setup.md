@@ -174,6 +174,9 @@ Q-3 이 확정되면 다시 검토한다.
 # 🔴 actuator 는 앱 포트에 없다 — 관리 포트 9090 · 루프백 전용 (#74).
 #    8080 으로 치면 404 다. 그것이 정상이고, 그 사실이 이 문서의 요점이다
 curl -s 127.0.0.1:9090/actuator/health
+# ⚠ docker compose --profile app 에서는 9090 이 publish 되지 않는다(루프백 바인드) — 컨테이너 안에서
+#   `docker compose exec app curl -s 127.0.0.1:9090/actuator/health` 로 친다. k8s httpGet 프로브처럼
+#   밖에서 붙는 것은 이 설정으론 닿지 않는다 (#74 · #116)
 curl -s -X POST localhost:8080/api/repositories \
   -H 'Content-Type: application/json' \
   -d '{"owner":"spring-projects","name":"spring-kafka","url":"https://github.com/spring-projects/spring-kafka"}'

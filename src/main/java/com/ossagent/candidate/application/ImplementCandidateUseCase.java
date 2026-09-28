@@ -17,11 +17,11 @@ import com.ossagent.candidate.domain.FailureFingerprint;
 import com.ossagent.candidate.domain.RetryDecision;
 import com.ossagent.candidate.domain.RetryPolicy;
 import com.ossagent.candidate.domain.GeneratedFile;
+import com.ossagent.candidate.domain.ImplementationDeferredException;
 import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.VerificationReport;
 import com.ossagent.candidate.domain.VerificationRequest;
 import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
-import com.ossagent.repository.application.BuildRepositoryContextUseCase;
 import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.support.observability.PipelineMetrics;
@@ -96,7 +96,6 @@ public class ImplementCandidateUseCase {
 
     private final CandidateImplementationWriter writer;
     private final PlanImplementationUseCase planner;
-    private final BuildRepositoryContextUseCase contexts;
     private final AnalyzeRepositoryPolicyUseCase policies;
     private final TargetWorkspaceSource workspaces;
     private final CodingAgent codingAgent;
@@ -119,7 +118,6 @@ public class ImplementCandidateUseCase {
      */
     public ImplementCandidateUseCase(CandidateImplementationWriter writer,
             PlanImplementationUseCase planner,
-            BuildRepositoryContextUseCase contexts,
             AnalyzeRepositoryPolicyUseCase policies,
             ObjectProvider<TargetWorkspaceSource> workspaces,
             ObjectProvider<CodingAgent> codingAgents,
@@ -135,7 +133,6 @@ public class ImplementCandidateUseCase {
         this.metrics = metrics;
         this.clock = clock;
         this.planner = planner;
-        this.contexts = contexts;
         this.policies = policies;
         // 🔴 셋 다 대역 프로필에서 빠질 수 있다(@ExternalAdapter · @Profile("!fakes")).
         //    getIfAvailable 로 받아 **없으면 착수를 시작하지 않는다** — executorReady() 참조
@@ -202,14 +199,15 @@ public class ImplementCandidateUseCase {
         Long candidateId = admission.candidateId();
         MDC.put(MDC_STAGE, "PLAN");
         Instant planStart = clock.instant();
-        ImplementationPlan plan;
+        PlanImplementationUseCase.PlannedImplementation planned;
         try {
-            plan = planner.plan(candidateId);
+            planned = planner.plan(candidateId);
         } catch (RuntimeException e) {
             stageDone(PipelineStage.PLAN, false, planStart);
             throw e;
         }
         stageDone(PipelineStage.PLAN, true, planStart);
+        ImplementationPlan plan = planned.plan();
 
         RepositoryCoordinates coordinates = policies.coordinatesOf(admission.repositoryId());
         ContributionConstraints constraints = policies.constraintsOf(admission.repositoryId());
@@ -218,9 +216,66 @@ public class ImplementCandidateUseCase {
         //   같은 좌표로 다시 fetch 하면 JGitWorkspaceSource 가 통째로 지우고 새로 만드니
         //   저장소당 1개가 상한이다. 실패한 후보의 트리 수명은 #26 이 본다
         SandboxWorkspace workspace = workspaces.fetch(coordinates, branch);
-        CodingInput input = new CodingInput(plan, contexts.build(admission.issue()), constraints);
+        // 🔴 워밍·씨딩을 코딩 **전** 원본 clone 에서 끝낸다 (#99). verify 안에서 처음 워밍하면
+        //    생성 코드가 testClasses 컴파일에 섞여, 컴파일 실패가 종료코드(재시도 대상)가 아니라
+        //    SandboxPermanentException(종단)으로 나와 3바퀴 루프가 첫 바퀴에서 끝났다.
+        //    여기서 나는 예외는 전이 앞이라 후보를 건드리지 않는다
+        MDC.put(MDC_STAGE, "VERIFY");
+        verifier.prepare(candidateId, coordinates, workspace.path(), constraints);
+        // 🔴 계획이 본 컨텍스트를 그대로 쓴다 — 다시 만들면 GitHub 호출이 두 배다 (#116)
+        CodingInput input = new CodingInput(plan, planned.context(), constraints);
 
         return new Prepared(plan, coordinates, constraints, branch, workspace, input);
+    }
+
+    /**
+     * 🔴 <b>전이 뒤</b>의 구간 — 백그라운드에서 돈다 (#106). {@code ImplementExecutor} 가 부른다.
+     *
+     * <p>{@link #implement} 와 순서가 다르다: 저쪽은 준비 → 전이(동기 경로 · 테스트가 쓴다), 이쪽은
+     * 이미 전이한 후보를 받아 준비 → 루프다. 준비 실패는 이제 「전이 앞」이 아니므로 후보를 건드려야 한다 —
+     * <b>일시 장애·리밋·정책 변경은 미룸(SELECTED)</b>이고(#98), 그 밖은 {@code FAILED} 다.
+     * 계획 상한 소진은 {@code PlanImplementationUseCase} 가 이미 {@code FAILED} 로 닫았다.
+     */
+    public void continueAfterStart(CandidateImplementationWriter.ImplementationStart start) {
+        Long candidateId = start.candidateId();
+        MDC.put(MDC_CANDIDATE_ID, String.valueOf(candidateId));
+        MDC.put(MDC_ATTEMPT, String.valueOf(start.attempt()));
+        try {
+            Prepared prepared;
+            try {
+                prepared = prepare(new CandidateImplementationWriter.Admission(candidateId, start.issue()));
+            } catch (PlanExhaustedException e) {
+                throw e;   // failPlanning 이 이미 IMPLEMENTING → FAILED 로 닫았다
+            } catch (RuntimeException e) {
+                if (isDeferrable(e)) {
+                    String reason = "착수 준비 중 일시 장애 (" + e.getClass().getSimpleName() + ")";
+                    retries.defer(candidateId, start.attempt(), AgentRun.Stage.CODE, reason);
+                    throw new ImplementationDeferredException(candidateId, reason);
+                }
+                retries.fail(candidateId, start.attempt(), AgentRun.Stage.CODE,
+                        "착수 준비 실패 (" + e.getClass().getSimpleName() + ")");
+                throw e;
+            }
+            runOutsideTransaction(start, prepared);
+        } finally {
+            MDC.remove(MDC_CANDIDATE_ID);
+            MDC.remove(MDC_STAGE);
+            MDC.remove(MDC_ATTEMPT);
+        }
+    }
+
+    /**
+     * 준비 단계에서 「준비되면 같은 요청이 성공한다」인 실패 — 미룬다.
+     * {@code RetryPolicy} 의 화이트리스트에 GitHub 쪽(리밋·5xx)을 더한다.
+     *
+     * <p>⚠️ 규약이 그 사이 닫힌 것(S-5 게이트)은 <b>미루지 않는다.</b> 기다리면 풀리는 종류가
+     * 아니라 사람이 해소해야 하는 것이고, 그 예외 타입은 {@code repository} 애그리거트의 것이라
+     * 여기서 볼 수도 없다({@code ApprovalGateArchitectureTest}). {@code FAILED} 로 떨어져 사람에게 간다.
+     */
+    private static boolean isDeferrable(RuntimeException e) {
+        return RetryPolicy.isTransient(e)
+                || e instanceof com.ossagent.support.github.GitHubRateLimitException
+                || e instanceof com.ossagent.support.github.GitHubTransientException;
     }
 
     /** {@link #prepare} 의 산출 — 루프가 바퀴마다 다시 만들지 않는 것들. */
@@ -271,6 +326,8 @@ public class ImplementCandidateUseCase {
             Prepared prepared) {
         Long candidateId = start.candidateId();
         int attempt = start.attempt();
+        // 🔴 미룸은 catch 밖에서 던진다 — try 안에서 던지면 아래 catch 가 잡아 FAILED 로 보낸다 (#98)
+        RetryDecision.Defer deferred = null;
         try {
             ImplementationPlan plan = prepared.plan();
             RepositoryCoordinates coordinates = prepared.coordinates();
@@ -298,6 +355,12 @@ public class ImplementCandidateUseCase {
                     retries.fail(candidateId, attempt, stop.stage(), stop.reason());
                     return;
                 }
+                if (decision instanceof RetryDecision.Defer defer) {
+                    // 🔴 일시 장애 — 후보를 태우지 않고 SELECTED 로 되돌린다. 사람이 다시 누른다 (#98)
+                    retries.defer(candidateId, attempt, defer.stage(), defer.reason());
+                    deferred = defer;
+                    break;
+                }
 
                 RetryDecision.Retry retry = (RetryDecision.Retry) decision;
                 previous = Optional.of(FailureFingerprint.of(retry.feedback()));
@@ -319,6 +382,11 @@ public class ImplementCandidateUseCase {
             log.warn("착수 실패 candidateId={} type={}", candidateId, e.getClass().getSimpleName(), e);
             retries.fail(candidateId, attempt, AgentRun.Stage.CODE,
                     "착수 실패 (" + e.getClass().getSimpleName() + ")");
+            return;
+        }
+        if (deferred != null) {
+            // 웹 층이 503 + Retry-After 로 번역한다 — 레이트리밋과 같은 「지연」이다
+            throw new ImplementationDeferredException(candidateId, deferred.reason());
         }
     }
 
@@ -488,7 +556,7 @@ public class ImplementCandidateUseCase {
      * <p>코딩까지는 검증기 없이도 돌지만, 그러면 <b>LLM 토큰과 clone 비용을 태우고</b>
      * 검증 없이 멈춘다. 사람이 그 버튼을 눌러 얻는 것이 없다.
      */
-    private boolean executorReady() {
+    public boolean executorReady() {
         return workspaces != null && codingAgent != null && verifier != null && reviewer != null;
     }
 

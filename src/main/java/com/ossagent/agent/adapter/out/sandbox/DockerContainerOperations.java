@@ -3,6 +3,8 @@ package com.ossagent.agent.adapter.out.sandbox;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.WaitContainerResultCallback;
+import com.github.dockerjava.api.exception.ConflictException;
+import com.github.dockerjava.api.exception.DockerClientException;
 import com.github.dockerjava.api.exception.DockerException;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Frame;
@@ -48,14 +50,18 @@ public class DockerContainerOperations implements ContainerOperations {
     @Override
     public String create(ContainerCreation creation) {
         try {
-            return client.createContainerCmd(creation.image())
+            var command = client.createContainerCmd(creation.image())
                     .withCmd(creation.argv())
                     .withEnv(creation.env())
                     .withWorkingDir(creation.workingDir())
                     .withHostConfig(creation.hostConfig())
-                    .withLabels(creation.labels())
-                    .exec()
-                    .getId();
+                    .withLabels(creation.labels());
+            if (creation.user() != null) {
+                // 🔴 워크스페이스 소유자로 돈다 (#115). root 로 돌면 Linux 에서 build/·.gradle/ 이
+                //    root 소유가 되어 다음 fetch 의 삭제가 AccessDenied 로 죽고 git 이 dubious ownership 을 낸다
+                command = command.withUser(creation.user());
+            }
+            return command.exec().getId();
         } catch (NotFoundException e) {
             // 🔴 이미지를 우리가 받아 오지 않는다 — pull 은 데몬 자격증명이 관여하는 행위라
             //    운영이 미리 받아 두는 쪽이 단순하다. 따라서 「없다」는 우리 결함이 아니라
@@ -102,7 +108,10 @@ public class DockerContainerOperations implements ContainerOperations {
             // 인터럽트를 「정상 종료」로 보고하면 호출자가 빌드가 끝난 줄 안다.
             // 컨테이너는 아직 살아 있으므로 타임아웃과 같은 처리(kill → remove)가 맞다
             return WaitOutcome.timeout();
-        } catch (DockerException | IllegalStateException e) {
+        } catch (DockerException | DockerClientException | IllegalStateException e) {
+            // 🔴 DockerClientException 도 잡는다 (#115). awaitStatusCode() 가 응답을 못 받았을 때 던지는
+            //    것인데 DockerException 의 하위가 아니라 RuntimeException 직계다 — 빠져나가면
+            //    데몬 예외 본문(URL·헤더)이 그대로 로그와 AgentRun.errorMessage 로 간다 (S-4)
             throw daemonFailure("컨테이너 대기", e);
         } catch (IOException e) {
             // try-with-resources 의 close 가 던지는 것. 넓게 잡지 않는다 —
@@ -138,8 +147,10 @@ public class DockerContainerOperations implements ContainerOperations {
             @Override
             public void onNext(Frame frame) {
                 // 여기서 스트림을 끊지 않는다 — 위 javadoc 참조.
-                // 상한을 넘은 프레임은 버려지므로 메모리는 더 늘지 않는다
-                buffer.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                // 상한을 넘은 프레임은 버려지므로 메모리는 더 늘지 않는다.
+                // 🔴 바이트로 넘긴다 (#115) — 프레임 경계는 임의 바이트 위치라 여기서 문자열로
+                //    바꾸면 경계에 걸친 멀티바이트 문자가 U+FFFD 로 깨져 판정 입력에 섞인다
+                buffer.append(frame.getPayload());
             }
         };
 
@@ -157,7 +168,7 @@ public class DockerContainerOperations implements ContainerOperations {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             buffer.markTruncated();
-        } catch (DockerException | IllegalStateException e) {
+        } catch (DockerException | DockerClientException | IllegalStateException e) {
             throw daemonFailure("로그 수집", e);
         } catch (IOException e) {
             // 로그를 못 받은 것이 실행 결과를 버릴 이유는 아니다 — 잘린 것으로 표시한다
@@ -174,17 +185,48 @@ public class DockerContainerOperations implements ContainerOperations {
      * 빠져나올 때 콜백 스레드가 아직 쓰고 있을 수 있고, 그 상태에서 읽으면 깨진 문자열이
      * 판정 입력이 된다.
      */
-    private static final class LogBuffer {
+    static final class LogBuffer {
 
         private final StringBuilder buffer = new StringBuilder();
         private final int maxChars;
         private boolean truncated;
 
+        /**
+         * 🔴 프레임 경계를 넘는 멀티바이트 문자를 위해 <b>디코더를 이어서</b> 쓴다 (#115).
+         * 프레임마다 {@code new String(bytes)} 를 하면 경계에 걸친 한 글자가 두 개의 U+FFFD 가 된다.
+         * 남은 바이트는 다음 프레임 앞에 붙인다.
+         */
+        private final java.nio.charset.CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPLACE);
+        private byte[] pending = new byte[0];
+
         LogBuffer(int maxChars) {
             this.maxChars = maxChars;
         }
 
+        synchronized void append(byte[] payload) {
+            if (truncated || payload == null || payload.length == 0) {
+                return;
+            }
+            byte[] input = new byte[pending.length + payload.length];
+            System.arraycopy(pending, 0, input, 0, pending.length);
+            System.arraycopy(payload, 0, input, pending.length, payload.length);
+            java.nio.ByteBuffer in = java.nio.ByteBuffer.wrap(input);
+            java.nio.CharBuffer out = java.nio.CharBuffer.allocate(input.length + 1);
+            decoder.decode(in, out, false);
+            pending = new byte[in.remaining()];
+            in.get(pending);
+            out.flip();
+            appendChars(out.toString());
+        }
+
+        /** 문자열 입력 — 테스트와 비-스트림 경로용. */
         synchronized void append(String chunk) {
+            appendChars(chunk);
+        }
+
+        private void appendChars(String chunk) {
             if (truncated) {
                 return;
             }
@@ -202,6 +244,15 @@ public class DockerContainerOperations implements ContainerOperations {
         }
 
         synchronized ContainerLogs toLogs() {
+            // 스트림 끝 — 남은 바이트가 있으면 깨진 것이니 대체 문자로 접는다
+            if (pending.length > 0) {
+                java.nio.CharBuffer out = java.nio.CharBuffer.allocate(pending.length + 2);
+                decoder.decode(java.nio.ByteBuffer.wrap(pending), out, true);
+                decoder.flush(out);
+                out.flip();
+                appendChars(out.toString());
+                pending = new byte[0];
+            }
             return new ContainerLogs(buffer.toString(), truncated);
         }
     }
@@ -243,7 +294,13 @@ public class DockerContainerOperations implements ContainerOperations {
                     .map(Network::getName)
                     .anyMatch(name::equals);
             if (!exists) {
-                client.createNetworkCmd().withName(name).exec();
+                try {
+                    client.createNetworkCmd().withName(name).exec();
+                } catch (ConflictException raced) {
+                    // 🔴 조회와 생성 사이에 다른 저장소의 워밍이 먼저 만들었다 (#115).
+                    //    「이미 있다」는 준비된 것이다 — 예외로 올리면 후보가 이유 없이 미뤄진다
+                    log.debug("워밍 네트워크가 그 사이 생겼다 name={}", name);
+                }
             }
         } catch (DockerException | IllegalStateException e) {
             throw daemonFailure("워밍 네트워크 준비", e);

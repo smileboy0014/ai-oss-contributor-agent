@@ -32,3 +32,6 @@ logs/
 # IDE 빌드 산출물 (VS Code · Eclipse 계열) — Gradle 의 build/ 와 별개로 생긴다
 bin/
 .vscode/
+
+# IDE 산출물 — VS Code Java(Eclipse JDT) 컴파일 출력
+bin/

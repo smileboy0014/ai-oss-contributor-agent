@@ -22,7 +22,10 @@ src/main/resources/db/migration/
 ├── V6__add_issue_scan_cursor.sql
 ├── V7__add_issue_filter_columns.sql
 ├── V8__policy_resolution.sql
-└── V9__policy_document_fingerprints.sql
+├── V9__policy_document_fingerprints.sql
+├── V10__scan_execution_and_interval.sql     (#26 — scan_execution · scan_interval_minutes)
+├── V11__oss_repository_unique_owner_name.sql (#114 — UNIQUE(owner, name))
+└── V12__policy_commands_override.sql         (#102 — commands_overridden_at)
 ```
 
 | 규칙 | 이유 |
@@ -86,6 +89,7 @@ oss_repository ──1:1──▶ repository_policy
 | `owner` | VARCHAR NOT NULL | `spring-projects` |
 | `name` | VARCHAR NOT NULL | `spring-kafka` |
 | `url` | VARCHAR NOT NULL **UNIQUE** | 중복 등록 차단의 근거 |
+| `(owner, name)` | **UNIQUE** ✅ V11 (#114) | 🔴 URL 철자만 다른 이중 등록이 **같은 upstream 이슈에 Draft PR 둘**을 냈다. 등록 시 좌표 검증·대소문자 무시 중복 검사도 함께 |
 | `enabled` | BOOLEAN NOT NULL | 스캔 대상 여부 |
 | `last_scanned_at` | TIMESTAMP NULL | **언제 돌렸나** — 커서가 아니다(아래) |
 | `issue_cursor_updated_at` | TIMESTAMP NULL | ✅ V6 — 이슈 증분 수집 커서. **어디까지 봤나** |
@@ -182,7 +186,8 @@ DB 로 옮기는 순간 그것이 사라져, 인스턴스가 `kill -9` 되면 `R
 | `id` | BIGINT PK | |
 | `repository_id` | BIGINT FK | 1:1 |
 | `java_version` | VARCHAR | 샌드박스 이미지 선택 근거 |
-| `build_command` · `test_command` | VARCHAR | 〃 실행 명령 |
+| `build_command` · `test_command` | VARCHAR(255) | 〃 실행 명령. 🔴 LLM 추출값이 255 를 넘으면 **NULL(못 읽음)** 로 둔다 — 잘라 쓸 수 없다 (#102) |
+| `commands_overridden_at` | TIMESTAMP NULL ✅ V12 (#102) | 사람이 `POST /policy/commands` 로 명령을 넣은 시각. 🔴 NULL 이 아니면 **재분석이 세 명령을 덮어쓰지 않는다** — 자동이 사람 판단을 다시 쓰지 않는다 |
 | `issue_reference_required` | BOOLEAN | 커밋/PR 에 이슈 참조 필수 |
 | `signoff_required` | BOOLEAN | DCO sign-off 필수 |
 | `tests_required` | BOOLEAN | 테스트 동반 필수 |

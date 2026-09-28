@@ -1,6 +1,12 @@
 spring:
   application:
     name: ai-oss-contributor-agent
+  task:
+    execution:
+      # 🔴 우리가 Executor 빈(scanTaskExecutor 등)을 등록하면 Boot 는 applicationTaskExecutor 를
+      #    만들지 않는다. 그러면 자격(qualifier) 없는 @Async 가 무제한 SimpleAsyncTaskExecutor 로
+      #    조용히 떨어진다. force 로 두면 Boot 의 유계 실행기가 함께 뜬다 (#116 · Boot 3.5)
+      mode: force
   datasource:
     url: ${DATABASE_URL:jdbc:h2:mem:oss-agent;MODE=PostgreSQL;DB_CLOSE_DELAY=-1}
     username: ${DATABASE_USERNAME:sa}
@@ -109,6 +115,9 @@ github:
   #    소진된 뒤가 아니라 임계 미만이 되는 순간부터다 — 예산을 끝까지 태우면 같은 토큰을
   #    쓰는 다른 작업(규약 수집 #7 · 코드 검색 #15)이 전부 막힌다.
   #    호출자는 이 예외를 실패가 아니라 「지연」으로 다룬다
+  #    ⚠ 절대값이 아니라 **버킷의 10% 를 상한**으로 깎인다 (#103): 인증 5,000/h 이면 100 그대로,
+  #      미인증 60/h 이면 6, Search 30/min 이면 3. 깎지 않으면 미인증은 첫 응답 직후부터
+  #      임계 미만이라 리셋까지 모든 호출을 거부한다 — 막는 동안 갱신할 응답이 없어 자물쇠였다
   rate-limit-threshold: 100
 
   # Fork 쓰기 — S-1. 쓰기 대상은 사용자 Fork 뿐이고 원본으로 가는 경로는 읽기만 존재한다.
@@ -120,8 +129,10 @@ github:
     #      남의 저장소 히스토리 오염(되돌릴 수 없다)이다
     owner: ${GITHUB_FORK_OWNER:}
     # POST /repos/{o}/{r}/forks 는 202 라 저장소가 아직 없을 수 있다. 무한 대기를 만들지 않는다
-    ready-timeout: 30s
-    ready-poll-interval: 2s
+    # 🔴 GitHub 문서: 「5분 넘게 걸리면 지원에 문의」. 30초는 spring-kafka 첫 fork 에 모자랐다 (#107).
+    #    준비 판정은 저장소 레코드가 아니라 기준 브랜치의 git ref 다 — 레코드가 먼저 200 이 된다
+    ready-timeout: 5m
+    ready-poll-interval: 5s
     # 대상 저장소에 나가는 커밋의 author·committer 이자 DCO sign-off 의 서명자 — S-5.
     # ⚠ GET /user 로 받지 않는다. public_repo 스코프로는 비공개 이메일을 받지 못해
     #   sign-off 가 noreply 주소로 나가고 대상 저장소의 DCO 검사에서 걸린다.
@@ -171,12 +182,22 @@ sandbox:
   # 🔴 S-3 의 실행체 설정 (#17). 네트워크는 여기 없다 — 명령 타입이 정한다.
   #    SANDBOX_NETWORK 를 키로 두면 실행 단계 격리가 배포 설정 한 줄로 꺼진다
   docker-api-version: ${SANDBOX_DOCKER_API_VERSION:1.44}
-  default-image: ${SANDBOX_DOCKER_IMAGE:eclipse-temurin:21-jdk}
+  # 컨테이너를 워크스페이스 소유자 uid:gid 로 돌린다 (#115). root 로 돌면 Linux 에서 build/·.gradle/ 이
+  # root 소유가 되어 다음 fetch 의 삭제가 죽고 git 이 dubious ownership 을 낸다.
+  # macOS Docker Desktop 은 uid 를 재매핑해 재현되지 않는다 — 배포에서만 터지는 종류라 기본 켜짐.
+  # 격리 설정이 아니라 운영 호환 스위치다 — 끄면 이전과 같이 root 로 돈다
+  run-as-workspace-owner: ${SANDBOX_RUN_AS_WORKSPACE_OWNER:true}
+  # 🔴 stock eclipse-temurin 이 아니다 — git 이 없어 검증의 DIFF 단계가 컨테이너 기동에서 죽는다 (#97).
+  #    docker/sandbox/build.sh 로 미리 빌드한다. 앱은 pull 도 build 도 하지 않는다
+  default-image: ${SANDBOX_DOCKER_IMAGE:oss-agent-sandbox:21}
   # 워밍 전용 네트워크. host·container:<id>·bridge 는 코드가 거부한다
   warm-network: ${SANDBOX_WARM_NETWORK:oss-agent-warm}
   # 🔴 바인드 허용 루트. 비어 있으면 「모든 경로가 루트 하위」가 되어 경로 제한이 무력해진다.
   #    구체적인 기본 루트는 위반이 아니다 — 위반은 루트가 「없는」 것이다.
-  #    상대경로면 기동 시점에 절대경로로 확정하고, 없으면 만든다
+  #    상대경로면 기동 시점에 절대경로로 확정하고, 없으면 만든다.
+  #    ⚠ 상대경로는 **JVM 의 작업 디렉토리** 기준이다 — jar 를 / 에서 띄우면 /build/… 가 된다.
+  #      배포에서는 절대경로를 준다. 깊이 2 이상이어야 한다(/data 는 거부, /data/oss-agent 는 통과) —
+  #      한 단계짜리 경로는 대개 시스템 디렉토리라 SandboxWorkspace 가 기동에서 막는다 (#116)
   workspace-root: ${SANDBOX_WORKSPACE_ROOT:build/sandbox-workspaces}
   cpu-limit: ${SANDBOX_CPU_LIMIT:2}
   # ⚠ 단위 필수. 단위 없는 값은 DataSize 에 바인딩되지 않는다
@@ -213,7 +234,8 @@ scan:
     #      태우지 않는다 — 오히려 주기 필터가 GitHub 호출을 **줄인다**(NFR-1)
     fixed-delay: 10m
     initial-delay: 5m
-  # 저장소별 주기(oss_repository.scan_interval_minutes)가 없을 때 쓰는 기본 주기 — FR-1
+  # 저장소별 주기(oss_repository.scan_interval_minutes)가 없을 때 쓰는 기본 주기 — FR-1.
+  # 저장소별 값은 PATCH /api/repositories/{id}/scan-interval 로 정한다 (#108)
   default-interval: 1h
   # 🔴 스캔 자리를 붙들 수 있는 시간. 지나면 다른 인스턴스가 뺏어 간다 — FR-4
   #
@@ -234,7 +256,14 @@ scan:
 agent:
   execution:
     max-attempts: 3
+    # 🔴 한 바퀴(CODE→VERIFY→REVIEW)의 벽시계 상한. 전체 착수 상한이 아니다 — 바퀴마다 센다
     timeout-seconds: 1800
+    # 🔴 착수는 비동기다 (#106) — POST /implement 는 전이(SELECTED→IMPLEMENTING)만 끝내고 202 로 돌아온다.
+    #    루프는 이 풀에서 돈다. 진행은 GET /api/candidates/{id}/implement.
+    #    ⚠ 워크스페이스가 저장소당 하나라 같은 저장소의 착수는 겹쳐 돌지 않는다(409) — 올려도 그 제약은 그대로다
+    max-concurrent: 1
+    # 차면 409 이고 후보는 SELECTED 로 되돌아간다 — 무한 큐는 「쌓이는 줄 모르는」 상태를 만든다
+    queue-capacity: 4
   # 이슈 분석(#11) — PRD §11. LLM 호출 1건 = 후보 1건이다
   analysis:
     # 한 번에 집어 오는 분석 대상 이슈 수 (PASSED · UNDECIDED)
@@ -270,6 +299,12 @@ agent:
     # 파일 7개짜리 무관한 계획이 max-planned-files(8)를 그대로 통과한다.
     # ⚠ 1.0 으로 조이지 않는다. 추정은 추정이고, 정밀도가 아니라 scope creep 이 목표다
     scope-tolerance: 2.0
+  # AI diff 리뷰(#20) — PRD §15. 값이 없으면 DiffReviewProperties 의 기본값(60000 · 4000)이다.
+  # 여기 적어 두는 이유는 「살아 있는 상한이 설정에 보이게」다 (#116)
+  review:
+    # 🔴 넘으면 자르지 않고 거부한다 — 잘린 diff 를 리뷰하면 「본 것만」 판정한다
+    max-diff-chars: 60000
+    max-output-tokens: 4000
   # 코딩(#18) — PRD §14. 계획대로 파일 **전체 내용**을 만든다
   coding:
     # 🔴 계획(4,000)보다 훨씬 커야 한다 — 여기서 돌려받는 것은 목록이 아니라 **파일 본문**이다.
@@ -306,11 +341,12 @@ agent:
     api-key: ${ANTHROPIC_API_KEY:}
     # external-deps.md 가 정한 기본 모델
     model: ${ANTHROPIC_MODEL:claude-sonnet-5}
-    # 비스트리밍 요청이 SDK HTTP 타임아웃을 넘지 않는 범위의 상한.
-    # 상한에서 잘리면 성공이 아니라 TRUNCATED 예외다
+    # 출력 예산 상한. 상한에서 잘리면 성공이 아니라 TRUNCATED 예외다
     max-output-tokens: 16000
-    # Q-3(프로필 미분리)을 감안해 보수적으로 잡았다. 코딩 단계 diff 가 가장 길어
-    # 호출 지점별로 달리 줄 여지가 있으나, 실측 전에는 나누지 않는다.
+    # 🔴 호출 하나의 시간 상한 — **2,000 토큰까지** (#104). SDK 의 timeout 은 전체 호출(본문 수신
+    #    포함)이라 120초를 16,000 토큰 비스트리밍 코딩 응답에 그대로 대면 매번 타임아웃이었다.
+    #    어댑터가 2,000 을 넘는 출력 예산에 1,000 토큰당 50초를 더한다(16,000 이면 120 + 700초).
+    #    분석 1,500 · 규약 2,000 은 이 값 그대로다.
     # ⚠ 키 이름이 필드명(timeout)과 같아야 한다. `timeout-seconds` 로 두면 Duration 에
     #   바인딩되지 않아 값을 낮춰도 아무 일도 일어나지 않는다 — github.read-timeout 과 같은 형식
     timeout: 120s
@@ -334,9 +370,9 @@ agent:
     # ⚠ input 만 적고 output 을 빠뜨리면 기동에 실패한다 — 한쪽만 적힌 단가는
     #   그 방향이 공짜인 장부를 만든다.
     # ⚠ 환경변수로 주기 어렵다(모델 ID 의 '-' 때문). 필요하면 실행 인자로 준다 —
-    #   --agent.llm.pricing.claude-sonnet-5.input=3.00
+    #   --agent.llm.pricing.claude-sonnet-5.input=2.00
     #
     # pricing:
     #   claude-sonnet-5:
-    #     input: 3.00
-    #     output: 15.00
+    #     input: 2.00
+    #     output: 10.00

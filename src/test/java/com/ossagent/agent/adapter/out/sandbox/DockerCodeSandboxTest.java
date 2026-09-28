@@ -42,7 +42,7 @@ class DockerCodeSandboxTest {
     @BeforeEach
     void setUp() throws IOException {
         operations = new RecordingContainerOperations();
-        props = new SandboxProperties(root, null, null, null, null, null, null, null, null, null, null);
+        props = new SandboxProperties(root, null, null, null, null, null, null, null, null, null, null, null);
         workspace = SandboxWorkspace.under(
                 Files.createDirectories(root.resolve("candidate-1")), props.workspaceRoot());
         cache = SandboxCacheVolume.forRepository("spring-projects", "spring-kafka");

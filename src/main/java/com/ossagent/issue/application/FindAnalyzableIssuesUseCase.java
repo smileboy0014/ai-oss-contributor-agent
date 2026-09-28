@@ -99,7 +99,10 @@ public class FindAnalyzableIssuesUseCase {
                 issue.getBody(),
                 issue.labelList(),
                 issue.getUrl(),
-                FilterOutcome.valueOf(issue.getFilterResult()),
+                // 🔴 null 을 통과시킨다 (#113). 재스캔이 updated_at 이 앞선 이슈의 판정을 지우는데,
+                //    후보가 이미 있는 이슈도 그 대상이다 — findOne 은 필터로 거르지 않으므로 여기서
+                //    valueOf(null) 이 NPE 로 착수를 죽였다. 「판정 없음」은 값이지 오류가 아니다
+                issue.getFilterResult() == null ? null : FilterOutcome.valueOf(issue.getFilterResult()),
                 issue.getFilterPriority());
     }
 }

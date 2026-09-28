@@ -36,6 +36,29 @@ public record GitHubRateLimit(int limit, int remaining, Instant resetAt) {
      * <p>모르는 것을 「임박」으로 취급하면 헤더를 주지 않는 응답마다 지연이 걸린다.
      */
     public boolean isBelow(int threshold) {
-        return isKnown() && remaining < threshold;
+        return isKnown() && remaining < effectiveThreshold(threshold);
+    }
+
+    /** 이 버킷에 실제로 적용되는 임계 — 로그와 판정이 같은 숫자를 쓴다. */
+    public int effectiveThreshold(int threshold) {
+        return effectiveThreshold(threshold, limit);
+    }
+
+    /**
+     * 🔴 임계를 <b>버킷 크기에 맞춰 깎는다</b> — #103.
+     *
+     * <p>{@code github.rate-limit-threshold: 100} 은 인증 5,000/h 을 전제로 정한 절대값이다.
+     * 미인증(60/h)·Search(30/min) 버킷에 그대로 대면 <b>첫 응답 직후부터</b> remaining 이 임계
+     * 미만이라 모든 호출을 거부하고, 막는 동안엔 응답이 없어 갱신도 없다 — 리셋까지 1시간
+     * 자물쇠다. yml 의 「비어 있으면 미인증으로 동작한다」가 거짓이 되던 자리다.
+     *
+     * <p>버킷의 10% 를 상한으로 둔다: 5,000 → 100 그대로, 60 → 6, 30 → 3. 최소 1.
+     * {@code limit} 을 모르면 절대값 그대로다 — 모르는 것을 「넉넉하다」로 읽지 않는다.
+     */
+    public static int effectiveThreshold(int threshold, int limit) {
+        if (limit <= 0 || limit == UNKNOWN_VALUE) {
+            return threshold;
+        }
+        return Math.max(1, Math.min(threshold, limit / 10));
     }
 }

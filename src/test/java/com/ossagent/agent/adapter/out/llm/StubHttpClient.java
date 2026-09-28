@@ -34,12 +34,18 @@ final class StubHttpClient implements HttpClient {
 
     /** 이 JSON 본문을 200 으로 돌려준다. */
     StubHttpClient respondJson(String json) {
-        responses.add(new Canned(200, json));
+        responses.add(new Canned(200, json, java.util.Map.of()));
         return this;
     }
 
     StubHttpClient respondStatus(int status) {
-        responses.add(new Canned(status, "{\"type\":\"error\",\"error\":{\"type\":\"x\",\"message\":\"x\"}}"));
+        return respondStatus(status, java.util.Map.of());
+    }
+
+    /** 상태코드 + 응답 헤더 — {@code Retry-After} 같은 것을 실을 때 (#104). */
+    StubHttpClient respondStatus(int status, java.util.Map<String, String> headers) {
+        responses.add(new Canned(status,
+                "{\"type\":\"error\",\"error\":{\"type\":\"x\",\"message\":\"x\"}}", headers));
         return this;
     }
 
@@ -69,7 +75,7 @@ final class StubHttpClient implements HttpClient {
             throw error;
         }
         Canned canned = (Canned) next;
-        return new CannedResponse(canned.status(), canned.json());
+        return new CannedResponse(canned.status(), canned.json(), canned.headers());
     }
 
     @Override
@@ -89,10 +95,11 @@ final class StubHttpClient implements HttpClient {
         return out.toString(StandardCharsets.UTF_8);
     }
 
-    private record Canned(int status, String json) {
+    private record Canned(int status, String json, java.util.Map<String, String> headers) {
     }
 
-    private record CannedResponse(int status, String json) implements HttpResponse {
+    private record CannedResponse(int status, String json, java.util.Map<String, String> extra)
+            implements HttpResponse {
 
         @Override
         public int statusCode() {
@@ -101,7 +108,9 @@ final class StubHttpClient implements HttpClient {
 
         @Override
         public Headers headers() {
-            return Headers.builder().put("content-type", "application/json").build();
+            Headers.Builder builder = Headers.builder().put("content-type", "application/json");
+            extra.forEach(builder::put);
+            return builder.build();
         }
 
         @Override

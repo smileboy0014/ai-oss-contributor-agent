@@ -169,19 +169,56 @@ class SandboxChangeVerifierTest {
     }
 
     @Test
-    @DisplayName("전부 통과하면 네 번 부른다 — 컴파일·테스트·diff 목록·diff 본문")
+    @DisplayName("전부 통과하면 여섯 번 부른다 — 컴파일·테스트·add·diff 목록·diff 본문·reset")
     void 전부_통과하면_diff_까지_본다() {
         sandbox.givenSequence(
                 FakeCodeSandbox.ok("compiled"),
                 FakeCodeSandbox.ok("tests passed"),
+                FakeCodeSandbox.ok(""),   // git add -A (#100)
                 FakeCodeSandbox.ok("3\t1\tsrc/main/java/Foo.java\n"),
                 FakeCodeSandbox.ok("+++ b/src/main/java/Foo.java\n+log.info(\"ok\");\n"));
 
         var report = verifier.verify(request(constraints("./gradlew compileJava", "./gradlew test")));
 
-        assertThat(sandbox.commands()).hasSize(4);
+        assertThat(sandbox.commands()).hasSize(6);
+        // 🔴 DIFF 는 스테이징 → 목록 → 본문 → 되돌림 순서다 (#100). 새 파일은 add -A 뒤에만 보인다
+        assertThat(sandbox.commands().subList(2, 6)).extracting(SandboxCommand::argv)
+                .containsExactly(
+                        List.of("git", "add", "-A"),
+                        List.of("git", "diff", "--cached", "--numstat"),
+                        List.of("git", "diff", "--cached", "--unified=0"),
+                        List.of("git", "reset", "-q"));
         assertOutcomes(report, StageOutcome.PASSED, StageOutcome.PASSED, StageOutcome.PASSED);
         assertThat(report.passed()).isTrue();
+    }
+
+    // ── 준비 (#99) ─────────────────────────────────────────────────────────
+
+    /**
+     * 🔴 워밍은 <b>코딩 전</b> 원본 clone 에서 한다. verify 안에서 처음 워밍하면 생성 코드가
+     * testClasses 컴파일에 섞여, 컴파일 실패가 종료코드가 아니라 예외(종단)로 나왔다.
+     */
+    @Test
+    @DisplayName("prepare 는 워밍·씨딩만 하고 대상 저장소 명령을 돌리지 않는다")
+    void prepare_는_워밍만_한다() {
+        var request = request(constraints("./gradlew compileJava", "./gradlew test"));
+
+        verifier.prepare(request.candidateId(), request.coordinates(), request.workspacePath(),
+                request.constraints());
+
+        assertThat(dependencyCache.prepared()).containsExactly(request.coordinates());
+        assertThat(sandbox.commands()).as("실행 단계는 코딩 뒤의 일이다").isEmpty();
+    }
+
+    @Test
+    @DisplayName("prepare 도 빌드 명령이 없으면 시작하지 않는다 — S-5")
+    void prepare_도_빌드_명령이_없으면_거부한다_S5() {
+        var request = request(constraints(null, "./gradlew test"));
+
+        assertThatThrownBy(() -> verifier.prepare(request.candidateId(), request.coordinates(),
+                request.workspacePath(), request.constraints()))
+                .isInstanceOf(VerificationSetupException.class);
+        assertThat(dependencyCache.prepared()).isEmpty();
     }
 
     // ── 판정 불가 ──────────────────────────────────────────────────────────
@@ -207,12 +244,13 @@ class SandboxChangeVerifierTest {
     @Test
     @DisplayName("🔴 diff 가 0건이면 UNDETERMINED 다 — 아무것도 검사하지 않고 초록이 되지 않는다")
     void diff_가_0건이면_판정_불가다() {
-        // 코딩 단계가 변경을 **커밋한 뒤**면 `git diff`(워킹 트리 vs 인덱스)가 빈다.
+        // `git add -A` 뒤에도 0건이면 코딩 단계가 아무것도 바꾸지 않은 것이다 (#100).
         // 그대로 두면 계획 범위 검사가 0건을 훑고 PASSED 가 된다 — 이 저장소가 반복해
         // 당한 「0건을 검사하고 초록」의 런타임판이다.
         sandbox.givenSequence(
                 FakeCodeSandbox.ok("compiled"),
                 FakeCodeSandbox.ok("tests passed"),
+                FakeCodeSandbox.ok(""),   // git add -A (#100)
                 FakeCodeSandbox.ok(""));
 
         var report = verifier.verify(request(constraints("./gradlew compileJava", "./gradlew test")));
@@ -228,8 +266,9 @@ class SandboxChangeVerifierTest {
                         .isEqualTo(StageOutcome.UNDETERMINED));
         assertThat(report.passed()).isFalse();
         assertThat(sandbox.commands())
-                .as("0건을 확인했으면 diff 본문을 받을 이유가 없다")
-                .hasSize(3);
+                .as("0건을 확인했으면 diff 본문을 받을 이유가 없다 — 되돌림(reset)은 항상 돈다")
+                .hasSize(5);
+        assertThat(sandbox.commands().get(4).argv()).containsExactly("git", "reset", "-q");
     }
 
     @Test
@@ -253,6 +292,7 @@ class SandboxChangeVerifierTest {
         sandbox.givenSequence(
                 FakeCodeSandbox.ok("compiled"),
                 FakeCodeSandbox.ok("tests passed"),
+                FakeCodeSandbox.ok(""),   // git add -A (#100)
                 FakeCodeSandbox.truncated("3\t1\tsrc/main/java/Foo.java\n"));
 
         var report = verifier.verify(request(constraints("./gradlew compileJava", "./gradlew test")));
@@ -268,6 +308,7 @@ class SandboxChangeVerifierTest {
         sandbox.givenSequence(
                 FakeCodeSandbox.truncated("아주 긴 Gradle 로그"),
                 FakeCodeSandbox.truncated("아주 긴 테스트 로그"),
+                FakeCodeSandbox.ok(""),   // git add -A (#100)
                 FakeCodeSandbox.ok("3\t1\tsrc/main/java/Foo.java\n"),
                 FakeCodeSandbox.ok(""));
 
@@ -295,13 +336,14 @@ class SandboxChangeVerifierTest {
         sandbox.givenSequence(
                 FakeCodeSandbox.ok("compiled"),
                 FakeCodeSandbox.ok("tests passed"),
+                FakeCodeSandbox.ok(""),   // git add -A (#100)
                 FakeCodeSandbox.ok("3\t1\tsrc/main/java/Foo.java\n40\t2\tbuild.gradle\n"));
 
         var report = verifier.verify(request(constraints("./gradlew compileJava", "./gradlew test")));
 
         assertThat(sandbox.commands())
-                .as("값싸고 잘 잘리지 않는 검사가 먼저 걸렀으면 본문을 받을 이유가 없다")
-                .hasSize(3);
+                .as("값싸고 잘 잘리지 않는 검사가 먼저 걸렀으면 본문을 받을 이유가 없다 — 되돌림은 항상 돈다")
+                .hasSize(5);
         assertThat(report.stage(VerificationStage.DIFF))
                 .get()
                 .satisfies(it -> {
@@ -350,8 +392,8 @@ class SandboxChangeVerifierTest {
     }
 
     private static SandboxProperties properties(Path workspaceRoot) {
-        return new SandboxProperties(workspaceRoot, "eclipse-temurin:21-jdk", "oss-agent-warm",
+        return new SandboxProperties(workspaceRoot, "oss-agent-sandbox:21", "oss-agent-warm",
                 2.0, DataSize.ofGigabytes(4), 512L, Duration.ofMinutes(30), Duration.ofMinutes(20),
-                Duration.ofSeconds(60), 200_000, "1.44");
+                Duration.ofSeconds(60), 200_000, "1.44", null);
     }
 }

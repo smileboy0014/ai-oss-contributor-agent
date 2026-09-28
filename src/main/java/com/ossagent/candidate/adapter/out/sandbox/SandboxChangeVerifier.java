@@ -18,6 +18,8 @@ import com.ossagent.candidate.domain.VerificationRequest;
 import com.ossagent.candidate.domain.VerificationSetupException;
 import com.ossagent.candidate.domain.VerificationStage;
 import com.ossagent.repository.domain.ContributionConstraints;
+import com.ossagent.repository.domain.RepositoryCoordinates;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -65,10 +67,26 @@ public class SandboxChangeVerifier implements ChangeVerifier {
      * {@code --numstat} 은 파일당 한 줄이라 출력이 작고, 그래서 절단에 거의 걸리지 않는다.
      * 가장 중요한 판정(계획 범위 밖)을 여기 둔 이유다 — {@link DiffInspection}.
      */
-    private static final List<String> DIFF_NUMSTAT = List.of("git", "diff", "--numstat");
+    private static final List<String> DIFF_NUMSTAT = List.of("git", "diff", "--cached", "--numstat");
 
     /** 🔴 우리 명령. {@code --unified=0} 으로 문맥 줄을 빼 출력을 줄인다. */
-    private static final List<String> DIFF_PATCH = List.of("git", "diff", "--unified=0");
+    private static final List<String> DIFF_PATCH = List.of("git", "diff", "--cached", "--unified=0");
+
+    /**
+     * 🔴 diff 전에 <b>전부 스테이징</b>한다 — 새 파일이 보이게 (#100).
+     *
+     * <p>{@code git diff}(인덱스 대 작업 트리)는 <b>untracked 파일을 빼고 센다.</b> 아무도 {@code git add}
+     * 를 하지 않았으므로 CREATE 전용 계획은 diff 0건 → {@code UNDETERMINED} → 종단이었고, 혼합
+     * 계획은 새 파일이 범위·잔재 검사를 <b>조용히 건너뛰었다.</b> {@code -A} 는 {@code .gitignore} 를
+     * 지키므로 {@code build/}·{@code .gradle/} 은 들어오지 않는다 — 호스트 JGit diff 와 같은 규칙이다.
+     */
+    private static final List<String> DIFF_STAGE_ALL = List.of("git", "add", "-A");
+
+    /**
+     * 스테이징을 되돌린다 — 인덱스를 HEAD 로. <b>판정 결과와 무관하게 항상</b> 돈다.
+     * 다음 바퀴의 호스트 diff 가 이 바퀴의 스테이징을 기준점으로 삼지 않게 한다.
+     */
+    private static final List<String> DIFF_UNSTAGE = List.of("git", "reset", "-q");
 
     private static final List<String> GRADLE_LAUNCHERS = List.of("./gradlew", "gradlew", "gradle");
 
@@ -131,14 +149,38 @@ public class SandboxChangeVerifier implements ChangeVerifier {
         }
     }
 
-    private VerificationReport runStages(VerificationRequest request) {
-        ContributionConstraints constraints = request.constraints();
+    /**
+     * 🔴 코딩 <b>전</b>에 불린다 — 원본 clone 으로 워밍·씨딩한다 (#99).
+     *
+     * <p>{@link #verify} 도 같은 {@code ensurePrepared} 를 부르지만 그것은 <b>안전망</b>이다
+     * (저장소당 1회 메모). 첫 워밍이 verify 안에서 일어나면 생성 코드가 {@code testClasses} 에 섞여,
+     * 컴파일 실패가 종료코드(재시도 대상)가 아니라 {@code SandboxPermanentException}(종단)으로 나왔다.
+     */
+    @Override
+    public void prepare(Long candidateId, RepositoryCoordinates coordinates, Path workspacePath,
+            ContributionConstraints constraints) {
+        if (candidateId == null || coordinates == null || workspacePath == null) {
+            throw new VerificationSetupException("준비 요청의 필수 값이 비었다");
+        }
+        Preflight preflight = preflight(candidateId, workspacePath,
+                constraints == null ? ContributionConstraints.unknown() : constraints);
+        dependencyCache.ensurePrepared(preflight.workspace(), coordinates,
+                preflight.buildTool(), preflight.constraints().javaVersion());
+        log.info("검증 준비 완료 candidateId={} buildTool={}", candidateId, preflight.buildTool());
+    }
+
+    /**
+     * 검증·준비가 공유하는 <b>시작 전 판정</b> — 명령 유무 · 빌드 도구 · 워크스페이스 경로.
+     * 어느 쪽이 먼저 불리든 같은 것을 같은 순서로 본다.
+     */
+    private Preflight preflight(Long candidateId, Path workspacePath,
+            ContributionConstraints constraints) {
         // 🔴 빌드 명령이 없으면 시작하지 않는다. 「명령을 못 읽었다」를 「검증할 것이 없다」로
         //    번역하지 않는다 — S-5 의 축이고, 여기서 접으면 검증 없는 PR 이 나간다
         if (!constraints.hasBuildCommand()) {
             throw new VerificationSetupException(
                     "규약에서 빌드 명령을 읽지 못했다 — 검증을 시작할 수 없다 (S-5)"
-                            + " candidateId=" + request.candidateId());
+                            + " candidateId=" + candidateId);
         }
 
         List<String> buildArgv = CommandLine.parse(constraints.buildCommand());
@@ -152,11 +194,26 @@ public class SandboxChangeVerifier implements ChangeVerifier {
             resolveBuildTool(CommandLine.parse(constraints.testCommand())).requireSupported();
         }
         SandboxWorkspace workspace =
-                SandboxWorkspace.under(request.workspacePath(), properties.workspaceRoot());
+                SandboxWorkspace.under(workspacePath, properties.workspaceRoot());
+        return new Preflight(constraints, buildArgv, buildTool, workspace);
+    }
+
+    private record Preflight(ContributionConstraints constraints, List<String> buildArgv,
+            BuildTool buildTool, SandboxWorkspace workspace) {
+    }
+
+    private VerificationReport runStages(VerificationRequest request) {
+        Preflight preflight = preflight(request.candidateId(), request.workspacePath(),
+                request.constraints());
+        ContributionConstraints constraints = preflight.constraints();
+        List<String> buildArgv = preflight.buildArgv();
+        BuildTool buildTool = preflight.buildTool();
+        SandboxWorkspace workspace = preflight.workspace();
         // 🔴 실행 **전에** 캐시를 준비한다 (Q-4 의 워밍 → 씨딩). 볼륨 이름을 여기서
         //    따로 만들지 않고 **준비한 쪽이 돌려준 것**을 쓴다 — 따로 만들면
         //    「A 를 준비하고 B 로 실행」이 가능해지고, 그것은 준비를 하고도 빈 캐시로
-        //    오프라인 실행하는 것과 같다
+        //    오프라인 실행하는 것과 같다.
+        //    ⚠ 첫 워밍은 여기가 아니라 prepare() 다 (#99). 여기는 메모된 볼륨을 돌려받는 자리다
         SandboxCacheVolume cacheVolume = dependencyCache.ensurePrepared(
                 workspace, request.coordinates(), buildTool, constraints.javaVersion());
 
@@ -229,6 +286,25 @@ public class SandboxChangeVerifier implements ChangeVerifier {
     private StageResult runDiffStage(Context context) {
         MDC.put("stage", VerificationStage.DIFF.name());
 
+        SandboxResult staged = execute(context, DIFF_STAGE_ALL);
+        if (!staged.succeeded()) {
+            // 🔴 스테이징을 못 했으면 새 파일이 안 보인다 — 「위반 없음」을 말할 수 없다
+            return undetermined(staged, "변경분을 스테이징하지 못했다 exitCode=" + staged.exitCode());
+        }
+        try {
+            return inspectStagedDiff(context);
+        } finally {
+            // 🔴 판정과 무관하게 인덱스를 되돌린다. 남겨 두면 다음 바퀴의 호스트 diff 가
+            //    이 바퀴의 스테이징을 기준점으로 삼아 「이번 바퀴에 바뀐 것」만 보게 된다
+            SandboxResult unstaged = execute(context, DIFF_UNSTAGE);
+            if (!unstaged.succeeded()) {
+                log.warn("스테이징을 되돌리지 못했다 exitCode={} — 호스트 diff 가 HEAD 기준으로 다시 잡는다",
+                        unstaged.exitCode());
+            }
+        }
+    }
+
+    private StageResult inspectStagedDiff(Context context) {
         SandboxResult numstat = execute(context, DIFF_NUMSTAT);
         if (!numstat.succeeded()) {
             // 🔴 diff 를 못 얻은 것은 「위반 없음」이 아니다. 코드 탓도 아니므로 FAILED 도 아니다
@@ -240,12 +316,11 @@ public class SandboxChangeVerifier implements ChangeVerifier {
         if (numstat.output() == null || numstat.output().isBlank()) {
             // 🔴 **모수 0 을 통과로 접지 않는다.** 검증은 언제나 코드를 고친 뒤에 돈다 —
             //    변경이 0건이라는 것은 「깨끗하다」가 아니라 **「우리가 엉뚱한 것을 보고 있다」**다.
-            //    가장 그럴듯한 원인: 코딩 단계가 변경을 **커밋한 뒤**라 `git diff`(워킹 트리 vs
-            //    인덱스)가 비었다. 그대로 두면 계획 범위 검사가 **아무것도 검사하지 않고 초록**이
-            //    되고, 그것이 이 저장소가 반복해 당한 「0건을 검사하고 초록」의 런타임판이다.
-            //    (#18 이 diff 기준점을 정하면 그때 `git diff <base>...HEAD` 로 좁힌다)
+            //    `git add -A` 뒤라 새 파일도 세어졌다 (#100). 그래도 0건이면 코딩 단계가 아무것도
+            //    바꾸지 않았거나 워크스페이스가 엉뚱한 것이다. 그대로 두면 계획 범위 검사가
+            //    **아무것도 검사하지 않고 초록**이 된다 — 「0건을 검사하고 초록」의 런타임판
             return undetermined(numstat,
-                    "diff 가 0건이다 — 검사할 변경을 찾지 못했다. 커밋 이후라 워킹 트리가 비었을 수 있다");
+                    "diff 가 0건이다 — 스테이징 뒤에도 검사할 변경이 없다. 코딩 단계가 파일을 바꾸지 않았거나 워크스페이스가 다르다");
         }
 
         List<DiffInspection.Finding> scope =

@@ -57,9 +57,12 @@ public record SandboxProperties(
         @DurationUnit(ChronoUnit.SECONDS) Duration warmTimeout,
         @DurationUnit(ChronoUnit.SECONDS) Duration logTimeout,
         Integer maxOutputChars,
-        String dockerApiVersion) {
+        String dockerApiVersion,
+        /** 컨테이너를 워크스페이스 소유자 uid 로 돌린다 (#115). 기본 켜짐 — Linux root 소유 파일을 막는다 */
+        Boolean runAsWorkspaceOwner) {
 
-    private static final String DEFAULT_IMAGE = "eclipse-temurin:21-jdk";
+    // 🔴 stock temurin 이 아니다 — git 이 없어 DIFF 단계가 죽는다. docker/sandbox/build.sh 가 만든다 (#97)
+    private static final String DEFAULT_IMAGE = "oss-agent-sandbox:21";
     private static final String DEFAULT_WARM_NETWORK = "oss-agent-warm";
     private static final double DEFAULT_CPU_LIMIT = 2.0;
     private static final DataSize DEFAULT_MEMORY = DataSize.ofGigabytes(4);
@@ -104,6 +107,7 @@ public record SandboxProperties(
         logTimeout = nullTo(logTimeout, DEFAULT_LOG_TIMEOUT);
         maxOutputChars = nullTo(maxOutputChars, DEFAULT_MAX_OUTPUT_CHARS);
         dockerApiVersion = blankTo(dockerApiVersion, DEFAULT_API_VERSION);
+        runAsWorkspaceOwner = nullTo(runAsWorkspaceOwner, Boolean.TRUE);
 
         if (maxOutputChars < 1) {
             throw new SandboxPermanentException("출력 상한은 1 이상이어야 한다: " + maxOutputChars);

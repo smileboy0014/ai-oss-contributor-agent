@@ -3,6 +3,9 @@ package com.ossagent.candidate.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ossagent.agent.domain.LlmTransientException;
+import com.ossagent.agent.domain.SandboxPermanentException;
+import com.ossagent.agent.domain.SandboxTransientException;
+import com.ossagent.agent.domain.WorkspaceException;
 import com.ossagent.agent.domain.LlmCallSite;
 import com.ossagent.agent.domain.LlmFailureReason;
 import java.time.Duration;
@@ -165,11 +168,56 @@ class RetryPolicyTest {
      * 소진된 것이다. 또 세면 <b>두 축이 곱해진다</b>({@code architecture.md} §4).
      */
     @Test
-    void 전송_실패는_재시도하지_않는다_S6() {
+    void 전송_실패는_재시도하지_않고_미룬다_S6() {
         RetryDecision decision = RetryPolicy.after(
                 new LlmTransientException(LlmFailureReason.TIMEOUT, LlmCallSite.CODE));
 
-        assertThat(decision).isInstanceOf(RetryDecision.Stop.class);
+        assertThat(decision)
+                .as("재시도(Retry)가 아니다 — 두 축이 곱해진다. 그러나 종단(Stop)도 아니다 — 후보의 코드와 무관하다 (#98)")
+                .isInstanceOfSatisfying(RetryDecision.Defer.class, defer ->
+                        assertThat(defer.stage()).isEqualTo(AgentRun.Stage.CODE));
+    }
+
+    // ── 일시 장애는 미룬다 — 태우지 않는다 (#98) ──────────────────────────────
+
+    /**
+     * 🔴 이미지 없음·데몬 다운은 <b>후보의 코드와 무관하다.</b> 초안은 이것까지 {@code Stop} 으로
+     * 보내 인프라 장애 한 번이 후보를 영구히 {@code FAILED} 로 지웠다.
+     */
+    @Test
+    void 샌드박스_일시_장애는_미룬다_S6() {
+        RetryDecision decision = RetryPolicy.after(
+                new SandboxTransientException("이미지가 로컬에 없다"));
+
+        assertThat(decision).isInstanceOfSatisfying(RetryDecision.Defer.class, defer ->
+                assertThat(defer.stage()).isEqualTo(AgentRun.Stage.VERIFY));
+    }
+
+    /** 🔴 같은 계층이라도 <b>영구</b> 실패는 그대로 멈춘다 — 화이트리스트는 타입의 {@code retryable()} 을 본다. */
+    @Test
+    void 샌드박스_영구_실패는_멈춘다_S6() {
+        RetryDecision decision = RetryPolicy.after(
+                new SandboxPermanentException("경로가 루트 밖이다"));
+
+        assertThat(decision).isInstanceOfSatisfying(RetryDecision.Stop.class, stop ->
+                assertThat(stop.stage()).isEqualTo(AgentRun.Stage.VERIFY));
+    }
+
+    /** {@code WorkspaceException} 은 자기 javadoc 이 「코드가 깨졌다로 세지 않는다」고 못 박은 타입이다. */
+    @Test
+    void 워크스페이스_장애는_미룬다_S6() {
+        RetryDecision decision = RetryPolicy.after(new WorkspaceException("clone 이 끊겼다"));
+
+        assertThat(decision).isInstanceOf(RetryDecision.Defer.class);
+    }
+
+    @Test
+    void 미룸_사유는_예외_본문을_싣지_않는다_S4() {
+        RetryDecision decision = RetryPolicy.after(
+                new WorkspaceException("https://user:secret@example.invalid/repo.git"));
+
+        assertThat(decision).isInstanceOfSatisfying(RetryDecision.Defer.class, defer ->
+                assertThat(defer.reason()).doesNotContain("secret").contains("WorkspaceException"));
     }
 
     @Test

@@ -90,7 +90,9 @@ public interface ContainerOperations {
             List<String> env,
             String workingDir,
             HostConfig hostConfig,
-            Map<String, String> labels) {
+            Map<String, String> labels,
+            /** {@code uid:gid} — 워크스페이스 소유자로 돈다. {@code null} 이면 이미지 기본(root) (#115) */
+            String user) {
     }
 
     /**

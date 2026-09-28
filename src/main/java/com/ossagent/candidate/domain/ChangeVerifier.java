@@ -33,6 +33,24 @@ package com.ossagent.candidate.domain;
 public interface ChangeVerifier {
 
     /**
+     * 검증 <b>전</b> 준비 — 의존성 워밍·씨딩을 <b>원본 clone 에서</b> 끝낸다 (#99 · Q-4).
+     *
+     * <p>🔴 <b>코딩 전에 부른다.</b> 워밍은 대상 저장소의 {@code testClasses} 를 컴파일한다.
+     * {@link #verify} 안에서 처음 워밍하면 <b>생성 코드가 그 컴파일에 섞이고</b>, 컴파일 실패가
+     * 「빌드 실패」(종료코드 · 재시도 대상)가 아니라 「워밍 실패」(예외 · 종단)로 나와
+     * 3바퀴 루프가 첫 바퀴에서 끝났다 — 루프가 존재하는 이유인 바로 그 실패에서.
+     *
+     * <p>착수 흐름은 이것을 {@code SELECTED → IMPLEMENTING} 전이 <b>앞</b>에서 부른다.
+     * 여기서 나는 예외는 후보를 건드리지 않는다 — 인프라가 준비되면 사람이 다시 누른다.
+     *
+     * @throws VerificationSetupException 명령이 없거나 빌드 도구를 모른다 — 시작조차 못 한다
+     * @throws com.ossagent.agent.domain.SandboxException 워밍·씨딩이 실행되지 못했거나 실패했다
+     */
+    void prepare(Long candidateId, com.ossagent.repository.domain.RepositoryCoordinates coordinates,
+            java.nio.file.Path workspacePath,
+            com.ossagent.repository.domain.ContributionConstraints constraints);
+
+    /**
      * 컴파일 → 테스트 → diff 를 순서대로 돌리고 <b>첫 실패에서 멈춘다.</b>
      *
      * <p>🔴 <b>빌드 실패로 예외를 던지지 않는다.</b> 그것은 게이트가 작동한 모습이고,

@@ -25,9 +25,11 @@ import java.util.List;
 public class FakeChangeVerifier implements ChangeVerifier {
 
     private final List<VerificationRequest> requests = new ArrayList<>();
+    private final List<Long> prepared = new ArrayList<>();
 
     private VerificationReport nextReport = passingReport();
     private RuntimeException nextFailure;
+    private RuntimeException nextPrepareFailure;
 
     /**
      * 🔴 <b>바퀴별 결과</b> — #21 의 루프를 검증하려면 이것이 있어야 한다.
@@ -42,9 +44,33 @@ public class FakeChangeVerifier implements ChangeVerifier {
 
     public void reset() {
         requests.clear();
+        prepared.clear();
         scripted.clear();
         nextReport = passingReport();
         nextFailure = null;
+        nextPrepareFailure = null;
+    }
+
+    /** {@link #prepare} 로 받은 후보들 — 「코딩 전에 워밍했는가」의 증거 (#99). */
+    public List<Long> prepared() {
+        return List.copyOf(prepared);
+    }
+
+    /** 워밍이 실패한다 — 전이 <b>앞</b>에서 올라가야 한다. */
+    public FakeChangeVerifier thenFailPrepareWith(RuntimeException failure) {
+        this.nextPrepareFailure = failure;
+        return this;
+    }
+
+    @Override
+    public void prepare(Long candidateId,
+            com.ossagent.repository.domain.RepositoryCoordinates coordinates,
+            java.nio.file.Path workspacePath,
+            com.ossagent.repository.domain.ContributionConstraints constraints) {
+        prepared.add(candidateId);
+        if (nextPrepareFailure != null) {
+            throw nextPrepareFailure;
+        }
     }
 
     /** 바퀴 순서대로 돌려준다. 다 쓰면 마지막 것이 반복된다. */

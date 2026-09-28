@@ -110,7 +110,9 @@ class ExternalTextScrubRegistryTest {
             // 낡은 PENDING 을 그대로 두면 이 표가 알리바이가 된다.
             Map.entry("GeneratedChange.diff", new Decision(Mechanism.FORCED_POINT,
                     "GeneratedChange.record(...) — 이 필드에 대입하는 유일한 지점이고"
-                            + " 거기서 redact 한다. 생성자는 protected 라 다른 경로가 없다."
+                            + " 거기서 redact 한다. 🔴 가릴 것이 있으면 저장하지 않고 거부한다(#96):"
+                            + " 이 컬럼은 정본 패치라 변조해 저장하면 PR 게이트의 재적용이 깨진다."
+                            + " 생성자는 protected 라 다른 경로가 없다."
                             + " 대상 저장소 코드 조각이 그대로 담기므로 저장소가 시크릿을"
                             + " 커밋해 뒀으면 diff 에 실려 온다 (#18)")),
             // 📌 둘은 #19·#20 이 머지된 뒤에도 PENDING 이었다 — 각자 값 타입만 세우고 「컬럼에
@@ -214,7 +216,9 @@ class ExternalTextScrubRegistryTest {
             //    경로 배제·스크럽을 세웠지만 FileChange 는 그것을 거치지 않았고(PR 시점에 워크스페이스를
             //    다시 읽어 만든다), 그래서 마지막 문인 이 타입이 스스로 막게 했다.
             Map.entry("FileChange.content", new Decision(Mechanism.VALUE_TYPE,
-                    "FileChange compact 생성자가 SecretFilePolicy 로 경로를 배제하고 내용을 redact 한다."
+                    "FileChange compact 생성자가 SecretFilePolicy 로 경로를 배제하고 내용을 redact 한다"
+                            + " — 🔴 가릴 것이 있으면 올리지 않고 거부한다(#111): 파일 전체가 Fork 에"
+                            + " 그대로 커밋되므로 가린 채 올리면 사람이 쓰지 않은 변조가 PR 에 실린다."
                             + " String 을 그대로 받는 생성 경로가 없다. 상류(GeneratedFile)의 같은 방어와"
                             + " 두 겹이지만, 이쪽은 공개 게시 직전의 마지막 그물이라 PrBody 와 같은 취급이다 (#22·#23)")),
 

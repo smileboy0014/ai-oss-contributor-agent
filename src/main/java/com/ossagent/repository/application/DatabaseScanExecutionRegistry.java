@@ -100,7 +100,21 @@ public class DatabaseScanExecutionRegistry implements ScanExecutionRegistry {
     @Override
     @Transactional
     public void release(Long repositoryId) {
-        find(repositoryId).ifPresent(ScanExecution::release);
+        find(repositoryId).ifPresent(execution -> {
+            if (!execution.release(instanceId.value())) {
+                log.warn("스캔 자리를 되돌리려 했으나 다른 인스턴스가 쥐고 있다 repositoryId={}", repositoryId);
+            }
+        });
+    }
+
+    /**
+     * 🔴 리스를 민다 — 단계·배치 경계마다 (#109). 리스 2h 는 한 스캔(최대 1,000 LLM 호출)보다
+     * 짧을 수 있고, 만료되면 다른 인스턴스가 뺏어 같은 저장소를 두 번 돈다.
+     */
+    @Override
+    @Transactional
+    public void heartbeat(Long repositoryId) {
+        markRunning(repositoryId);
     }
 
     /**
@@ -114,8 +128,11 @@ public class DatabaseScanExecutionRegistry implements ScanExecutionRegistry {
     @Transactional
     public void markRunning(Long repositoryId) {
         Instant now = Instant.now(clock);
-        find(repositoryId).ifPresent(
-                execution -> execution.markRunning(now, now.plus(properties.leaseDuration())));
+        find(repositoryId).ifPresent(execution -> {
+            if (!execution.markRunning(now, now.plus(properties.leaseDuration()), instanceId.value())) {
+                log.warn("리스를 밀려 했으나 다른 인스턴스가 이 스캔을 뺏었다 repositoryId={}", repositoryId);
+            }
+        });
     }
 
     @Override
@@ -153,7 +170,13 @@ public class DatabaseScanExecutionRegistry implements ScanExecutionRegistry {
                     repositoryId, terminal);
             return;
         }
-        execution.get().finish(terminal, Instant.now(clock), toOutcome(result), stage, failureType);
+        boolean mine = execution.get().finish(terminal, Instant.now(clock), toOutcome(result),
+                stage, failureType, instanceId.value());
+        if (!mine) {
+            // 🔴 뺏긴 행이다 — 승자의 리스를 지우지 않는다. 내 결과는 로그에만 남는다 (#109)
+            log.warn("스캔 마감을 건너뛴다 — 리스가 만료돼 다른 인스턴스가 이 저장소를 뺏었다 "
+                    + "repositoryId={} phase={}", repositoryId, terminal);
+        }
     }
 
     private Optional<ScanExecution> find(Long repositoryId) {
@@ -190,6 +213,7 @@ public class DatabaseScanExecutionRegistry implements ScanExecutionRegistry {
                         outcome.candidatesFailed(), outcome.candidatesSkipped(),
                         outcome.hasMore(), outcome.delayedUntil(), outcome.skipReason()),
                 execution.getFailureStage(),
-                execution.getFailureType());
+                execution.getFailureType(),
+                execution.getLeaseExpiresAt());
     }
 }

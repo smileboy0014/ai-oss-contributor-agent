@@ -1,5 +1,9 @@
 package com.ossagent.candidate.domain;
 
+import com.ossagent.agent.domain.LlmCallSite;
+import com.ossagent.agent.domain.LlmException;
+import com.ossagent.agent.domain.SandboxException;
+import com.ossagent.agent.domain.WorkspaceException;
 import java.util.Optional;
 
 /**
@@ -110,18 +114,33 @@ public final class RetryPolicy {
      *   <tr><td>{@link DiffReviewRejectedException}</td>
      *       <td>{@code Reason.retryable()} 이 <b>지금 전부 거짓</b>이다. 🔴 참인 사유가
      *           생기면 아래 분기가 그것을 집어낸다 — 그때 이 표를 고친다</td></tr>
-     *   <tr><td>{@code LlmException} · {@code SandboxException}</td>
-     *       <td>🔴 <b>전송 계층 축이 이미 흡수했다</b>({@code agent.llm.max-retries}).
-     *           여기까지 온 것은 그 상한이 소진된 것이고, 파이프라인 카운터로 또 세면
-     *           <b>두 축이 곱해진다</b> — {@code architecture.md} §4</td></tr>
+     *   <tr><td>{@code LlmPermanentException} · {@code SandboxPermanentException}</td>
+     *       <td>같은 요청을 다시 보내도 같다 — 절단 · 잘못된 요청 · 경로 위반</td></tr>
      * </table>
      *
+     * <h2>🔴 일시 장애는 {@link RetryDecision.Defer} 다 — 멈추되 태우지 않는다 (#98)</h2>
+     *
+     * <p>{@code LlmTransientException} · {@code SandboxTransientException} · {@code WorkspaceException}
+     * 은 <b>전송 계층 축이 이미 흡수한 뒤</b> 여기 온다({@code agent.llm.max-retries}). 그래서
+     * 파이프라인 카운터로 또 세지 않는 것은 그대로다 — 다만 그것이 <b>종단</b>이어야 할 이유는
+     * 없었다. 이미지가 없거나 데몬이 죽은 것은 후보의 코드와 무관하고 준비되면 같은 요청이 성공한다.
+     * 초안은 이것까지 {@code Stop} 으로 보내 인프라 장애 한 번이 후보를 영구히 지웠다.
+     *
+     * <p>🔴 <b>이것도 화이트리스트다.</b> 「일시」임을 <b>타입이 스스로 말하는</b> 것만 미룬다
+     * ({@code retryable()} · {@code WorkspaceException} javadoc). 모르는 예외는 여전히 {@code Stop} 이다 —
+     * 「모르니까 미루자」로 두면 새 결함이 조용히 SELECTED 로 되돌아가 사람이 무한히 다시 누른다.
+     *
      * <p>⚠️ 그래서 이 메서드는 <b>「무엇을 멈출까」를 열거하지 않는다.</b>
-     * 기본이 {@code Stop} 이고, 재시도가 의미 있는 예외가 생기면 <b>그것만</b> 분기를 얻는다.
+     * 기본이 {@code Stop} 이고, 재시도·미룸이 의미 있는 예외가 생기면 <b>그것만</b> 분기를 얻는다.
      */
     public static RetryDecision after(RuntimeException failure) {
         if (failure == null) {
             throw new IllegalArgumentException("실패는 필수다");
+        }
+        // 🔴 일시 장애 화이트리스트 — 타입이 「다시 하면 될 수 있다」를 스스로 말하는 것만 (#98)
+        if (isTransient(failure)) {
+            return new RetryDecision.Defer(stageOf(failure),
+                    "일시 장애로 미룬다 (" + failure.getClass().getSimpleName() + ") — 준비되면 다시 착수한다");
         }
         // 🔴 유일한 재시도 후보. 지금은 어떤 사유도 참이 아니라 이 분기가 타지 않는다 —
         //    그래도 둔다. 참인 사유가 생기는 날 여기가 그것을 집어내고,
@@ -184,10 +203,30 @@ public final class RetryPolicy {
         if (failure instanceof DiffReviewRejectedException) {
             return AgentRun.Stage.REVIEW;
         }
-        if (failure instanceof VerificationSetupException) {
+        if (failure instanceof VerificationSetupException || failure instanceof SandboxException) {
             return AgentRun.Stage.VERIFY;
         }
+        if (failure instanceof LlmException llm && llm.callSite() == LlmCallSite.REVIEW) {
+            return AgentRun.Stage.REVIEW;
+        }
         return AgentRun.Stage.CODE;
+    }
+
+    /**
+     * 「준비되면 같은 요청이 성공한다」를 <b>타입이 스스로 말하는가</b> — #98.
+     *
+     * <p>🔴 여기에 {@code RuntimeException} 일반을 넣지 않는다. 그것은 거부목록이다.
+     * {@code WorkspaceException} 은 자기 javadoc 이 「우리가 작업을 수행하지 못한 경우 —
+     * 네트워크·권한·경로. 재시도 루프의 「코드가 깨졌다」로 세지 않는다」고 못 박아 두었다.
+     */
+    public static boolean isTransient(RuntimeException failure) {
+        if (failure instanceof SandboxException sandbox) {
+            return sandbox.retryable();
+        }
+        if (failure instanceof LlmException llm) {
+            return llm.retryable();
+        }
+        return failure instanceof WorkspaceException;
     }
 
     /**

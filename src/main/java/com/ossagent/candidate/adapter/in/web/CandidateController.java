@@ -47,16 +47,19 @@ public class CandidateController {
 
     private final FindCandidatesUseCase findCandidates;
     private final SelectCandidateUseCase selectCandidate;
-    private final ImplementCandidateUseCase implementCandidate;
+    private final com.ossagent.candidate.application.LaunchImplementationUseCase launchImplementation;
+    private final com.ossagent.candidate.application.ImplementationRegistry implementations;
     private final CreateDraftPrUseCase createDraftPr;
 
     public CandidateController(FindCandidatesUseCase findCandidates,
             SelectCandidateUseCase selectCandidate,
-            ImplementCandidateUseCase implementCandidate,
+            com.ossagent.candidate.application.LaunchImplementationUseCase launchImplementation,
+            com.ossagent.candidate.application.ImplementationRegistry implementations,
             CreateDraftPrUseCase createDraftPr) {
         this.findCandidates = findCandidates;
         this.selectCandidate = selectCandidate;
-        this.implementCandidate = implementCandidate;
+        this.launchImplementation = launchImplementation;
+        this.implementations = implementations;
         this.createDraftPr = createDraftPr;
     }
 
@@ -148,8 +151,25 @@ public class CandidateController {
      * 승인은 「몇 번 눌러도 같은 결과」가 아니라 <b>한 번 일어난 사건</b>이어야 한다.
      */
     @PostMapping("/{id}/implement")
-    public SelectionResponse implement(@PathVariable Long id) {
-        return SelectionResponse.from(id, implementCandidate.implement(id));
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.ACCEPTED)
+    public com.ossagent.candidate.adapter.in.web.dto.ImplementAcceptedResponse implement(
+            @PathVariable Long id) {
+        // 🔴 전이(SELECTED→IMPLEMENTING)는 이 요청 안에서 끝나고 루프는 백그라운드다 (#106).
+        //    초안은 루프가 다 돈 뒤 돌아와 몇 시간을 요청 스레드에서 보냈다
+        return com.ossagent.candidate.adapter.in.web.dto.ImplementAcceptedResponse.of(
+                id, launchImplementation.launch(id));
+    }
+
+    /**
+     * 착수 진행 조회 — {@code 202} 가 준 {@code statusUrl}. ⚠️ 프로세스 메모리다 — 재기동하면
+     * {@code IDLE} 로 돌아간다. 후보의 상태는 {@code GET /api/candidates/{id}} 가 정본이다.
+     */
+    @org.springframework.web.bind.annotation.GetMapping("/{id}/implement")
+    public com.ossagent.candidate.adapter.in.web.dto.ImplementationProgressResponse implementProgress(
+            @PathVariable Long id) {
+        return com.ossagent.candidate.adapter.in.web.dto.ImplementationProgressResponse.from(
+                implementations.stateOf(id).orElseGet(() ->
+                        com.ossagent.candidate.application.ImplementationRegistry.ImplementationProgress.idle(id)));
     }
 
     /**

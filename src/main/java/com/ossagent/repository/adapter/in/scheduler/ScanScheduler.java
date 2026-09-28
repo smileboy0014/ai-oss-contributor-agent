@@ -2,6 +2,10 @@ package com.ossagent.repository.adapter.in.scheduler;
 
 import com.ossagent.repository.application.LaunchScanUseCase;
 import com.ossagent.repository.application.RegisterRepositoryUseCase;
+import com.ossagent.repository.application.RequestScanUseCase;
+import com.ossagent.repository.application.ScanExecutionRegistry;
+import com.ossagent.repository.application.ScanExecutionState;
+import com.ossagent.repository.application.ScanPipelineResult;
 import com.ossagent.repository.application.ScanProperties;
 import com.ossagent.repository.domain.OssRepository;
 import com.ossagent.repository.domain.ScanAlreadyRunningException;
@@ -44,13 +48,18 @@ public class ScanScheduler {
 
     private final RegisterRepositoryUseCase repositories;
     private final LaunchScanUseCase launchScan;
+    private final RequestScanUseCase requestScan;
+    private final ScanExecutionRegistry executions;
     private final ScanProperties properties;
     private final Clock clock;
 
     public ScanScheduler(RegisterRepositoryUseCase repositories, LaunchScanUseCase launchScan,
+            RequestScanUseCase requestScan, ScanExecutionRegistry executions,
             ScanProperties properties, Clock clock) {
         this.repositories = repositories;
         this.launchScan = launchScan;
+        this.requestScan = requestScan;
+        this.executions = executions;
         this.properties = properties;
         this.clock = clock;
         log.info("정기 스캔 스케줄러가 활성화됐다 — GitHub·LLM 을 주기적으로 호출한다 "
@@ -71,6 +80,15 @@ public class ScanScheduler {
      * <p>{@code fixedDelay} 다({@code fixedRate} 가 아니다) — 이전 실행이 끝난 뒤부터 센다.
      * 스캔이 주기보다 오래 걸릴 수 있고, {@code fixedRate} 면 그때 실행이 겹쳐 쌓인다.
      */
+    private boolean isDelayed(Long repositoryId, Instant now) {
+        return executions.stateOf(repositoryId)
+                .filter(state -> !state.isActive())
+                .map(ScanExecutionState::lastResult)
+                .map(ScanPipelineResult::delayedUntil)
+                .map(now::isBefore)
+                .orElse(false);
+    }
+
     @Scheduled(fixedDelayString = "${scan.schedule.fixed-delay}",
             initialDelayString = "${scan.schedule.initial-delay}")
     public void scanAll() {
@@ -92,8 +110,19 @@ public class ScanScheduler {
                 notDue++;
                 continue;
             }
+            // 🔴 지난 스캔이 「delayedUntil 까지 지연」으로 끝났으면 그 전에 다시 두드리지 않는다 (#108).
+            //    레이트리밋은 지연이지 실패가 아니고(glossary), 값은 적혀 있는데 아무도 읽지 않았다
+            if (isDelayed(repository.getId(), now)) {
+                notDue++;
+                continue;
+            }
             try {
                 launchScan.launch(repository.getId());
+                // 🔴 스캔 시각을 남긴다 (#108). 컨트롤러는 남기는데 스케줄러는 launch 만 불러
+                //    last_scanned_at 이 영영 NULL 이었고 isDueForScan 이 항상 참 — 저장소별 주기가
+                //    죽고 fixed-delay(10분)마다 전부 재스캔했다. 순서는 컨트롤러와 같다: 기동이 거절되면
+                //    받지도 않은 요청의 흔적을 남기지 않는다
+                requestScan.requestScan(repository.getId());
                 launched++;
             } catch (ScanAlreadyRunningException e) {
                 // 진행 중이거나 큐가 찼다 — 정상이다. 다음 주기가 이어받는다

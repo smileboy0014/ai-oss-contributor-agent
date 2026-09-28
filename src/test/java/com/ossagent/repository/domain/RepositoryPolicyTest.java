@@ -341,4 +341,33 @@ class RepositoryPolicyTest {
         return PolicyDocumentFingerprints.parse(
                 "CONTRIBUTING.md=" + DocumentFingerprint.of(content).value());
     }
+
+    // ── #102 명령 수동 설정 ──────────────────────────────────────────────
+
+    @Test
+    void 사람이_넣은_명령은_재분석이_덮어쓰지_않는다_S5() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(),
+                new RuleReading(true, null, null, null, false, false, false, ScrubbedRules.of("{}")), CLOCK);
+        policy.overrideCommands("21", "./gradlew compileJava", "./gradlew test", CLOCK);
+
+        policy.reanalyze(allowed(), CLOCK);
+
+        assertThat(policy.getBuildCommand())
+                .as("자동이 사람 판단을 다시 쓰지 않는다 — Q-8 해소와 같은 방향")
+                .isEqualTo("./gradlew compileJava");
+        assertThat(policy.getTestCommand()).isEqualTo("./gradlew test");
+        assertThat(policy.getJavaVersion()).isEqualTo("21");
+        assertThat(policy.getCommandsOverriddenAt()).isNotNull();
+    }
+
+    @Test
+    void 컬럼을_넘는_추출값은_못_읽은_것으로_둔다() {
+        RepositoryPolicy policy = RepositoryPolicy.analyzed(repo(), new RuleReading(true, "17",
+                "x".repeat(300), "./gradlew test", false, false, false, ScrubbedRules.of("{}")), CLOCK);
+
+        assertThat(policy.getBuildCommand())
+                .as("모델이 명령 대신 문장을 주면 저장이 죽어 스캔 전체가 FAILED 였다 — null 이면 사람이 채운다")
+                .isNull();
+        assertThat(policy.getTestCommand()).isEqualTo("./gradlew test");
+    }
 }

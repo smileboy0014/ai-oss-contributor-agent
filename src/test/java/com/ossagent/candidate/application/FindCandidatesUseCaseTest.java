@@ -55,7 +55,7 @@ class FindCandidatesUseCaseTest {
         when(candidate.getAnalysis()).thenReturn("이 이슈는 " + FAKE_TOKEN + " 로 재현됩니다");
         when(candidates.findById(1L)).thenReturn(Optional.of(candidate));
         when(runs.findByCandidateIdOrderByStartedAtAsc(1L)).thenReturn(List.of());
-        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.empty());
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(1L)).thenReturn(Optional.empty());
 
         CandidateDetailView detail = useCase.findDetail(1L);
 
@@ -76,7 +76,7 @@ class FindCandidatesUseCaseTest {
         when(run.getErrorMessage())
                 .thenReturn("GET https://api.github.com/repos?access_token=" + FAKE_TOKEN + " 실패");
         when(runs.findByCandidateIdOrderByStartedAtAsc(1L)).thenReturn(List.of(run));
-        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.empty());
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(1L)).thenReturn(Optional.empty());
 
         CandidateDetailView detail = useCase.findDetail(1L);
 
@@ -99,7 +99,7 @@ class FindCandidatesUseCaseTest {
         when(change.getDiff()).thenReturn(diff);
         when(change.getTestResult()).thenReturn("BUILD SUCCESSFUL");
         when(change.getReviewResult()).thenReturn(null);
-        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.of(change));
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(1L)).thenReturn(Optional.of(change));
 
         var summary = useCase.findDetail(1L).latestChange();
 
@@ -121,7 +121,7 @@ class FindCandidatesUseCaseTest {
         when(candidate.getId()).thenReturn(1L);
         when(candidates.findById(1L)).thenReturn(Optional.of(candidate));
         when(runs.findByCandidateIdOrderByStartedAtAsc(1L)).thenReturn(List.of());
-        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.empty());
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(1L)).thenReturn(Optional.empty());
 
         PullRequest pullRequest = mock(PullRequest.class);
         // #22 가 push URL 에 자격증명을 박는 형태로 넣을 수 있다 — 가장 흔한 구현이다
@@ -167,7 +167,7 @@ class FindCandidatesUseCaseTest {
         when(candidate.getId()).thenReturn(1L);
         when(candidates.findById(1L)).thenReturn(Optional.of(candidate));
         when(runs.findByCandidateIdOrderByStartedAtAsc(1L)).thenReturn(List.of());
-        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.empty());
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(1L)).thenReturn(Optional.empty());
 
         CandidateDetailView detail = useCase.findDetail(1L);
 
@@ -196,7 +196,7 @@ class FindCandidatesUseCaseTest {
 
         GeneratedChange change = mock(GeneratedChange.class);
         when(change.getDiff()).thenReturn(diff);
-        when(changes.findFirstByCandidateIdOrderByCreatedAtDesc(1L)).thenReturn(Optional.of(change));
+        when(changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(1L)).thenReturn(Optional.of(change));
 
         return useCase.findDetail(1L).latestChange().diffSha256();
     }

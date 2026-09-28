@@ -78,7 +78,8 @@ public record CommitMessage(String text) {
             //    PR 이 DCO 검사에서 막히고, 그것은 「규약을 읽고도 안 지킨」 모양이 된다 — S-5.
             if (identity == null) {
                 throw new IllegalArgumentException(
-                        "sign-off 가 필수인 저장소인데 서명자가 설정되지 않았습니다 (github.commit-author)");
+                        "sign-off 가 필수인 저장소인데 서명자가 설정되지 않았습니다"
+                                + " (github.fork.author-name · github.fork.author-email)");
             }
             out.append("\n\n").append(identity.signoffLine());
         }

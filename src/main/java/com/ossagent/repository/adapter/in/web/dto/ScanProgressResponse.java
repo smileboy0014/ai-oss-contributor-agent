@@ -28,7 +28,9 @@ public record ScanProgressResponse(
         Instant delayedUntil,
         String skipReason,
         String failureStage,
-        String failureType) {
+        String failureType,
+        /** 활성 상태의 리스 만료 시각 — 지났으면 주인 인스턴스가 죽은 것이다 (#109) */
+        Instant leaseExpiresAt) {
 
     public static ScanProgressResponse from(ScanExecutionState state) {
         ScanPipelineResult result = state.lastResult();
@@ -46,6 +48,7 @@ public record ScanProgressResponse(
                 result == null ? null : result.delayedUntil(),
                 result == null || result.skipReason() == null ? null : result.skipReason().name(),
                 state.failureStage() == null ? null : state.failureStage().name(),
-                state.failureType());
+                state.failureType(),
+                state.leaseExpiresAt());
     }
 }

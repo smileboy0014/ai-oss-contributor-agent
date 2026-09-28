@@ -83,14 +83,15 @@
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` · `breaking_change=true` · **`confidence < agent.analysis.min-confidence`**(#11) | 시스템 |
 | `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
 | `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject`. 🔴 `cancelSelection` 이 출발 상태를 **직접** 본다 — 전이표에는 `ANALYZED → REJECTED` 도 있어서 맡겨 두면 `rejectAsInfeasible`(시스템 판정)과 같은 것이 된다 | **사람** |
-| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`, #18). 🔴 계획·컨텍스트·clone 은 **이 전이 앞**에서 돈다 — 그 구간의 레이트리밋은 503 + `Retry-After` 이고 후보는 `SELECTED` 그대로다(지연 ≠ 실패) | **사람이 트리거** |
+| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`, #18) — 🔴 **202** · 전이는 사람이 누른 요청 안에서, 계획·clone·워밍·루프는 **백그라운드**(#106, `GET …/implement` 진행 조회 · 같은 저장소는 겹쳐 돌지 않는다 409). 준비 구간의 레이트리밋·일시 장애·정책 변경은 **미룸**(#98)으로 `SELECTED` 복귀 — 지연 ≠ 실패 | **사람이 트리거** |
 | `SELECTED` | `FAILED` ● | **구현 계획을 세우지 못했다** — `agent.plan.max-attempts` 소진 (#16). `REJECTED` 가 아니다: 그쪽은 사람의 선택 취소다 | 시스템 |
 | `IMPLEMENTING` | `TESTING` | 코드 생성 완료 | 시스템 |
 | `TESTING` | `REVIEWING` | 빌드·테스트 통과 | 시스템 |
 | `TESTING` | `IMPLEMENTING` | 테스트 실패 → 에러 분석 후 재시도 | 시스템 |
 | `REVIEWING` | `READY_FOR_PR` | AI 리뷰 통과 | 시스템 |
 | `REVIEWING` | `IMPLEMENTING` | 리뷰 실패 → 재시도 | 시스템 |
-| `IMPLEMENTING`·`TESTING`·`REVIEWING` | `FAILED` ● | **재시도 상한 소진** | 시스템 |
+| `IMPLEMENTING`·`TESTING`·`REVIEWING` | `FAILED` ● | **재시도 상한 소진** · 복구 불가 오류(계획 밖 경로 · diff 에 시크릿 패턴 #96 · 판정 불가) | 시스템 |
+| `IMPLEMENTING`·`TESTING`·`REVIEWING` | `SELECTED` | 🔴 **일시 장애로 미룬다** (#98) — 이미지 없음 · 데몬 다운 · LLM 5xx · clone 끊김. 후보의 코드와 무관하고 준비되면 같은 요청이 성공하므로 **태우지 않는다**. `attempt` 는 0 으로, `selectedAt` 은 그대로(사람이 골랐다는 사실은 변하지 않는다). 웹은 503 + `Retry-After`. **사람이 `implement` 를 다시 누른다** — 자동 재시도가 아니라 게이트다 | 시스템 |
 | `READY_FOR_PR` | `PR_CREATED` ● | PR 생성 요청 (`POST /candidates/{id}/pull-request`, #23) → 정책 재확인 → Fork 동기화 → **upstream 재clone + 저장 diff 적용 → Fork push**(S-1) → **draft** PR(S-2). push 는 게이트 **뒤**에서만 일어난다 | **사람이 트리거** |
 
 ● = **종단 상태**. `PR_CREATED` · `REJECTED` · `FAILED` 셋이다.
@@ -357,7 +358,11 @@ COMPILE ─▶ TEST ─▶ DIFF ─▶ (AI Review — 검증 밖, REVIEW 단계)
 |---|---|---|
 | `COMPILE` | `RepositoryPolicy.build_command` 종료 코드 | `Retry` → `IMPLEMENTING` 회귀 |
 | `TEST` | `RepositoryPolicy.test_command` 종료 코드. 규약에 명령이 없으면 **`UNDETERMINED`** | `Retry` / `UNDETERMINED` 면 `Stop` |
-| `DIFF` | 의도 외 변경 혼입 검사 — 계획 밖 파일 · 디버그 잔재 · 대량 포맷 노이즈. 출력이 `sandbox.max-output-chars` 에서 잘리면 **`UNDETERMINED`** | 〃 |
+| `DIFF` | 의도 외 변경 혼입 검사 — 계획 밖 파일 · 디버그 잔재 · 대량 포맷 노이즈. 출력이 `sandbox.max-output-chars` 에서 잘리면 **`UNDETERMINED`**. 🔴 `git add -A` → `git diff --cached` → `git reset` 순서다(#100) — 스테이징하지 않으면 **새 파일이 검사에서 빠진다** | 〃 |
+
+⚠️ 워밍·씨딩(Q-4)은 검증 안이 아니라 **코딩 전** `ChangeVerifier.prepare` 에서 원본 clone 으로 돈다(#99).
+검증 안에서 처음 워밍하면 생성 코드가 `testClasses` 컴파일에 섞여, 컴파일 실패가 종료코드(재시도 대상)가
+아니라 예외(종단)로 나와 3바퀴 루프가 첫 바퀴에서 끝났다.
 | AI Review (`REVIEW`) | LLM diff 리뷰 — 판정 셋(`PASS`·`CHANGES_REQUESTED`·`UNDETERMINED`) (#20) | `CHANGES_REQUESTED` → 회귀 · `UNDETERMINED` → `Stop` |
 
 ⚠️ PRD §15 의 「Unit → Integration → Format/Lint」 다섯 칸은 **셋으로 줄였다**(glossary 「Verification」).

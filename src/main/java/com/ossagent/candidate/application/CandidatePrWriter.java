@@ -68,7 +68,7 @@ class CandidatePrWriter {
                 .orElseThrow(() -> new CandidateNotFoundException(candidateId));
 
         Optional<GeneratedChange> change =
-                changes.findFirstByCandidateIdOrderByCreatedAtDesc(candidateId);
+                changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(candidateId);
 
         return new PrSnapshot(
                 candidate.getIssueId(),
@@ -93,7 +93,7 @@ class CandidatePrWriter {
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void recordPublished(Long candidateId, String commitSha) {
-        GeneratedChange change = changes.findFirstByCandidateIdOrderByCreatedAtDesc(candidateId)
+        GeneratedChange change = changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(candidateId)
                 .orElseThrow(() -> new IllegalStateException(
                         "push 했는데 변경분 행이 없다 candidateId=" + candidateId));
         change.markPublished(commitSha);

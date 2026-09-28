@@ -46,10 +46,26 @@ public final class PlanValidator {
             throw new IllegalArgumentException("범위 눈금이 없다 — 상한 없는 검증은 검증이 아니다");
         }
         List<String> violations = new ArrayList<>();
+        checkSecretPaths(plan, violations);
         checkFilesExist(plan, shownPaths, contextPartial, violations);
         checkRepositoryRules(plan, constraints, violations);
         checkScope(plan, limits, violations);
         return violations.isEmpty() ? PlanVerdict.passed() : PlanVerdict.rejected(violations);
+    }
+
+    /**
+     * 🔴 시크릿 경로는 <b>계획 시점</b>에 거른다 (#111 · S-4).
+     *
+     * <p>{@code GeneratedFile}·{@code FileChange} 도 같은 판정을 하지만 그쪽은 코딩 뒤·PR 게이트 직전이다 —
+     * 거기서 걸리면 LLM 토큰과 clone 을 다 태운 뒤 500 으로 끝나고 후보가 {@code READY_FOR_PR} 에
+     * 고착된다. 여기서 거르면 「모델에게 다시 시켜라」는 재생성 사유가 된다.
+     */
+    private static void checkSecretPaths(ImplementationPlan plan, List<String> violations) {
+        for (String path : plan.paths()) {
+            if (com.ossagent.support.secret.SecretFilePolicy.isSecretPath(path)) {
+                violations.add("시크릿 경로는 계획에 넣을 수 없다 — 키·자격증명 파일은 건드리지 않는다: " + path);
+            }
+        }
     }
 
     /**

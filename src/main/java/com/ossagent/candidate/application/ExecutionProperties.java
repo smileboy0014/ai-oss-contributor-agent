@@ -1,6 +1,7 @@
 package com.ossagent.candidate.application;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * 파이프라인 실행 설정 — {@code agent.execution.*} (이슈 #18 · 개명 #21).
@@ -33,9 +34,24 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *                        최악은 {@code maxAttempts × timeoutSeconds} 다
  */
 @ConfigurationProperties("agent.execution")
-public record ExecutionProperties(int maxAttempts, int timeoutSeconds) {
+public record ExecutionProperties(int maxAttempts, int timeoutSeconds,
+        /** 착수 동시 실행 수 (#106). 워크스페이스가 저장소당 하나라 저장소가 겹치면 어차피 409 다 */
+        Integer maxConcurrent,
+        /** 착수 큐 상한 (#106). 차면 409 이고 후보는 SELECTED 로 되돌아간다 */
+        Integer queueCapacity) {
 
+    /** 동시성 설정을 모르는 호출자용 — 테스트가 쓴다. */
+    public ExecutionProperties(int maxAttempts, int timeoutSeconds) {
+        this(maxAttempts, timeoutSeconds, null, null);
+    }
+
+
+    // 🔴 생성자가 둘이면 Boot 는 어느 것으로 바인딩할지 모른다 — 「No default constructor found」로
+    //    컨텍스트 전체가 죽는다. 정본은 canonical 하나다
+    @ConstructorBinding
     public ExecutionProperties {
+        maxConcurrent = maxConcurrent == null || maxConcurrent < 1 ? 1 : maxConcurrent;
+        queueCapacity = queueCapacity == null || queueCapacity < 0 ? 4 : queueCapacity;
         // 🔴 아래쪽만 막는 것으로는 부족하다. 0 은 무한이 아니라 최강 제약이고
         //    (attempt >= 0 이 항상 참이라 즉시 FAILED), 정작 위험한 10000 은 무저항 통과한다.
         //    위쪽 경계는 도메인 상수가 본다 — 여기서는 「값이 말이 되는가」만 본다

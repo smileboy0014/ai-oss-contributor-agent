@@ -84,7 +84,7 @@ CREATE INDEX idx_scan_execution_phase_lease ON scan_execution (phase, lease_expi
 -- 「없으면 만든다」를 원자적으로 하려면 ON CONFLICT·MERGE 가 필요하고 그것이 벤더
 -- 고유 문법이다. 그래서 행을 **항상 있게** 한다:
 --   · 기존 저장소 → 아래 백필
---   · 신규 등록   → RegisterRepositoryUseCase 가 저장소와 같은 트랜잭션에서 만든다
+--   · 신규 등록   → OssRepository 생성자가 저장소와 함께 만든다 (같은 트랜잭션 · #26 구현 중 변경)
 --
 -- ⚠ 그래서 「행이 없다」는 정상 상태가 아니다. tryStart 가 0행을 받으면 그것이
 --   「남이 잡았다」인지 「행이 없다」인지 구분해야 한다 — 존재 확인을 분리해 행이

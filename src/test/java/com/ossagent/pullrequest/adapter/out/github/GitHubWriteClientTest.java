@@ -162,7 +162,8 @@ class GitHubWriteClientTest {
                 .andRespond(withSuccess("{\"full_name\":\"" + FORK_OWNER + "/spring-kafka\"}",
                         MediaType.APPLICATION_JSON));
 
-        var created = client.createFork("spring-projects", "spring-kafka");
+        var created = client.createFork("spring-projects", "spring-kafka",
+                new GitDataPayloads.ForkRequest(null, true));
 
         assertThat(created.path("full_name").asText())
                 .as("fork 생성은 upstream 히스토리를 바꾸지 않는다 — 내 계정에 저장소를 만든다")

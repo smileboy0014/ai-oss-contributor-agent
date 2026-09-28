@@ -44,8 +44,58 @@ class ScanSchedulerDueFilterTest {
 
     private final RegisterRepositoryUseCase repositories = mock(RegisterRepositoryUseCase.class);
     private final LaunchScanUseCase launchScan = mock(LaunchScanUseCase.class);
+    private final com.ossagent.repository.application.RequestScanUseCase requestScan =
+            mock(com.ossagent.repository.application.RequestScanUseCase.class);
+    private final com.ossagent.repository.application.FakeScanExecutionRegistry executions =
+            new com.ossagent.repository.application.FakeScanExecutionRegistry(CLOCK);
     private final ScanScheduler scheduler = new ScanScheduler(
-            repositories, launchScan, ScanProperties.defaults(), CLOCK);
+            repositories, launchScan, requestScan, executions, ScanProperties.defaults(), CLOCK);
+
+    // ── #108 ──────────────────────────────────────────────────────────────
+
+    /**
+     * 🔴 스케줄러가 기동한 스캔도 {@code last_scanned_at} 을 남긴다. 컨트롤러만 남기고 스케줄러는
+     * launch 만 불러 이 값이 영영 NULL 이었고, 그러면 isDueForScan 이 항상 참이라 저장소별 주기가
+     * 죽고 fixed-delay 마다 전부 재스캔했다 — #26 이 만든 주기 기능이 통째로 무효였다.
+     */
+    @Test
+    @DisplayName("🔴 기동한 스캔은 스캔 시각을 남긴다 — 안 남기면 주기 필터가 영영 참이다 (#108)")
+    void 기동하면_스캔_시각을_남긴다() {
+        OssRepository due = repository(1L, true, true);
+        when(repositories.findAll()).thenReturn(List.of(due));
+
+        scheduler.scanAll();
+
+        verify(requestScan).requestScan(1L);
+    }
+
+    @Test
+    @DisplayName("기동이 거절되면 스캔 시각을 남기지 않는다 — 받지도 않은 요청의 흔적")
+    void 거절되면_스캔_시각을_남기지_않는다() {
+        OssRepository due = repository(1L, true, true);
+        when(repositories.findAll()).thenReturn(List.of(due));
+        doThrow(new ScanAlreadyRunningException(1L, ScanAlreadyRunningException.Reason.ALREADY_RUNNING))
+                .when(launchScan).launch(1L);
+
+        scheduler.scanAll();
+
+        verify(requestScan, never()).requestScan(anyLong());
+    }
+
+    @Test
+    @DisplayName("지난 스캔이 delayedUntil 로 끝났으면 그 전에 다시 두드리지 않는다 (#108)")
+    void 지연_중이면_기동하지_않는다() {
+        OssRepository due = repository(1L, true, true);
+        when(repositories.findAll()).thenReturn(List.of(due));
+        executions.tryStart(1L);
+        executions.markSkipped(1L, new com.ossagent.repository.application.ScanPipelineResult(
+                0, 0, 0, 0, 0, 0, false, Instant.parse("2026-09-27T12:30:00Z"),
+                com.ossagent.repository.domain.ScanSkipReason.RATE_LIMITED));
+
+        scheduler.scanAll();
+
+        verify(launchScan, never()).launch(anyLong());
+    }
 
     @Test
     @DisplayName("🔴 주기가 안 된 저장소는 기동하지 않는다 — 전역 주기 하나면 FR-1 이 표현되지 않는다")

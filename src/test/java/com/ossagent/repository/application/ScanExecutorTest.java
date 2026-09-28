@@ -37,7 +37,7 @@ class ScanExecutorTest {
     @DisplayName("정상 종료하면 SUCCEEDED 로 마감한다")
     void 정상_종료는_SUCCEEDED_다() {
         registry.tryStart(REPO);
-        when(pipeline.run(REPO)).thenReturn(
+        when(pipeline.run(org.mockito.ArgumentMatchers.eq(REPO), any())).thenReturn(
                 new ScanPipelineResult(3, 3, 1, 0, 0, 0, false, null, null));
 
         executor.execute(REPO);
@@ -50,7 +50,7 @@ class ScanExecutorTest {
     @DisplayName("건너뛴 실행은 SKIPPED 다 — 실패로 세지 않는다")
     void 건너뛴_실행은_SKIPPED_다() {
         registry.tryStart(REPO);
-        when(pipeline.run(REPO)).thenReturn(
+        when(pipeline.run(org.mockito.ArgumentMatchers.eq(REPO), any())).thenReturn(
                 ScanPipelineResult.skipped(ScanSkipReason.CONTRIBUTION_FORBIDDEN));
 
         executor.execute(REPO);
@@ -65,7 +65,7 @@ class ScanExecutorTest {
         registry.tryStart(REPO);
         doThrow(ScanStageFailedException.at(ScanStage.SCAN, REPO,
                 new IllegalStateException("토큰이 섞인 메시지")))
-                .when(pipeline).run(REPO);
+                .when(pipeline).run(org.mockito.ArgumentMatchers.eq(REPO), any());
 
         executor.execute(REPO);
 
@@ -79,7 +79,7 @@ class ScanExecutorTest {
     @DisplayName("알 수 없는 RuntimeException 도 FAILED 로 마감한다")
     void 알_수_없는_실패도_마감한다() {
         registry.tryStart(REPO);
-        doThrow(new IllegalArgumentException("어딘가 고장")).when(pipeline).run(REPO);
+        doThrow(new IllegalArgumentException("어딘가 고장")).when(pipeline).run(org.mockito.ArgumentMatchers.eq(REPO), any());
 
         executor.execute(REPO);
 
@@ -90,7 +90,7 @@ class ScanExecutorTest {
     @DisplayName("🔴 Error 가 나도 자리가 비워진다 — 안전망이 없으면 영구 RUNNING 이다")
     void Error_가_나도_자리를_비운다() {
         registry.tryStart(REPO);
-        doThrow(new StackOverflowError("깊은 재귀")).when(pipeline).run(REPO);
+        doThrow(new StackOverflowError("깊은 재귀")).when(pipeline).run(org.mockito.ArgumentMatchers.eq(REPO), any());
 
         // Error 는 삼키지 않는다 — 올라간다. 자리만 마감한다
         try {
@@ -114,7 +114,7 @@ class ScanExecutorTest {
                         Instant.now(), null, null, null, null)));
         doThrow(new IllegalStateException("기록 실패"))
                 .when(flaky).markSucceeded(any(), any());
-        when(pipeline.run(REPO)).thenReturn(
+        when(pipeline.run(org.mockito.ArgumentMatchers.eq(REPO), any())).thenReturn(
                 new ScanPipelineResult(0, 0, 0, 0, 0, 0, false, null, null));
 
         new ScanExecutor(pipeline, flaky).execute(REPO);

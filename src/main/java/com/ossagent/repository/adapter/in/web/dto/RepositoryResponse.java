@@ -9,7 +9,9 @@ public record RepositoryResponse(
         String name,
         String url,
         boolean enabled,
-        Instant lastScannedAt) {
+        Instant lastScannedAt,
+        /** 저장소별 주기(분). {@code null} 이면 {@code scan.default-interval} (#108) */
+        Integer scanIntervalMinutes) {
 
     public static RepositoryResponse from(OssRepository repository) {
         return new RepositoryResponse(
@@ -18,6 +20,7 @@ public record RepositoryResponse(
                 repository.getName(),
                 repository.getUrl(),
                 repository.isEnabled(),
-                repository.getLastScannedAt());
+                repository.getLastScannedAt(),
+                repository.getScanIntervalMinutes());
     }
 }

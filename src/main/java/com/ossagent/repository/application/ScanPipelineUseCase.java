@@ -83,12 +83,20 @@ public class ScanPipelineUseCase {
      *         호출자가 진행 조회에 기록한다 — 🔴 예외 <b>원문</b>은 싣지 않는다 (S-4)
      */
     public ScanPipelineResult run(Long repositoryId) {
+        return run(repositoryId, () -> { });
+    }
+
+    /**
+     * @param heartbeat 🔴 단계·배치 경계마다 부른다 (#109) — 리스를 민다. 한 스캔이 리스(2h)보다 길면
+     *                  다른 인스턴스가 뺏어 같은 저장소를 두 번 돈다
+     */
+    public ScanPipelineResult run(Long repositoryId, Runnable heartbeat) {
         if (repositoryId == null) {
             throw new IllegalArgumentException("저장소 식별자는 필수다");
         }
         assertNoTransaction();
         try {
-            return runStages(repositoryId);
+            return runStages(repositoryId, heartbeat);
         } finally {
             // 🔴 반드시 지운다. 실행 스레드는 풀(core=1)에서 재사용되므로 남겨 두면
             //    다음 저장소의 로그에 앞 실행의 단계가 찍힌다 — 로그를 이어붙이려고
@@ -97,7 +105,7 @@ public class ScanPipelineUseCase {
         }
     }
 
-    private ScanPipelineResult runStages(Long repositoryId) {
+    private ScanPipelineResult runStages(Long repositoryId, Runnable heartbeat) {
         // ── 0단계. 정책 보장 (FR-0) ──────────────────────────────────
         // ⚠ MDC 를 단계마다 채운다. 포맷에 %X{stage} 를 넣어도 이것이 없으면
         //   LLM 호출 구간 외에는 빈 채로 찍힌다 — logging.md 의 「식별자로 로그를
@@ -130,6 +138,7 @@ public class ScanPipelineUseCase {
             return ScanPipelineResult.skipped(target.skipReason());
         }
         stageDone(PipelineStage.POLICY, StageOutcome.SUCCEEDED, policyStart);
+        heartbeat.run();
 
         // ── 1단계. 수집 ─────────────────────────────────────────────
         MDC.put(MDC_STAGE, PipelineStage.SCAN.name());
@@ -142,6 +151,7 @@ public class ScanPipelineUseCase {
             throw ScanStageFailedException.at(ScanStage.SCAN, repositoryId, e);
         }
         stageDone(PipelineStage.SCAN, StageOutcome.SUCCEEDED, scanStart);
+        heartbeat.run();
 
         // ── 2단계. 필터 ─────────────────────────────────────────────
         MDC.put(MDC_STAGE, PipelineStage.FILTER.name());
@@ -156,13 +166,14 @@ public class ScanPipelineUseCase {
                     ScanPipelineResult.partial(scan, null));
         }
         stageDone(PipelineStage.FILTER, StageOutcome.SUCCEEDED, filterStart);
+        heartbeat.run();
 
         // ── 3단계. 분석 ─────────────────────────────────────────────
         MDC.put(MDC_STAGE, PipelineStage.ANALYZE.name());
         long analyzeStart = System.nanoTime();
         AnalysisResult analysis;
         try {
-            analysis = analyzeIssues.analyze(repositoryId);
+            analysis = analyzeIssues.analyze(repositoryId, heartbeat);
         } catch (ContributionNotAllowedException e) {
             stageDone(PipelineStage.ANALYZE, StageOutcome.SKIPPED, analyzeStart);
             // 🔴 실패가 아니다 — S-5 게이트가 정상 작동한 것이다.

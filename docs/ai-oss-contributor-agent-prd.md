@@ -614,6 +614,8 @@ GET    /api/repositories
 POST   /api/repositories/{id}/scan              # 202 Accepted — 비동기
 GET    /api/repositories/{id}/scan              # 진행 상태 조회
 POST   /api/repositories/{id}/policy/resolution # 규약 보류를 사람이 해소한다
+POST   /api/repositories/{id}/policy/commands   # 규약이 침묵하는 빌드·테스트 명령을 사람이 넣는다 (#102)
+PATCH  /api/repositories/{id}/scan-interval     # 저장소별 스캔 주기(분) — 없으면 기본 주기 (#108)
 ```
 
 ### Candidate

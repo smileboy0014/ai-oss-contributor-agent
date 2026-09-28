@@ -45,6 +45,11 @@ public interface ScanExecutionRegistry {
     /** 스레드를 잡았다 — {@code QUEUED} → {@code RUNNING}. */
     void markRunning(Long repositoryId);
 
+    /** 🔴 리스를 민다 — 긴 스캔 중간에 (#109). 구현이 없으면 {@code markRunning} 과 같다 */
+    default void heartbeat(Long repositoryId) {
+        markRunning(repositoryId);
+    }
+
     void markSucceeded(Long repositoryId, ScanPipelineResult result);
 
     /** 🔴 실패가 아니다 — 규약이 막았거나 읽지 못했다. */

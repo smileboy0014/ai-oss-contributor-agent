@@ -94,6 +94,11 @@ public class AnalyzeIssuesUseCase {
      *         🔴 규약을 읽지 못했거나(보류) AI 기여가 금지된 저장소 — S-5
      */
     public AnalysisResult analyze(Long repositoryId) {
+        return analyze(repositoryId, () -> { });
+    }
+
+    /** @param heartbeat 배치마다 부른다 — 스캔 리스를 미는 자리다 (#109). 1,000건 분석이 2h 를 넘길 수 있다 */
+    public AnalysisResult analyze(Long repositoryId, Runnable heartbeat) {
         if (repositoryId == null) {
             throw new IllegalArgumentException("저장소 식별자는 필수다");
         }
@@ -109,6 +114,7 @@ public class AnalyzeIssuesUseCase {
         boolean hasMore = false;
 
         for (int batch = 0; batch < properties.maxBatchesPerRun(); batch++) {
+            heartbeat.run();
             List<AnalyzableIssue> page = analyzableIssues.findAnalyzable(
                     repositoryId, afterPriority, afterId, properties.batchSize());
             if (page.isEmpty()) {

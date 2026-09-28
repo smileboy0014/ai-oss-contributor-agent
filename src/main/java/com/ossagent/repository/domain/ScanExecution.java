@@ -167,12 +167,27 @@ public class ScanExecution {
      * 이것은 heartbeat 가 아니다 — 스레드를 더 만들지 않고 <b>자연스러운 전이 한 번</b>에
      * 얹는다.
      */
-    public void markRunning(Instant now, Instant leaseUntil) {
+    public boolean markRunning(Instant now, Instant leaseUntil, String ownerToken) {
+        if (!ownedBy(ownerToken)) {
+            return false;
+        }
         this.phase = ScanPhase.RUNNING;
         this.leaseExpiresAt = leaseUntil;
         if (this.startedAt == null) {
             this.startedAt = now;
         }
+        return true;
+    }
+
+    /**
+     * 🔴 이 행을 지금 <b>내가</b> 쥐고 있는가 (#109).
+     *
+     * <p>리스가 만료돼 다른 인스턴스가 뺏은 뒤에도 원래 주인은 자기 스캔을 끝내고 마감을 부른다.
+     * 그때 소유를 안 보면 <b>패자의 마감이 승자의 리스를 지워</b> 다음 tick 에 또 acquire 되고,
+     * 그렇게 fan-out 한다. 토큰은 acquire 가 심으므로 {@code null} 이면(레거시 행) 소유로 본다.
+     */
+    private boolean ownedBy(String token) {
+        return this.ownerToken == null || token == null || this.ownerToken.equals(token);
     }
 
     /**
@@ -181,19 +196,30 @@ public class ScanExecution {
      * <p>🔴 <b>직전 집계를 지우지 않는다.</b> 제출이 거절된 것은 이번 시도의 일이고,
      * 지난번에 무엇을 했는지는 여전히 사람이 봐야 할 정보다.
      */
-    public void release() {
+    public boolean release(String ownerToken) {
+        if (!ownedBy(ownerToken)) {
+            return false;
+        }
         this.phase = ScanPhase.IDLE;
         this.startedAt = null;
         this.finishedAt = null;
         this.leaseExpiresAt = null;
         this.ownerToken = null;
+        return true;
     }
 
-    /** 끝났다 — 🔴 리스를 반드시 비운다. 남기면 IDLE 이 아닌데도 만료를 기다리게 된다. */
-    public void finish(ScanPhase terminal, Instant now, ScanOutcome outcome,
-            ScanStage failureStage, String failureType) {
+    /**
+     * 끝났다 — 🔴 리스를 반드시 비운다. 남기면 IDLE 이 아닌데도 만료를 기다리게 된다.
+     *
+     * @return 내 행이었나. 뺏긴 행이면 <b>아무것도 바꾸지 않는다</b> — 승자의 리스를 지우지 않는다 (#109)
+     */
+    public boolean finish(ScanPhase terminal, Instant now, ScanOutcome outcome,
+            ScanStage failureStage, String failureType, String ownerToken) {
         if (terminal == null || terminal.isActive()) {
             throw new IllegalArgumentException("마감 국면이 아니다: " + terminal);
+        }
+        if (!ownedBy(ownerToken)) {
+            return false;
         }
         this.phase = terminal;
         this.finishedAt = now;
@@ -201,7 +227,8 @@ public class ScanExecution {
         this.ownerToken = null;
         this.failureStage = failureStage;
         this.failureType = failureType;
-        applyOutcome(outcome);
+        applyOutcome(outcome, terminal);
+        return true;
     }
 
     /**
@@ -210,8 +237,14 @@ public class ScanExecution {
      * <p>실패로 끝난 실행은 집계가 없을 수 있다. 그때 0 으로 덮으면 지난번 성과까지
      * 사라져 「이 저장소는 아무것도 수집한 적이 없다」로 보인다.
      */
-    private void applyOutcome(ScanOutcome outcome) {
+    private void applyOutcome(ScanOutcome outcome, ScanPhase terminal) {
         if (outcome == null) {
+            if (terminal == ScanPhase.FAILED) {
+                // 🔴 실패에 옛 SKIPPED 의 사유·지연 시각을 남기지 않는다 (#109). 카운터는 「지난 결과」로
+                //    읽히지만 skipReason·delayedUntil 은 「이번 실패」로 읽혀 두 이야기가 한 응답에 섞였다
+                this.skipReason = null;
+                this.delayedUntil = null;
+            }
             return;
         }
         this.issuesSaved = outcome.issuesSaved();

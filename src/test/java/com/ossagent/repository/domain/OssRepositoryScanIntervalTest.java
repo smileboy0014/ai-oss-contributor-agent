@@ -38,6 +38,23 @@ class OssRepositoryScanIntervalTest {
     }
 
     @Nested
+    @DisplayName("스캔 시각을 남긴 뒤 (#108)")
+    class AfterMarkScanned {
+
+        @Test
+        @DisplayName("🔴 markScanned 뒤 주기 안이면 대상이 아니다 — 스케줄러가 이것을 남겨야 주기가 산다")
+        void 스캔_시각을_남기면_주기_안에는_대상이_아니다() {
+            OssRepository repository = repository();
+            repository.markScanned(NOW);
+
+            assertThat(repository.isDueForScan(NOW.plus(Duration.ofMinutes(10)), DEFAULT_INTERVAL))
+                    .as("이 값이 안 남으면 fixed-delay 마다 전부 재스캔한다 — #26 의 주기가 통째로 무효였다")
+                    .isFalse();
+            assertThat(repository.isDueForScan(NOW.plus(DEFAULT_INTERVAL), DEFAULT_INTERVAL)).isTrue();
+        }
+    }
+
+    @Nested
     @DisplayName("전역 기본 주기")
     class DefaultInterval {
 

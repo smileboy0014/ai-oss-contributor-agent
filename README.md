@@ -13,6 +13,8 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
 - 기여 후보 조회 API: `GET /api/candidates` (상태·난이도·신뢰도 필터 + 페이지네이션) · `GET /api/candidates/{id}`
 - **사람의 승인 지점 셋**(S-6): `POST /api/candidates/{id}/select`(선정) · `…/implement`(착수) ·
   `…/pull-request`(Draft PR 생성). 취소는 `…/reject`, 규약 보류 해소는 `POST /api/repositories/{id}/policy/resolution`.
+  규약 문서가 침묵하는 빌드·테스트 명령은 사람이 `POST /api/repositories/{id}/policy/commands` 로 넣고(#102),
+  저장소별 스캔 주기는 `PATCH /api/repositories/{id}/scan-interval` 로 정합니다(#108).
   🔴 **스케줄러·워커가 이 선을 넘지 않습니다** — ArchUnit 이 「web 어댑터만 부른다」를 고정합니다
 - **구현 루프**: 계획 → 코딩 → 샌드박스 검증(컴파일·테스트·diff) → AI 리뷰를 **최대 3바퀴**. 상한 소진은 `FAILED`
 - **Fork push · Draft PR**: 게이트 뒤에서 upstream 을 재clone 해 저장된 diff 를 입히고 **사용자 Fork 에만** push 한 뒤

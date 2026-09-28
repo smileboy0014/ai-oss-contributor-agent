@@ -79,6 +79,13 @@ public class RepositoryPolicy {
 
     private String testCommand;
 
+    /**
+     * 사람이 명령을 직접 넣은 시각 (#102). {@code null} 이 아니면 재분석이 {@code javaVersion} ·
+     * {@code buildCommand} · {@code testCommand} 를 덮어쓰지 않는다 — 자동이 사람 판단을 다시 쓰지 않는다.
+     */
+    @Column(name = "commands_overridden_at")
+    private Instant commandsOverriddenAt;
+
     @Column(nullable = false)
     private boolean issueReferenceRequired;
 
@@ -523,9 +530,14 @@ public class RepositoryPolicy {
 
     private void apply(RuleReading reading, PolicyDocumentFingerprints prints, Clock clock) {
         this.aiContributionAllowed = reading.aiContributionAllowed();
-        this.javaVersion = reading.javaVersion();
-        this.buildCommand = reading.buildCommand();
-        this.testCommand = reading.testCommand();
+        if (commandsOverriddenAt == null) {
+            // 🔴 컬럼(255) 을 넘는 값은 「못 읽었다」로 둔다 (#102). 모델이 명령 대신 문장을 주면 저장이
+            //    DataIntegrityViolation 으로 죽어 스캔 전체가 FAILED 였다. null 이면 검증기가
+            //    「규약에서 명령을 못 읽었다」로 멈추고 사람이 /policy/commands 로 채운다
+            this.javaVersion = withinColumn(reading.javaVersion());
+            this.buildCommand = withinColumn(reading.buildCommand());
+            this.testCommand = withinColumn(reading.testCommand());
+        }
         this.issueReferenceRequired = reading.issueReferenceRequired();
         this.signoffRequired = reading.signoffRequired();
         this.testsRequired = reading.testsRequired();
@@ -535,6 +547,42 @@ public class RepositoryPolicy {
         this.analyzedAt = clock.instant();
         recordDocuments(prints, clock);
         this.updatedAt = clock.instant();
+    }
+
+    /**
+     * 🔴 사람이 빌드·테스트 명령을 직접 넣는다 — #102 · S-5.
+     *
+     * <p>규약 문서가 침묵하는 것을 채우는 경로다. 이후 재분석은 이 세 값을 덮어쓰지 않는다
+     * ({@link #apply}) — 사람의 판단을 자동이 다시 쓰지 않는다(Q-8 해소와 같은 방향).
+     *
+     * @param javaVersion  비면 기존 값을 유지한다
+     * @param buildCommand 필수
+     * @param testCommand  비면 {@code null} — 「규약이 침묵」으로 남긴다
+     */
+    public void overrideCommands(String javaVersion, String buildCommand, String testCommand,
+            Clock clock) {
+        if (buildCommand == null || buildCommand.isBlank()) {
+            throw new IllegalArgumentException("빌드 명령은 필수다 — 검증의 COMPILE 단계가 이것으로 돈다");
+        }
+        if (buildCommand.length() > COMMAND_MAX_LENGTH
+                || (testCommand != null && testCommand.length() > COMMAND_MAX_LENGTH)
+                || (javaVersion != null && javaVersion.length() > COMMAND_MAX_LENGTH)) {
+            throw new IllegalArgumentException("명령은 " + COMMAND_MAX_LENGTH + "자를 넘을 수 없다");
+        }
+        this.buildCommand = buildCommand.trim();
+        this.testCommand = testCommand == null || testCommand.isBlank() ? null : testCommand.trim();
+        if (javaVersion != null && !javaVersion.isBlank()) {
+            this.javaVersion = javaVersion.trim();
+        }
+        this.commandsOverriddenAt = clock.instant();
+        this.updatedAt = clock.instant();
+    }
+
+    /** {@code VARCHAR(255)} — 넘으면 「못 읽었다」({@code null}). 명령은 잘라 쓸 수 없다 */
+    private static final int COMMAND_MAX_LENGTH = 255;
+
+    private static String withinColumn(String value) {
+        return value == null || value.length() > COMMAND_MAX_LENGTH ? null : value;
     }
 
     /** 컬럼 상한을 넘지 않게 자른다. 사유 문자열은 진단용이라 잘려도 무해하다. */

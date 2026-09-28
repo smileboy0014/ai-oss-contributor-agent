@@ -25,7 +25,16 @@ public record ScanExecutionState(
         Instant finishedAt,
         ScanPipelineResult lastResult,
         ScanStage failureStage,
-        String failureType) {
+        String failureType,
+        /** DB 구현만 채운다 — {@code null} 이면 「리스 개념이 없다」(메모리 대역) (#109) */
+        Instant leaseExpiresAt) {
+
+    /** 리스를 모르는 호출자용 — 대역·테스트가 쓴다. */
+    public ScanExecutionState(Long repositoryId, ScanPhase phase, Instant startedAt,
+            Instant finishedAt, ScanPipelineResult lastResult, ScanStage failureStage,
+            String failureType) {
+        this(repositoryId, phase, startedAt, finishedAt, lastResult, failureStage, failureType, null);
+    }
 
     public static ScanExecutionState idle(Long repositoryId) {
         return new ScanExecutionState(repositoryId, ScanPhase.IDLE, null, null, null, null, null);
@@ -34,5 +43,13 @@ public record ScanExecutionState(
     /** 진행 중인가 — 중복 방어(FR-4)가 보는 값이다. */
     public boolean isActive() {
         return phase != null && phase.isActive();
+    }
+
+    /**
+     * 🔴 활성이라 적혀 있어도 리스가 지났으면 주인은 죽은 것이다 (#109). {@code kill -9} 뒤 진행 조회가
+     * 2시간 동안 RUNNING 을 말하던 자리다. 리스를 모르면(메모리 대역) 만료가 아니다.
+     */
+    public boolean isLeaseExpired(Instant now) {
+        return isActive() && leaseExpiresAt != null && now != null && !now.isBefore(leaseExpiresAt);
     }
 }

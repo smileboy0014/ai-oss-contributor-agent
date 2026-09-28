@@ -66,7 +66,12 @@ public interface TargetWorkspaceSource {
      * <p>🔴 <b>적용 실패는 예외다.</b> upstream 이 그 사이 움직여 변경분이 더는 맞지 않는다는
      * 뜻이고, 그것을 「부분 적용」으로 넘기면 반쪽 변경이 Fork 에 올라간다. 사람이 다시 착수한다.
      *
+     * <p>🔴 <b>바뀐 경로를 여기서 돌려준다</b> — 적용 뒤 {@link #diff} 로 다시 세지 않는다 (#95).
+     * 구현이 인덱스까지 갱신하면 「인덱스 대 작업 트리」 diff 가 비어 <b>입혔는데 바뀐 것이
+     * 없다</b>로 읽힌다. 실제로 그렇게 PR 게이트가 항상 실패했다.
+     *
+     * @return 패치가 건드린 저장소 상대경로 집합 — 추가·수정·삭제 전부. 비어 있지 않다
      * @throws WorkspaceException diff 형식이 깨졌거나 적용되지 않는다
      */
-    void apply(SandboxWorkspace workspace, String unifiedDiff);
+    java.util.Set<String> apply(SandboxWorkspace workspace, String unifiedDiff);
 }

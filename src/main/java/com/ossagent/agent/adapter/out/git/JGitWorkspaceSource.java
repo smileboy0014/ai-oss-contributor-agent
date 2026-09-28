@@ -20,6 +20,8 @@ import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.lib.StoredConfig;
+import org.eclipse.jgit.patch.FileHeader;
+import org.eclipse.jgit.patch.Patch;
 import org.eclipse.jgit.treewalk.FileTreeIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,7 +72,12 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
     private final Path workspaceRoot;
 
     public JGitWorkspaceSource(SandboxProperties properties) {
-        this.workspaceRoot = properties.workspaceRoot();
+        this(properties.workspaceRoot());
+    }
+
+    /** 테스트용 — 설정 객체 없이 루트만 준다. 실 JGit 을 로컬 저장소에 돌리는 검사가 쓴다. */
+    JGitWorkspaceSource(Path workspaceRoot) {
+        this.workspaceRoot = workspaceRoot;
         // 🔴 기동 시 한 번 — 이 빈이 올라온 이상 JGit 이 바깥 설정을 읽지 않는다.
         //    호출 시점에 걸면 「첫 호출 전에 다른 JGit 사용처가 먼저 돈다」는 경로가 남는다
         JGitSystemConfig.suppressNativeGitLookup();
@@ -215,27 +222,58 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
      * 예외를 던지고, 그 시점까지 쓴 파일이 작업 트리에 남을 수 있다. 예외를 그대로 올리므로 호출자는
      * 이 워크스페이스를 <b>버려야</b> 한다 — 다음 {@link #fetch} 가 디렉토리를 비우고 다시 받는다.
      *
-     * <p>⚠️ 인덱스는 건드리지 않는다. 뒤이어 {@link #diff} 가 「인덱스 대 작업 트리」로 바뀐 경로를
-     * 세므로, 적용된 변경분이 그대로 diff 로 다시 나온다. 그것이 push 에 실릴 파일 목록이다.
+     * <h2>🔴 적용 뒤 {@link #diff} 를 다시 부르지 않는다 — #95</h2>
+     *
+     * <p>초안은 「인덱스는 건드리지 않는다」고 적고 적용 뒤 {@link #diff} 로 바뀐 경로를 다시
+     * 셌다. <b>그 전제가 거짓이었다.</b> JGit 7 의 {@code ApplyCommand} 는 {@code PatchApplier}
+     * 로 가고, 그것은 패치를 입힌 파일마다 <b>인덱스 항목까지 갱신</b>한다
+     * ({@code lockDirCache → DirCacheBuilder.commit}). 그래서 「인덱스 대 작업 트리」 diff 가
+     * <b>항상 비었고</b>, PR 게이트는 변경분을 입혀 놓고 「바뀐 파일이 없다」로 매번 죽었다.
+     * 페이크가 {@code apply} 와 무관하게 고정 diff 를 돌려줘 테스트는 초록이었다 —
+     * {@code JGitWorkspaceSourceApplyTest} 가 실 JGit 으로 그 자리를 잡는다.
+     *
+     * <p>바뀐 경로는 <b>패치 자체</b>에서 읽는다. 삭제는 {@code newPath} 가 {@code /dev/null}
+     * 이라 양쪽을 다 담아야 push 에서 빠지지 않는다 — {@link #diff} 와 같은 규칙이다.
+     *
+     * @return 패치가 건드린 저장소 상대경로 — 추가·수정·삭제 전부
      */
     @Override
-    public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+    public Set<String> apply(SandboxWorkspace workspace, String unifiedDiff) {
         if (workspace == null) {
             throw new WorkspaceException("워크스페이스는 필수다");
         }
         if (unifiedDiff == null || unifiedDiff.isBlank()) {
             throw new WorkspaceException("입힐 변경분이 없다 — 빈 diff 로 push 하지 않는다");
         }
+        byte[] bytes = unifiedDiff.getBytes(StandardCharsets.UTF_8);
+
+        // 🔴 경로는 패치에서 읽는다. ApplyResult 는 갱신한 파일만 돌려주고 삭제가 빠질 수 있다
+        Patch patch = new Patch();
+        patch.parse(bytes, 0, bytes.length);
+        if (!patch.getErrors().isEmpty()) {
+            // ⚠ 오류 본문을 싣지 않는다 — 대상 저장소 텍스트가 섞여 있다 (S-4)
+            throw new WorkspaceException("저장된 변경분의 형식이 깨졌다 (오류 " + patch.getErrors().size() + "건)");
+        }
+        Set<String> paths = new HashSet<>();
+        for (FileHeader header : patch.getFiles()) {
+            addIfReal(paths, header.getOldPath());
+            addIfReal(paths, header.getNewPath());
+        }
+        if (paths.isEmpty()) {
+            throw new WorkspaceException("저장된 변경분에 파일 헤더가 없다 — 입힐 것이 없다");
+        }
+
         try (Git git = Git.open(workspace.path().toFile())) {
             git.apply()
-                    .setPatch(new java.io.ByteArrayInputStream(
-                            unifiedDiff.getBytes(StandardCharsets.UTF_8)))
+                    .setPatch(new java.io.ByteArrayInputStream(bytes))
                     .call();
         } catch (GitAPIException | IOException e) {
             throw new WorkspaceException(
                     "저장된 변경분이 현재 upstream 에 적용되지 않는다 — 다시 착수한다", e);
         }
-        log.info("변경분 적용 완료 workspace={} diffChars={}", workspace.path(), unifiedDiff.length());
+        // ⚠ 호스트 절대경로를 싣지 않는다 — fetch 의 로그와 같은 판단
+        log.info("변경분 적용 완료 files={} diffChars={}", paths.size(), unifiedDiff.length());
+        return Set.copyOf(paths);
     }
 
     private static void addIfReal(Set<String> paths, String path) {

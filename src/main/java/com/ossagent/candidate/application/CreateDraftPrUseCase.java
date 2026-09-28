@@ -2,7 +2,6 @@ package com.ossagent.candidate.application;
 
 import com.ossagent.agent.domain.SandboxWorkspace;
 import com.ossagent.agent.domain.TargetWorkspaceSource;
-import com.ossagent.agent.domain.WorkspaceDiff;
 import com.ossagent.candidate.domain.CandidateStatus;
 import com.ossagent.candidate.domain.CandidateTransitionException;
 import com.ossagent.candidate.domain.StatusTransition;
@@ -43,6 +42,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeSet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -267,14 +267,15 @@ public class CreateDraftPrUseCase {
     private List<FileChange> materialize(RepositoryCoordinates upstream, BranchName branch,
             String unifiedDiff) {
         SandboxWorkspace workspace = workspaces.fetch(upstream, branch.value());
-        workspaces.apply(workspace, unifiedDiff);
-        WorkspaceDiff applied = workspaces.diff(workspace);
+        // 🔴 바뀐 경로는 apply 가 돌려준다. 적용 뒤 diff() 를 다시 부르면 JGit 이 인덱스까지
+        //    갱신한 탓에 항상 비어, 「입혔는데 바뀐 것이 없다」로 게이트가 매번 죽었다 (#95)
+        Set<String> applied = workspaces.apply(workspace, unifiedDiff);
         if (applied.isEmpty()) {
             throw new DraftPrException("변경분을 입혔는데 바뀐 파일이 없습니다 — diff 가 비어 있거나 이미 반영됐습니다");
         }
 
         List<FileChange> changes = new ArrayList<>();
-        for (String path : new TreeSet<>(applied.changedPaths())) {
+        for (String path : new TreeSet<>(applied)) {
             // 🔴 경로 판정은 SandboxWorkspace 가 한다 — ../ 와 심볼릭 링크를 거른다 (S-3)
             Path file = workspace.resolveInside(path);
             if (!Files.exists(file)) {

@@ -268,7 +268,7 @@ class ImplementCandidatePipelineTest {
         }
 
         @Override
-        public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+        public Set<String> apply(SandboxWorkspace workspace, String unifiedDiff) {
             throw new UnsupportedOperationException("착수 경로는 diff 를 입히지 않는다 — PR 게이트의 일이다");
         }
     }

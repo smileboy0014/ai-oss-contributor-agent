@@ -454,7 +454,7 @@ class CreateDraftPrUseCaseTest {
         }
 
         @Override
-        public void apply(SandboxWorkspace workspace, String unifiedDiff) {
+        public Set<String> apply(SandboxWorkspace workspace, String unifiedDiff) {
             appliedDiffs.add(unifiedDiff);
             try {
                 Path target = workspace.resolveInside(CHANGED_PATH);
@@ -463,6 +463,8 @@ class CreateDraftPrUseCaseTest {
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
+            // 🔴 apply 가 경로를 돌려준다 — 실 JGit 은 적용 뒤 diff() 가 비므로 (#95)
+            return Set.of(CHANGED_PATH);
         }
     }
 

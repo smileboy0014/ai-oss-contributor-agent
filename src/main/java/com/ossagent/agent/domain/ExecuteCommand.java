@@ -29,6 +29,7 @@ public record ExecuteCommand(
 
     /** Gradle 이 네트워크를 시도하지 않게 하는 플래그. 아래 {@link #withOfflineFlag} 참조. */
     private static final String OFFLINE = "--offline";
+    private static final String NO_DAEMON = "--no-daemon";
 
     private static final List<String> GRADLE_LAUNCHERS = List.of("./gradlew", "gradlew", "gradle");
 
@@ -72,12 +73,20 @@ public record ExecuteCommand(
         if (argv == null || argv.isEmpty()) {
             return argv;
         }
-        if (!isGradleLauncher(argv.get(0)) || argv.contains(OFFLINE)) {
+        if (!isGradleLauncher(argv.get(0))) {
             return argv;
         }
-        List<String> withFlag = new ArrayList<>(argv.size() + 1);
+        List<String> withFlag = new ArrayList<>(argv.size() + 2);
         withFlag.add(argv.get(0));
-        withFlag.add(OFFLINE);
+        if (!argv.contains(OFFLINE)) {
+            withFlag.add(OFFLINE);
+        }
+        // 🔴 --no-daemon 도 붙인다 (#115). 없으면 단계마다(컴파일·테스트·diff 넷) 새 컨테이너에서
+        //    데몬을 띄우고, 데몬 힙(대상의 org.gradle.jvmargs)이 4GB 상한을 넘기면 137 로 죽어
+        //    「코드가 틀렸다」로 기록된다. 워밍(WarmCommand)은 이미 붙이고 있었다
+        if (!argv.contains(NO_DAEMON)) {
+            withFlag.add(NO_DAEMON);
+        }
         withFlag.addAll(argv.subList(1, argv.size()));
         return List.copyOf(withFlag);
     }

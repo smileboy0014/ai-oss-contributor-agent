@@ -15,6 +15,9 @@ import com.ossagent.agent.domain.SeedCacheCommand;
 import com.ossagent.agent.domain.TargetCommandLine;
 import com.ossagent.agent.domain.WarmCommand;
 import com.ossagent.repository.domain.RepositoryCoordinates;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -144,30 +147,77 @@ public class SandboxPipeline implements DependencyCache {
      */
     private void prepareCache(SandboxWorkspace workspace, SandboxCacheVolume cacheVolume,
             String javaVersion, BuildTool buildTool) {
-        if (seeded.contains(cacheVolume.name())) {
+        if (seeded.contains(cacheVolume.name()) && workspaceWarmed(workspace, cacheVolume)) {
             return;
         }
         Lock lock = warmLocks.computeIfAbsent(cacheVolume.name(), key -> new ReentrantLock());
         lock.lock();
         try {
-            if (seeded.contains(cacheVolume.name())) {
+            boolean volumeSeeded = seeded.contains(cacheVolume.name());
+            boolean warmed = workspaceWarmed(workspace, cacheVolume);
+            if (volumeSeeded && warmed) {
                 return;
             }
-            log.info("의존성 캐시 워밍 시작 volume={}", cacheVolume.name());
-            requireSucceeded("워밍",
-                    sandbox.run(WarmCommand.of(workspace, buildTool,
-                            javaVersion, defaultImage, warmLimits)));
-
-            requireSucceeded("씨딩",
-                    sandbox.run(SeedCacheCommand.of(workspace, cacheVolume,
-                            javaVersion, defaultImage, warmLimits)));
-
-            // 🔴 둘 다 성공한 뒤에만 표시한다. 실패한 채로 표시하면 다음 후보가
-            //    빈 캐시로 오프라인 실행을 하고, 그 결과가 「테스트 실패」로 기록된다
-            seeded.add(cacheVolume.name());
+            // 🔴 「볼륨이 씨딩됐다」와 「이 워크스페이스가 워밍됐다」는 다른 사실이다 (#101).
+            //    wrapper 배포본은 볼륨이 아니라 <workspace>/.gradle 에 있고, fetch 가 그 디렉토리를
+            //    통째로 지운다. 볼륨 메모만 보고 건너뛰면 새 워크스페이스가 network=none 에서
+            //    wrapper 를 받으려다 죽고, 그것이 「코드가 틀렸다」로 기록돼 3바퀴를 태웠다
+            if (!warmed) {
+                log.info("의존성 캐시 워밍 시작 volume={} (workspace 워밍 마커 없음)", cacheVolume.name());
+                requireSucceeded("워밍",
+                        sandbox.run(WarmCommand.of(workspace, buildTool,
+                                javaVersion, defaultImage, warmLimits)));
+                markWarmed(workspace, cacheVolume);
+            }
+            if (!volumeSeeded) {
+                requireSucceeded("씨딩",
+                        sandbox.run(SeedCacheCommand.of(workspace, cacheVolume,
+                                javaVersion, defaultImage, warmLimits)));
+                // 🔴 성공한 뒤에만 표시한다. 실패한 채로 표시하면 다음 후보가
+                //    빈 캐시로 오프라인 실행을 하고, 그 결과가 「테스트 실패」로 기록된다
+                seeded.add(cacheVolume.name());
+            }
             log.info("의존성 캐시 준비 완료 volume={}", cacheVolume.name());
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * 워밍이 끝난 워크스페이스에 <b>우리가</b> 남기는 표식 — {@code GRADLE_USER_HOME} 안이다.
+     *
+     * <p>{@code fetch} 가 디렉토리를 비우면 표식도 사라져 다음 준비가 다시 워밍한다. 대상 코드가
+     * 실행 단계(RW)에서 지워도 같다 — 틀리는 방향이 「한 번 더 워밍」이라 안전하다.
+     * Gradle 내부 구조({@code wrapper/dists})를 들여다보지 않는 이유는 그것이 Gradle 버전마다
+     * 바뀔 수 있어서다.
+     */
+    static final String WARM_MARKER = ".oss-agent-warmed";
+
+    private static Path warmMarker(SandboxWorkspace workspace) {
+        return workspace.path().resolve(".gradle").resolve(WARM_MARKER);
+    }
+
+    /** 표식의 내용이 <b>어느 저장소</b>의 워밍인지다 — 같은 디렉토리에 다른 저장소가 오면 다시 워밍한다. */
+    private static boolean workspaceWarmed(SandboxWorkspace workspace, SandboxCacheVolume cacheVolume) {
+        Path marker = warmMarker(workspace);
+        if (!Files.isRegularFile(marker)) {
+            return false;
+        }
+        try {
+            return cacheVolume.name().equals(Files.readString(marker).strip());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private static void markWarmed(SandboxWorkspace workspace, SandboxCacheVolume cacheVolume) {
+        Path marker = warmMarker(workspace);
+        try {
+            Files.createDirectories(marker.getParent());
+            Files.writeString(marker, cacheVolume.name() + "\n");
+        } catch (IOException e) {
+            // ⚠ 표식을 못 남기면 다음 준비가 한 번 더 워밍할 뿐이다 — 조용히 넘기지는 않는다
+            log.warn("워밍 표식을 남기지 못했다 — 다음 준비가 다시 워밍한다", e);
         }
     }
 

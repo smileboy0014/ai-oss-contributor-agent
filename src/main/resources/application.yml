@@ -171,6 +171,11 @@ sandbox:
   # 🔴 S-3 의 실행체 설정 (#17). 네트워크는 여기 없다 — 명령 타입이 정한다.
   #    SANDBOX_NETWORK 를 키로 두면 실행 단계 격리가 배포 설정 한 줄로 꺼진다
   docker-api-version: ${SANDBOX_DOCKER_API_VERSION:1.44}
+  # 컨테이너를 워크스페이스 소유자 uid:gid 로 돌린다 (#115). root 로 돌면 Linux 에서 build/·.gradle/ 이
+  # root 소유가 되어 다음 fetch 의 삭제가 죽고 git 이 dubious ownership 을 낸다.
+  # macOS Docker Desktop 은 uid 를 재매핑해 재현되지 않는다 — 배포에서만 터지는 종류라 기본 켜짐.
+  # 격리 설정이 아니라 운영 호환 스위치다 — 끄면 이전과 같이 root 로 돈다
+  run-as-workspace-owner: ${SANDBOX_RUN_AS_WORKSPACE_OWNER:true}
   # 🔴 stock eclipse-temurin 이 아니다 — git 이 없어 검증의 DIFF 단계가 컨테이너 기동에서 죽는다 (#97).
   #    docker/sandbox/build.sh 로 미리 빌드한다. 앱은 pull 도 build 도 하지 않는다
   default-image: ${SANDBOX_DOCKER_IMAGE:oss-agent-sandbox:21}

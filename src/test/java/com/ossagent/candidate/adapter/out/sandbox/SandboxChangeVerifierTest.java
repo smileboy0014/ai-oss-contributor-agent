@@ -392,8 +392,8 @@ class SandboxChangeVerifierTest {
     }
 
     private static SandboxProperties properties(Path workspaceRoot) {
-        return new SandboxProperties(workspaceRoot, "eclipse-temurin:21-jdk", "oss-agent-warm",
+        return new SandboxProperties(workspaceRoot, "oss-agent-sandbox:21", "oss-agent-warm",
                 2.0, DataSize.ofGigabytes(4), 512L, Duration.ofMinutes(30), Duration.ofMinutes(20),
-                Duration.ofSeconds(60), 200_000, "1.44");
+                Duration.ofSeconds(60), 200_000, "1.44", null);
     }
 }

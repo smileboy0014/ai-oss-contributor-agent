@@ -70,6 +70,13 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
      */
     private static final int SHALLOW_DEPTH = 1;
 
+    /**
+     * clone 의 소켓 타임아웃(초). spring-kafka 얕은 clone 은 수십 초 안이다 — 10분이면 느린 회선도
+     * 넉넉하고, 넘기면 연결이 죽은 것이다. {@code WorkspaceException} 으로 올라가고 착수 흐름에서는
+     * 전이 앞이라 후보를 건드리지 않는다.
+     */
+    private static final int CLONE_TIMEOUT_SECONDS = 600;
+
     private final Path workspaceRoot;
 
     public JGitWorkspaceSource(SandboxProperties properties) {
@@ -113,6 +120,9 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
         try (Git git = Git.cloneRepository()
                 .setURI(url)                       // 🔴 익명 — 자격증명을 싣지 않는다 (S-4)
                 .setDirectory(workspace.path().toFile())
+                // 🔴 기본값은 무제한이다 (#115). 반쯤 열린 연결 하나가 착수 스레드를 영영 잡는다 —
+                //    「타임아웃·재시도를 어댑터에서 명시한다」(external-deps.md)
+                .setTimeout(CLONE_TIMEOUT_SECONDS)
                 .setDepth(SHALLOW_DEPTH)
                 .setCloneSubmodules(false)         // 🔴 임의 URL 을 따라가지 않는다
                 .call()) {

@@ -151,6 +151,7 @@ public class DockerCodeSandbox implements CodeSandbox {
                 SandboxContainerSpec.environmentAsList(command),
                 command.workspace().containerPath(),
                 SandboxContainerSpec.hostConfig(command, properties),
-                SandboxContainerSpec.labels(instanceId.value()));
+                SandboxContainerSpec.labels(instanceId.value()),
+                SandboxContainerSpec.user(command, properties));
     }
 }

@@ -72,6 +72,9 @@ class SandboxPipelineTest {
         // 🔴 붙지 않으면 network=none 에서 의존성 해석이 **타임아웃**으로 나타나
         //    30분 예산을 태우고 「테스트 실패」로 오분류된다
         assertThat(execute.argv()).contains("--offline");
+        // 🔴 --no-daemon 이 없으면 단계마다 데몬을 띄우고 데몬 힙이 4GB 상한을 넘겨 137 로 죽어
+        //    「코드가 틀렸다」로 기록된다 (#115)
+        assertThat(execute.argv()).contains("--no-daemon");
     }
 
     @Test
@@ -85,6 +88,44 @@ class SandboxPipelineTest {
 
         assertThat(warmCount()).isEqualTo(1);
         assertThat(sandbox.commands()).hasSize(4);
+    }
+
+    /**
+     * 🔴 볼륨 메모와 워크스페이스는 다른 사실이다 (#101). wrapper 배포본은 볼륨이 아니라
+     * {@code <workspace>/.gradle} 에 있고 fetch 가 그 디렉토리를 통째로 지운다 — 볼륨 메모만 보고
+     * 건너뛰면 새 워크스페이스가 network=none 에서 wrapper 를 받으려다 죽는다.
+     */
+    @Test
+    @DisplayName("🔴 같은 저장소라도 새 워크스페이스면 다시 워밍한다 — wrapper 가 거기 있다 (#101)")
+    void 새_워크스페이스는_다시_워밍한다(@TempDir Path root) throws Exception {
+        SandboxPipeline pipeline = pipeline();
+        Path real = root.toRealPath();
+        SandboxWorkspace first = SandboxWorkspace.under(Files.createDirectories(real.resolve("ws1")), real);
+        SandboxWorkspace second = SandboxWorkspace.under(Files.createDirectories(real.resolve("ws2")), real);
+
+        pipeline.run(first, KAFKA, JAVA_VERSION, command());
+        pipeline.run(second, KAFKA, JAVA_VERSION, command());
+
+        assertThat(warmCount()).as("워크스페이스마다 워밍 1회").isEqualTo(2);
+        assertThat(sandbox.commands().stream().filter(SeedCacheCommand.class::isInstance).count())
+                .as("볼륨은 이미 씨딩됐으므로 다시 씨딩하지 않는다")
+                .isEqualTo(1);
+        assertThat(second.path().resolve(".gradle").resolve(SandboxPipeline.WARM_MARKER))
+                .as("워밍 표식이 워크스페이스에 남는다 — fetch 가 지우면 다시 워밍한다")
+                .exists();
+    }
+
+    @Test
+    @DisplayName("재기동(새 파이프라인)에도 워밍 표식이 있으면 워밍은 건너뛰고 씨딩만 한다")
+    void 재기동_뒤_표식이_있으면_씨딩만_한다(@TempDir Path root) throws Exception {
+        SandboxWorkspace workspace = workspace(root);
+        pipeline().run(workspace, KAFKA, JAVA_VERSION, command());
+        sandbox.reset();
+
+        pipeline().run(workspace, KAFKA, JAVA_VERSION, command());
+
+        assertThat(warmCount()).isZero();
+        assertThat(sandbox.commands().get(0)).isInstanceOf(SeedCacheCommand.class);
     }
 
     @Test
@@ -145,9 +186,12 @@ class SandboxPipelineTest {
 
         assertThatThrownBy(() -> seedFailing.run(workspace, KAFKA, JAVA_VERSION, command()))
                 .isInstanceOf(SandboxPermanentException.class);
-        assertThat(failing.warms)
+        assertThat(failing.seeds)
                 .as("🔴 실패를 「준비됨」으로 기억하면 다음 후보가 빈 캐시로 오프라인 실행을 한다")
                 .isEqualTo(2);
+        assertThat(failing.warms)
+                .as("워밍은 성공했고 산출물이 워크스페이스에 있다 — 다시 워밍할 이유가 없다 (#101 표식)")
+                .isEqualTo(1);
     }
 
     @Test
@@ -209,6 +253,7 @@ class SandboxPipelineTest {
     private static final class FailOnSeed implements CodeSandbox {
 
         private int warms;
+        private int seeds;
 
         @Override
         public SandboxResult run(SandboxCommand command) {
@@ -217,6 +262,7 @@ class SandboxPipelineTest {
                 return new SandboxResult(0, "ok", false, false,
                         Duration.ofSeconds(1), true);
             }
+            seeds++;
             return new SandboxResult(1, "cp failed", false, false,
                     Duration.ofSeconds(1), true);
         }

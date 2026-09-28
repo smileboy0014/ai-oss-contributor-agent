@@ -69,7 +69,10 @@ public final class CommandLine {
             throw new VerificationSetupException("실행할 명령이 비어 있다 — 규약에서 읽지 못했다 (S-5)");
         }
         List<String> argv = new ArrayList<>();
-        for (String raw : command.trim().split("\\s+")) {
+        // 🔴 가로 공백으로만 자른다 (#115). `\s+` 는 개행을 구분자로 삼켜
+        //    `./gradlew test\nrm -rf /` 가 토큰 5개짜리 합법 명령이 됐다 — 개행이 토큰에
+        //    남아야 아래 requireShellFree 가 문다. TargetCommandLine 이 같은 판단을 먼저 했다
+        for (String raw : command.trim().split("[ \t]+")) {
             if (raw.isEmpty()) {
                 continue;
             }

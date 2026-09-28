@@ -52,13 +52,18 @@ public record SeedCacheCommand(
     /**
      * 🔴 우리 명령이다. {@code -a} 로 속성을 보존해 Gradle 이 캐시를 그대로 인식하게 한다.
      *
+     * <p>🔴 원본을 {@code modules-2/.} 로 준다 (#115). {@code cp -a SRC DST} 는 DST 가 이미 있으면
+     * SRC 를 <b>그 안으로</b> 복사한다 — 재기동 뒤 다시 씨딩할 때마다
+     * {@code modules-2/modules-2/…} 가 중첩돼 볼륨이 1~2GB 씩 자랐고 Gradle 은 그것을 읽지 않았다.
+     * {@code SRC/.} 는 DST 가 없으면 만들고 있으면 <b>내용을 합친다</b> — 멱등이다.
+     *
      * <p>⚠ 워밍이 아무것도 받지 못해 원본이 없으면 {@code cp} 가 0 이 아닌 코드로 끝난다.
      * 그것은 예외가 아니라 <b>결과</b>다 — 호출자가 종료코드로 판단한다.
      */
     @Override
     public List<String> argv() {
         return List.of("cp", "-a",
-                workspace.containerGradleHome() + "/caches/modules-2",
+                workspace.containerGradleHome() + "/caches/modules-2/.",
                 cacheVolume.containerPath() + "/modules-2");
     }
 }

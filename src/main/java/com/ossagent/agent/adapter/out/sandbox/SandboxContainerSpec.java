@@ -183,4 +183,32 @@ public final class SandboxContainerSpec {
     static Map<String, String> labels(String instanceId) {
         return Map.of(LABEL_SANDBOX, "true", LABEL_INSTANCE, instanceId);
     }
+
+    /**
+     * 컨테이너 사용자 — <b>워크스페이스 소유자의 {@code uid:gid}</b> (#115).
+     *
+     * <p>root 로 돌면 Linux 에서 Gradle 이 {@code build/}·{@code .gradle/} 을 root 소유로 남기고,
+     * 다음 {@code fetch} 의 삭제가 {@code AccessDeniedException} 으로 죽어 그 저장소가 영구히 막힌다.
+     * git 도 {@code dubious ownership}(exit 128)으로 거부한다. macOS Docker Desktop 은 uid 를
+     * 재매핑해 재현되지 않는다 — 개발기에서 안 보이고 배포에서 터지는 종류다.
+     *
+     * <p>{@code sandbox.run-as-workspace-owner=false} 로 끌 수 있다(격리 설정이 아니라 운영 호환 스위치).
+     * uid 를 읽을 수 없는 파일시스템이거나 소유자가 root 면 {@code null} — 이미지 기본으로 돈다.
+     */
+    static String user(SandboxCommand command, SandboxProperties props) {
+        if (!props.runAsWorkspaceOwner()) {
+            return null;
+        }
+        try {
+            Object uid = java.nio.file.Files.getAttribute(command.workspace().path(), "unix:uid");
+            Object gid = java.nio.file.Files.getAttribute(command.workspace().path(), "unix:gid");
+            if (uid instanceof Integer u && gid instanceof Integer g && u != 0) {
+                return u + ":" + g;
+            }
+            return null;
+        } catch (java.io.IOException | UnsupportedOperationException | IllegalArgumentException e) {
+            // ⚠ 경로를 싣지 않는다. 읽지 못하면 root 로 돈다 — 실패 방향이 「지금까지와 같음」이다
+            return null;
+        }
+    }
 }

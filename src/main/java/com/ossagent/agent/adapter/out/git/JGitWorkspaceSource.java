@@ -77,6 +77,9 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
      */
     private static final int CLONE_TIMEOUT_SECONDS = 600;
 
+    /** JGit {@code DiffFormatter} 가 바이너리 항목에 남기는 줄 — 본문이 없어 재적용이 불가능하다. */
+    private static final String BINARY_MARKER = "Binary files differ";
+
     private final Path workspaceRoot;
 
     public JGitWorkspaceSource(SandboxProperties properties) {
@@ -225,7 +228,15 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
                 addIfReal(paths, entry.getOldPath());
                 addIfReal(paths, entry.getNewPath());
             }
-            return new WorkspaceDiff(out.toString(StandardCharsets.UTF_8), paths);
+            String unifiedDiff = out.toString(StandardCharsets.UTF_8);
+            // 🔴 바이너리 변경은 착수 때 끊는다 (#111). 저장된 diff 가 정본인데 바이너리는 본문 없이
+            //    「Binary files differ」 한 줄이라 PR 게이트가 재적용할 수 없다 — 토큰을 다 태운 뒤
+            //    마지막 게이트에서 알기보다 여기서 알린다
+            if (unifiedDiff.contains(BINARY_MARKER)) {
+                throw new WorkspaceException(
+                        "변경분에 바이너리 파일이 있다 — 텍스트 변경만 정본이 된다");
+            }
+            return new WorkspaceDiff(unifiedDiff, paths);
 
         } catch (IOException | GitAPIException e) {
             throw new WorkspaceException("변경분을 읽지 못했다", e);
@@ -273,6 +284,13 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
         }
         Set<String> paths = new HashSet<>();
         for (FileHeader header : patch.getFiles()) {
+            // 🔴 바이너리 항목은 조용히 탈락한다 (#111) — JGit 의 apply 는 「Binary files differ」를
+            //    오류 없이 건너뛰어, 검증된 것과 다른 부분 커밋이 Fork 에 올라갔다. 거부한다
+            if (header.getPatchType() != FileHeader.PatchType.UNIFIED) {
+                throw new WorkspaceException(
+                        "바이너리 변경분은 재적용할 수 없다 — 텍스트 diff 만 정본이 된다 (파일 수 "
+                                + patch.getFiles().size() + ")");
+            }
             addIfReal(paths, header.getOldPath());
             addIfReal(paths, header.getNewPath());
         }

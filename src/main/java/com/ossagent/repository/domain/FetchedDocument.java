@@ -98,7 +98,8 @@ public record FetchedDocument(
      * 해소 API(#24)가 아직 없으므로 되돌릴 수단이 없다.
      */
     public boolean isTransientFailure() {
-        return reason == UnreadableReason.RATE_LIMITED || reason == UnreadableReason.SERVER_ERROR;
+        return reason == UnreadableReason.RATE_LIMITED || reason == UnreadableReason.SERVER_ERROR
+                || reason == UnreadableReason.AUTHENTICATION;
     }
 
     /** 🔴 내용을 포함하지 않는다. 실수로 로그에 실려도 파일 본문이 나가지 않게 한다. */

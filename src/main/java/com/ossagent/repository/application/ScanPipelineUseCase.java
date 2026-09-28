@@ -116,7 +116,9 @@ public class ScanPipelineUseCase {
             return ScanPipelineResult.skipped(ScanSkipReason.RATE_LIMITED);
         } catch (RuntimeException e) {
             stageDone(PipelineStage.POLICY, StageOutcome.FAILED, policyStart);
-            throw e;
+            // 🔴 단계를 달아 올린다 (#114). 맨몸으로 올리면 ScanExecutor 가 markFailed(id, null, …) 을
+            //    불러 진행 조회가 stage=null 로 나온다 — 가장 먼저·자주 실패하는 단계가 진단 불가였다
+            throw ScanStageFailedException.at(ScanStage.POLICY, repositoryId, e);
         }
 
         if (!target.contributionAllowed()) {

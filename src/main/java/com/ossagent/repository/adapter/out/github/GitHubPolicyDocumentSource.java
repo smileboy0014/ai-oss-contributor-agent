@@ -9,6 +9,8 @@ import com.ossagent.repository.domain.RepositoryDocuments;
 import com.ossagent.repository.domain.RepositoryFile;
 import com.ossagent.repository.domain.RepositorySource;
 import com.ossagent.repository.domain.UnreadableReason;
+import com.ossagent.support.github.GitHubAuthenticationException;
+import com.ossagent.support.github.GitHubPermissionException;
 import com.ossagent.support.github.GitHubRateLimitException;
 import com.ossagent.support.github.GitHubTransientException;
 import com.ossagent.support.github.GitHubUnreadableContentException;
@@ -115,7 +117,12 @@ public class GitHubPolicyDocumentSource implements PolicyDocumentSource {
         if (e instanceof GitHubUnreadableContentException) {
             return UnreadableReason.UNKNOWN;
         }
-        // 권한·인증·분류되지 않는 오류. 재시도해도 같으므로 영구 실패로 본다
+        if (e instanceof GitHubAuthenticationException || e instanceof GitHubPermissionException) {
+            // 🔴 우리 토큰의 문제다 (#114) — 영구로 접으면 첫 실행의 설정 실수가 저장소를
+            //    사람만 풀 수 있는 보류로 보내고, 토큰을 고쳐도 재분석이 막힌다
+            return UnreadableReason.AUTHENTICATION;
+        }
+        // 분류되지 않는 오류. 재시도해도 같으므로 영구 실패로 본다
         return UnreadableReason.UNKNOWN;
     }
 }

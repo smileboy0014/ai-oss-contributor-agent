@@ -207,4 +207,118 @@ public class ApiExceptionHandler {
                 .header(HttpHeaders.RETRY_AFTER, String.valueOf(DEFAULT_RETRY_AFTER.toSeconds()))
                 .body(detail);
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // #112 — 운영 경로의 예외가 500 으로 뭉개지지 않게 한다.
+    //
+    // 🔴 「upstream 이 움직였다 → 다시 착수」와 「서버 고장」이 같은 500 이면 운영자가 재시도할지
+    //    고칠지 모른다. 상태코드는 대응을 가른다: 503 은 「기다렸다 다시」, 409 는 「상태를 바꾸고
+    //    다시」, 422 는 「입력·규약이 문제」, 502 는 「대외 시스템이 우리 요청을 거부·훼손」.
+    //    reason 프로퍼티가 어느 게이트·어느 계층인지를 기계가 읽을 수 있게 한다.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** PR 게이트가 만들지 못했다 — 후보는 {@code READY_FOR_PR} 그대로다. 사유가 곧 다음 행동이다. */
+    @ExceptionHandler(com.ossagent.pullrequest.domain.DraftPrException.class)
+    public ProblemDetail handleDraftPr(com.ossagent.pullrequest.domain.DraftPrException e) {
+        return problem(HttpStatus.CONFLICT, e.getMessage(), "DRAFT_PR");
+    }
+
+    /** Fork 확보·push 가 GitHub 에서 거부됐다 — 우리 요청이 아니라 대외 쪽 상태다. */
+    @ExceptionHandler(com.ossagent.pullrequest.domain.ForkPublishException.class)
+    public ProblemDetail handleForkPublish(com.ossagent.pullrequest.domain.ForkPublishException e) {
+        return problem(HttpStatus.BAD_GATEWAY, e.getMessage(), "FORK_PUBLISH");
+    }
+
+    /**
+     * 🔴 <b>S-1 게이트가 발화했다</b> — 쓰기 대상이 Fork 가 아니었다. 500 이 맞다(우리 코드나 설정의
+     * 결함이다). 그러나 <b>구분돼야 한다</b>: {@code GITHUB_FORK_OWNER} 가 비었을 때 정상 발화하는데
+     * 「서버 오류」로 보이면 운영자가 재시도하고, 그 재시도가 매번 같은 게이트에 부딪힌다.
+     */
+    @ExceptionHandler(com.ossagent.pullrequest.domain.UpstreamWriteAttemptException.class)
+    public ProblemDetail handleUpstreamWriteAttempt(
+            com.ossagent.pullrequest.domain.UpstreamWriteAttemptException e) {
+        ProblemDetail detail = problem(HttpStatus.INTERNAL_SERVER_ERROR,
+                "안전 게이트(S-1)가 원본 저장소 쓰기를 막았습니다 — 재시도하지 말고 github.fork.owner 설정과 로그를 확인하세요",
+                "S1_GATE");
+        detail.setTitle("Fork 밖 쓰기 차단");
+        return detail;
+    }
+
+    /** 워크스페이스 준비·적용 실패 — clone 끊김이면 잠시 뒤, upstream 이 움직였으면 다시 착수. 둘 다 「지금은 안 된다」다. */
+    @ExceptionHandler(com.ossagent.agent.domain.WorkspaceException.class)
+    public ResponseEntity<ProblemDetail> handleWorkspace(com.ossagent.agent.domain.WorkspaceException e) {
+        return retryLater(problem(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage(), "WORKSPACE"));
+    }
+
+    /** 샌드박스 일시 장애(이미지 없음·데몬 다운) — 준비되면 같은 요청이 성공한다. */
+    @ExceptionHandler(com.ossagent.agent.domain.SandboxTransientException.class)
+    public ResponseEntity<ProblemDetail> handleSandboxTransient(
+            com.ossagent.agent.domain.SandboxTransientException e) {
+        return retryLater(problem(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage(), "SANDBOX"));
+    }
+
+    /** 샌드박스가 이 요청을 처리할 수 없다 — 규약 명령·경로·빌드 도구 문제. 재시도해도 같다. */
+    @ExceptionHandler(com.ossagent.agent.domain.SandboxPermanentException.class)
+    public ProblemDetail handleSandboxPermanent(com.ossagent.agent.domain.SandboxPermanentException e) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage(), "SANDBOX");
+    }
+
+    /** LLM 전송 실패 — 재시도 상한을 소진한 뒤다. 잠시 뒤 다시. */
+    @ExceptionHandler(com.ossagent.agent.domain.LlmTransientException.class)
+    public ResponseEntity<ProblemDetail> handleLlmTransient(com.ossagent.agent.domain.LlmTransientException e) {
+        ProblemDetail detail = problem(HttpStatus.SERVICE_UNAVAILABLE,
+                "LLM 호출이 실패했습니다 (" + e.reason() + ") — 잠시 뒤 다시 요청하세요", "LLM");
+        long seconds = e.retryAfter().map(Duration::toSeconds).orElse(DEFAULT_RETRY_AFTER.toSeconds());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(Math.max(1, seconds)))
+                .body(detail);
+    }
+
+    /** 모델이 쓸 수 없는 응답을 냈다(절단·거부·잘못된 요청) — 우리 요청을 고쳐야 한다. */
+    @ExceptionHandler(com.ossagent.agent.domain.LlmPermanentException.class)
+    public ProblemDetail handleLlmPermanent(com.ossagent.agent.domain.LlmPermanentException e) {
+        return problem(HttpStatus.BAD_GATEWAY,
+                "LLM 응답을 쓸 수 없습니다 (" + e.reason() + ")", "LLM");
+    }
+
+    /** 계획 재생성 상한 소진 — 후보는 이미 {@code FAILED} 다. 409 가 아니다: 전이는 정상이었다. */
+    @ExceptionHandler(com.ossagent.candidate.application.PlanExhaustedException.class)
+    public ProblemDetail handlePlanExhausted(com.ossagent.candidate.application.PlanExhaustedException e) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage(), "PLAN_EXHAUSTED");
+    }
+
+    /** 규약에서 명령을 읽지 못해 검증을 시작조차 못 한다 — 사람이 규약을 채운다. */
+    @ExceptionHandler(com.ossagent.candidate.domain.VerificationSetupException.class)
+    public ProblemDetail handleVerificationSetup(com.ossagent.candidate.domain.VerificationSetupException e) {
+        return problem(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage(), "VERIFICATION_SETUP");
+    }
+
+    /** 토큰이 틀렸거나 스코프가 모자란다 — 우리 설정 문제이지 호출자 문제가 아니다. */
+    @ExceptionHandler({com.ossagent.support.github.GitHubAuthenticationException.class,
+            com.ossagent.support.github.GitHubPermissionException.class})
+    public ProblemDetail handleGitHubAuth(com.ossagent.support.github.GitHubApiException e) {
+        return problem(HttpStatus.BAD_GATEWAY,
+                "GitHub 이 요청을 거부했습니다 (status=" + e.status() + ") — GITHUB_TOKEN 과 스코프를 확인하세요",
+                "GITHUB_AUTH");
+    }
+
+    /** GitHub 5xx·타임아웃 — 전송 재시도를 소진한 뒤다. 잠시 뒤 다시. */
+    @ExceptionHandler(com.ossagent.support.github.GitHubTransientException.class)
+    public ResponseEntity<ProblemDetail> handleGitHubTransient(
+            com.ossagent.support.github.GitHubTransientException e) {
+        return retryLater(problem(HttpStatus.SERVICE_UNAVAILABLE,
+                "GitHub 호출이 실패했습니다 — 잠시 뒤 다시 요청하세요", "GITHUB"));
+    }
+
+    private static ProblemDetail problem(HttpStatus status, String detail, String reason) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
+        problem.setProperty("reason", reason);
+        return problem;
+    }
+
+    private static ResponseEntity<ProblemDetail> retryLater(ProblemDetail detail) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(DEFAULT_RETRY_AFTER.toSeconds()))
+                .body(detail);
+    }
 }

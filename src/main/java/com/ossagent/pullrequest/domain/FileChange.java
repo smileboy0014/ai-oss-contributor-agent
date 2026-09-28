@@ -61,7 +61,16 @@ public record FileChange(String path,
         } else if (content == null) {
             throw new IllegalArgumentException("파일 내용이 없습니다: " + path);
         } else {
-            content = TokenRedactor.redact(content);
+            // 🔴 가려서 올리지 않는다 — 걸리면 거부한다 (#111 · S-4). 이 값은 파일 **전체**이고 Fork 에
+            //    그대로 커밋된다. 우리가 안 건드린 줄의 정당한 리터럴이 ***REDACTED*** 로 바뀌어
+            //    나가면 사람이 쓰지 않은 변조가 Draft PR 에 실린다. 시크릿 모양이 든 파일은
+            //    올리지 않는 것이 맞고, 그것은 사람이 봐야 할 일이다
+            String scrubbed = TokenRedactor.redact(content);
+            if (!scrubbed.equals(content)) {
+                throw new IllegalArgumentException(
+                        "시크릿 패턴이 든 파일은 Fork 에 올리지 않는다 (S-4): " + path);
+            }
+            content = scrubbed;
         }
     }
 

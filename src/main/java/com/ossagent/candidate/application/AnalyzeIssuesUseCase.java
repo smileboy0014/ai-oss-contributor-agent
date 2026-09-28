@@ -203,6 +203,22 @@ public class AnalyzeIssuesUseCase {
                     candidateId, e.reason());
             writer.failAnalysis(candidateId);
             counter.failed++;
+        } catch (RuntimeException e) {
+            // 🔴 그 밖의 무엇이든 — 후보는 이미 ANALYZING 으로 커밋돼 있다 (#113). 여기서 빠져나가면
+            //    failAnalysis 를 아무도 부르지 않고 다음 실행은 findExistingIssueIds 로 건너뛰어
+            //    영구 ANALYZING 이다. 키가 없을 때의 DisabledLanguageModel(IllegalStateException)이
+            //    실제로 그 경로였다. 타입만 남긴다 — 예외 본문은 S-4 대상이다
+            log.warn("분석이 예외로 끝났다 candidateId={} type={} — FAILED",
+                    candidateId, e.getClass().getSimpleName());
+            try {
+                writer.failAnalysis(candidateId);
+            } catch (RuntimeException failFailed) {
+                // DB 자체가 죽은 경우다 — 다음 실행이 같은 이슈를 다시 보지 못하는 것은 남지만,
+                // 배치를 죽여서 얻는 것이 없다
+                log.error("후보를 FAILED 로 닫지 못했다 candidateId={} type={}",
+                        candidateId, failFailed.getClass().getSimpleName(), failFailed);
+            }
+            counter.failed++;
         } finally {
             MDC.remove("candidateId");
         }

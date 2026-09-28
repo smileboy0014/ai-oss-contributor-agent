@@ -103,6 +103,7 @@ public class CreateDraftPrUseCase {
     private final ForkPublisher forkPublisher;
     private final DraftPrPublisher draftPrs;
     private final TargetWorkspaceSource workspaces;
+    private final ImplementationRegistry implementations;
     private final PipelineMetrics metrics;
     private final Clock clock;
 
@@ -114,13 +115,14 @@ public class CreateDraftPrUseCase {
     public CreateDraftPrUseCase(CandidatePrWriter writer, FindAnalyzableIssuesUseCase issues,
             AnalyzeRepositoryPolicyUseCase policies, ForkPublisher forkPublisher,
             DraftPrPublisher draftPrs, ObjectProvider<TargetWorkspaceSource> workspaces,
-            PipelineMetrics metrics, Clock clock) {
+            ImplementationRegistry implementations, PipelineMetrics metrics, Clock clock) {
         this.writer = writer;
         this.issues = issues;
         this.policies = policies;
         this.forkPublisher = forkPublisher;
         this.draftPrs = draftPrs;
         this.workspaces = workspaces.getIfAvailable();
+        this.implementations = implementations;
         this.metrics = metrics;
         this.clock = clock;
     }
@@ -137,6 +139,8 @@ public class CreateDraftPrUseCase {
         if (candidateId == null) {
             throw new IllegalArgumentException("후보 식별자는 필수입니다");
         }
+        // 🔴 clone + GitHub 호출 ~8회가 뒤따른다. 호출자가 트랜잭션으로 감싸면 그 내내 커넥션이 잡힌다 (#116)
+        assertNoTransaction();
 
         // ── ① 읽기 ───────────────────────────────────────────────────
         CandidatePrWriter.PrSnapshot snapshot = writer.load(candidateId);
@@ -151,6 +155,12 @@ public class CreateDraftPrUseCase {
         //    ⚠ 「실무상 NOT NULL 이니 괜찮다」로 두면 PrTitle.forIssue 의 int 언박싱에서
         //      NullPointerException 이 나고, 그것은 「왜 PR 이 안 만들어지는지」를 말해주지 않는다.
         //      AnalyzableIssue 는 id·repositoryId 만 검증하므로 여기서 본다
+        // 🔴 같은 저장소의 착수가 돌고 있으면 그 워크스페이스를 지우게 된다 (#106) — 겹쳐 돌리지 않는다
+        if (implementations.isRepositoryBusy(issue.repositoryId())) {
+            throw new DraftPrException("같은 저장소의 다른 후보가 착수 중입니다 candidateId=" + candidateId
+                    + " — 워크스페이스는 저장소당 하나라 끝난 뒤 다시 요청하세요");
+        }
+
         if (issue.githubIssueNumber() == null) {
             throw new DraftPrException(
                     "이슈 번호를 알 수 없어 PR 을 만들 수 없습니다 candidateId=" + candidateId
@@ -285,6 +295,15 @@ public class CreateDraftPrUseCase {
             changes.add(new FileChange(path, readUtf8(file, path), false, Files.isExecutable(file)));
         }
         return changes;
+    }
+
+    private static void assertNoTransaction() {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager
+                .isActualTransactionActive()) {
+            throw new IllegalStateException(
+                    "PR 생성을 트랜잭션 안에서 부를 수 없다 — clone·GitHub 호출이 커넥션을 점유한다. "
+                            + "호출자의 @Transactional 을 제거한다 (architecture.md 규율)");
+        }
     }
 
     private static String readUtf8(Path file, String path) {

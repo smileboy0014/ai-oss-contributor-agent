@@ -99,7 +99,7 @@ class PlanImplementationUseCaseTest {
     void 검증을_통과한_계획을_한_번에_돌려준다() {
         planner.willReturn(goodPlan());
 
-        ImplementationPlan plan = useCase().plan(CANDIDATE_ID);
+        ImplementationPlan plan = useCase().plan(CANDIDATE_ID).plan();
 
         assertThat(plan.paths()).containsExactly(SHOWN);
         assertThat(planner.callCount()).isEqualTo(1);
@@ -125,7 +125,7 @@ class PlanImplementationUseCaseTest {
     void 검증에_걸리면_사유를_실어_다시_세운다() {
         planner.willReturn(planFor("src/main/java/org/x/Ghost.java")).willReturn(goodPlan());
 
-        ImplementationPlan plan = useCase().plan(CANDIDATE_ID);
+        ImplementationPlan plan = useCase().plan(CANDIDATE_ID).plan();
 
         assertThat(plan.paths()).containsExactly(SHOWN);
         assertThat(planner.callCount()).isEqualTo(2);
@@ -141,7 +141,7 @@ class PlanImplementationUseCaseTest {
     void 스키마_위반도_재생성_대상이다() {
         planner.willThrow(new PlanRejectedException("JSON 아님")).willReturn(goodPlan());
 
-        ImplementationPlan plan = useCase().plan(CANDIDATE_ID);
+        ImplementationPlan plan = useCase().plan(CANDIDATE_ID).plan();
 
         assertThat(plan.paths()).containsExactly(SHOWN);
         assertThat(planner.callCount())

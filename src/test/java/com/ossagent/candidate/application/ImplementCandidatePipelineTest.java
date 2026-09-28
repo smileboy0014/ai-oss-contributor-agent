@@ -180,7 +180,8 @@ class ImplementCandidatePipelineTest {
         given(writer.recordChange(anyLong(), anyString(), anyString())).willReturn(99L);
 
         PlanImplementationUseCase planner = mock(PlanImplementationUseCase.class);
-        given(planner.plan(CANDIDATE_ID)).willReturn(plan);
+        given(planner.plan(CANDIDATE_ID)).willReturn(
+                new PlanImplementationUseCase.PlannedImplementation(plan, context()));
 
         BuildRepositoryContextUseCase contexts = mock(BuildRepositoryContextUseCase.class);
         given(contexts.build(any())).willReturn(context());
@@ -199,7 +200,7 @@ class ImplementCandidatePipelineTest {
         CandidateRetryWriter retries = mock(CandidateRetryWriter.class);
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
-                contexts, policies, provider(workspaces), provider(new FakeCodingAgent(generatedPath)),
+                policies, provider(workspaces), provider(new FakeCodingAgent(generatedPath)),
                 provider(verifier), provider(reviewer), retries,
                 new ExecutionProperties(3, 1800),
                 new com.ossagent.support.observability.PipelineMetrics(

@@ -327,7 +327,8 @@ class ImplementCandidateRetryLoopTest {
         given(writer.recordChange(anyLong(), anyString(), anyString())).willReturn(99L);
 
         PlanImplementationUseCase planner = mock(PlanImplementationUseCase.class);
-        given(planner.plan(CANDIDATE_ID)).willReturn(plan);
+        given(planner.plan(CANDIDATE_ID)).willReturn(
+                new PlanImplementationUseCase.PlannedImplementation(plan, context()));
 
         BuildRepositoryContextUseCase contexts = mock(BuildRepositoryContextUseCase.class);
         given(contexts.build(any())).willReturn(context());
@@ -359,7 +360,7 @@ class ImplementCandidateRetryLoopTest {
         RecordingCodingAgent coder = new RecordingCodingAgent();
 
         ImplementCandidateUseCase useCase = new ImplementCandidateUseCase(writer, planner,
-                contexts, policies, provider(new FixedWorkspaceSource(workspace)),
+                policies, provider(new FixedWorkspaceSource(workspace)),
                 provider(coder), provider(verifier), provider(reviewer), retries,
                 new ExecutionProperties(MAX_ATTEMPTS, 1800),
                 new com.ossagent.support.observability.PipelineMetrics(

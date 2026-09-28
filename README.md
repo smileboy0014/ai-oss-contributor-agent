@@ -11,7 +11,7 @@ Java/Spring 오픈소스의 이슈를 탐색하고, 사람이 최종 승인하�
   규약 분석 → 이슈 증분 수집 → 규칙 필터 → LLM 분석까지 잇고 🔴 **`ANALYZED` 에서 멈춥니다**(S-6).
   정기 스캔은 기본 꺼짐(`SCAN_SCHEDULE_ENABLED`)
 - 기여 후보 조회 API: `GET /api/candidates` (상태·난이도·신뢰도 필터 + 페이지네이션) · `GET /api/candidates/{id}`
-- **사람의 승인 지점 셋**(S-6): `POST /api/candidates/{id}/select`(선정) · `…/implement`(착수) ·
+- **사람의 승인 지점 셋**(S-6): `POST /api/candidates/{id}/select`(선정) · `…/implement`(착수 — `202`, 루프는 백그라운드 · `GET …/implement` 진행 조회) ·
   `…/pull-request`(Draft PR 생성). 취소는 `…/reject`, 규약 보류 해소는 `POST /api/repositories/{id}/policy/resolution`.
   규약 문서가 침묵하는 빌드·테스트 명령은 사람이 `POST /api/repositories/{id}/policy/commands` 로 넣고(#102),
   저장소별 스캔 주기는 `PATCH /api/repositories/{id}/scan-interval` 로 정합니다(#108).

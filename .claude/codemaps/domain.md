@@ -83,7 +83,7 @@
 | `ANALYZED` | `REJECTED` ● | `implementation_feasible=false` · `breaking_change=true` · **`confidence < agent.analysis.min-confidence`**(#11) | 시스템 |
 | `ANALYZED` | `SELECTED` | **사람이 고른다** — `POST /candidates/{id}/select` | **사람** |
 | `SELECTED` | `REJECTED` ● | **사람이 선택을 취소한다** — `POST /candidates/{id}/reject`. 🔴 `cancelSelection` 이 출발 상태를 **직접** 본다 — 전이표에는 `ANALYZED → REJECTED` 도 있어서 맡겨 두면 `rejectAsInfeasible`(시스템 판정)과 같은 것이 된다 | **사람** |
-| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`, #18). 🔴 계획·컨텍스트·clone 은 **이 전이 앞**에서 돈다 — 그 구간의 레이트리밋은 503 + `Retry-After` 이고 후보는 `SELECTED` 그대로다(지연 ≠ 실패) | **사람이 트리거** |
+| `SELECTED` | `IMPLEMENTING` | 구현 요청 (`POST /candidates/{id}/implement`, #18) — 🔴 **202** · 전이는 사람이 누른 요청 안에서, 계획·clone·워밍·루프는 **백그라운드**(#106, `GET …/implement` 진행 조회 · 같은 저장소는 겹쳐 돌지 않는다 409). 준비 구간의 레이트리밋·일시 장애·정책 변경은 **미룸**(#98)으로 `SELECTED` 복귀 — 지연 ≠ 실패 | **사람이 트리거** |
 | `SELECTED` | `FAILED` ● | **구현 계획을 세우지 못했다** — `agent.plan.max-attempts` 소진 (#16). `REJECTED` 가 아니다: 그쪽은 사람의 선택 취소다 | 시스템 |
 | `IMPLEMENTING` | `TESTING` | 코드 생성 완료 | 시스템 |
 | `TESTING` | `REVIEWING` | 빌드·테스트 통과 | 시스템 |

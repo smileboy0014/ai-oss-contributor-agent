@@ -99,7 +99,8 @@ class CreateDraftPrUseCaseTest {
         workspaces = new FakeWorkspaceSource(newWorkspace());
 
         useCase = new CreateDraftPrUseCase(writer, issues, policies, forks, draftPrs,
-                provider(workspaces), new PipelineMetrics(new SimpleMeterRegistry()),
+                provider(workspaces), new ImplementationRegistry(Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)),
+                new PipelineMetrics(new SimpleMeterRegistry()),
                 Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
     }
 

@@ -1,6 +1,12 @@
 spring:
   application:
     name: ai-oss-contributor-agent
+  task:
+    execution:
+      # 🔴 우리가 Executor 빈(scanTaskExecutor 등)을 등록하면 Boot 는 applicationTaskExecutor 를
+      #    만들지 않는다. 그러면 자격(qualifier) 없는 @Async 가 무제한 SimpleAsyncTaskExecutor 로
+      #    조용히 떨어진다. force 로 두면 Boot 의 유계 실행기가 함께 뜬다 (#116 · Boot 3.5)
+      mode: force
   datasource:
     url: ${DATABASE_URL:jdbc:h2:mem:oss-agent;MODE=PostgreSQL;DB_CLOSE_DELAY=-1}
     username: ${DATABASE_USERNAME:sa}
@@ -188,7 +194,10 @@ sandbox:
   warm-network: ${SANDBOX_WARM_NETWORK:oss-agent-warm}
   # 🔴 바인드 허용 루트. 비어 있으면 「모든 경로가 루트 하위」가 되어 경로 제한이 무력해진다.
   #    구체적인 기본 루트는 위반이 아니다 — 위반은 루트가 「없는」 것이다.
-  #    상대경로면 기동 시점에 절대경로로 확정하고, 없으면 만든다
+  #    상대경로면 기동 시점에 절대경로로 확정하고, 없으면 만든다.
+  #    ⚠ 상대경로는 **JVM 의 작업 디렉토리** 기준이다 — jar 를 / 에서 띄우면 /build/… 가 된다.
+  #      배포에서는 절대경로를 준다. 깊이 2 이상이어야 한다(/data 는 거부, /data/oss-agent 는 통과) —
+  #      한 단계짜리 경로는 대개 시스템 디렉토리라 SandboxWorkspace 가 기동에서 막는다 (#116)
   workspace-root: ${SANDBOX_WORKSPACE_ROOT:build/sandbox-workspaces}
   cpu-limit: ${SANDBOX_CPU_LIMIT:2}
   # ⚠ 단위 필수. 단위 없는 값은 DataSize 에 바인딩되지 않는다
@@ -225,7 +234,8 @@ scan:
     #      태우지 않는다 — 오히려 주기 필터가 GitHub 호출을 **줄인다**(NFR-1)
     fixed-delay: 10m
     initial-delay: 5m
-  # 저장소별 주기(oss_repository.scan_interval_minutes)가 없을 때 쓰는 기본 주기 — FR-1
+  # 저장소별 주기(oss_repository.scan_interval_minutes)가 없을 때 쓰는 기본 주기 — FR-1.
+  # 저장소별 값은 PATCH /api/repositories/{id}/scan-interval 로 정한다 (#108)
   default-interval: 1h
   # 🔴 스캔 자리를 붙들 수 있는 시간. 지나면 다른 인스턴스가 뺏어 간다 — FR-4
   #
@@ -246,7 +256,14 @@ scan:
 agent:
   execution:
     max-attempts: 3
+    # 🔴 한 바퀴(CODE→VERIFY→REVIEW)의 벽시계 상한. 전체 착수 상한이 아니다 — 바퀴마다 센다
     timeout-seconds: 1800
+    # 🔴 착수는 비동기다 (#106) — POST /implement 는 전이(SELECTED→IMPLEMENTING)만 끝내고 202 로 돌아온다.
+    #    루프는 이 풀에서 돈다. 진행은 GET /api/candidates/{id}/implement.
+    #    ⚠ 워크스페이스가 저장소당 하나라 같은 저장소의 착수는 겹쳐 돌지 않는다(409) — 올려도 그 제약은 그대로다
+    max-concurrent: 1
+    # 차면 409 이고 후보는 SELECTED 로 되돌아간다 — 무한 큐는 「쌓이는 줄 모르는」 상태를 만든다
+    queue-capacity: 4
   # 이슈 분석(#11) — PRD §11. LLM 호출 1건 = 후보 1건이다
   analysis:
     # 한 번에 집어 오는 분석 대상 이슈 수 (PASSED · UNDECIDED)
@@ -282,6 +299,12 @@ agent:
     # 파일 7개짜리 무관한 계획이 max-planned-files(8)를 그대로 통과한다.
     # ⚠ 1.0 으로 조이지 않는다. 추정은 추정이고, 정밀도가 아니라 scope creep 이 목표다
     scope-tolerance: 2.0
+  # AI diff 리뷰(#20) — PRD §15. 값이 없으면 DiffReviewProperties 의 기본값(60000 · 4000)이다.
+  # 여기 적어 두는 이유는 「살아 있는 상한이 설정에 보이게」다 (#116)
+  review:
+    # 🔴 넘으면 자르지 않고 거부한다 — 잘린 diff 를 리뷰하면 「본 것만」 판정한다
+    max-diff-chars: 60000
+    max-output-tokens: 4000
   # 코딩(#18) — PRD §14. 계획대로 파일 **전체 내용**을 만든다
   coding:
     # 🔴 계획(4,000)보다 훨씬 커야 한다 — 여기서 돌려받는 것은 목록이 아니라 **파일 본문**이다.
@@ -347,9 +370,9 @@ agent:
     # ⚠ input 만 적고 output 을 빠뜨리면 기동에 실패한다 — 한쪽만 적힌 단가는
     #   그 방향이 공짜인 장부를 만든다.
     # ⚠ 환경변수로 주기 어렵다(모델 ID 의 '-' 때문). 필요하면 실행 인자로 준다 —
-    #   --agent.llm.pricing.claude-sonnet-5.input=3.00
+    #   --agent.llm.pricing.claude-sonnet-5.input=2.00
     #
     # pricing:
     #   claude-sonnet-5:
-    #     input: 3.00
-    #     output: 15.00
+    #     input: 2.00
+    #     output: 10.00

@@ -310,6 +310,13 @@ public class ApiExceptionHandler {
                 "GitHub 호출이 실패했습니다 — 잠시 뒤 다시 요청하세요", "GITHUB"));
     }
 
+    /** 착수가 이미 진행 중이거나 같은 저장소가 바쁘거나 큐가 찼다 — 409 (#106). 잠시 뒤 다시. */
+    @ExceptionHandler(com.ossagent.candidate.domain.ImplementationAlreadyRunningException.class)
+    public ProblemDetail handleImplementationAlreadyRunning(
+            com.ossagent.candidate.domain.ImplementationAlreadyRunningException e) {
+        return problem(HttpStatus.CONFLICT, e.getMessage(), e.reason().name());
+    }
+
     private static ProblemDetail problem(HttpStatus status, String detail, String reason) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
         problem.setProperty("reason", reason);

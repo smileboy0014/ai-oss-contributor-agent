@@ -22,7 +22,6 @@ import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.VerificationReport;
 import com.ossagent.candidate.domain.VerificationRequest;
 import com.ossagent.repository.application.AnalyzeRepositoryPolicyUseCase;
-import com.ossagent.repository.application.BuildRepositoryContextUseCase;
 import com.ossagent.repository.domain.ContributionConstraints;
 import com.ossagent.repository.domain.RepositoryCoordinates;
 import com.ossagent.support.observability.PipelineMetrics;
@@ -97,7 +96,6 @@ public class ImplementCandidateUseCase {
 
     private final CandidateImplementationWriter writer;
     private final PlanImplementationUseCase planner;
-    private final BuildRepositoryContextUseCase contexts;
     private final AnalyzeRepositoryPolicyUseCase policies;
     private final TargetWorkspaceSource workspaces;
     private final CodingAgent codingAgent;
@@ -120,7 +118,6 @@ public class ImplementCandidateUseCase {
      */
     public ImplementCandidateUseCase(CandidateImplementationWriter writer,
             PlanImplementationUseCase planner,
-            BuildRepositoryContextUseCase contexts,
             AnalyzeRepositoryPolicyUseCase policies,
             ObjectProvider<TargetWorkspaceSource> workspaces,
             ObjectProvider<CodingAgent> codingAgents,
@@ -136,7 +133,6 @@ public class ImplementCandidateUseCase {
         this.metrics = metrics;
         this.clock = clock;
         this.planner = planner;
-        this.contexts = contexts;
         this.policies = policies;
         // 🔴 셋 다 대역 프로필에서 빠질 수 있다(@ExternalAdapter · @Profile("!fakes")).
         //    getIfAvailable 로 받아 **없으면 착수를 시작하지 않는다** — executorReady() 참조
@@ -203,14 +199,15 @@ public class ImplementCandidateUseCase {
         Long candidateId = admission.candidateId();
         MDC.put(MDC_STAGE, "PLAN");
         Instant planStart = clock.instant();
-        ImplementationPlan plan;
+        PlanImplementationUseCase.PlannedImplementation planned;
         try {
-            plan = planner.plan(candidateId);
+            planned = planner.plan(candidateId);
         } catch (RuntimeException e) {
             stageDone(PipelineStage.PLAN, false, planStart);
             throw e;
         }
         stageDone(PipelineStage.PLAN, true, planStart);
+        ImplementationPlan plan = planned.plan();
 
         RepositoryCoordinates coordinates = policies.coordinatesOf(admission.repositoryId());
         ContributionConstraints constraints = policies.constraintsOf(admission.repositoryId());
@@ -225,9 +222,60 @@ public class ImplementCandidateUseCase {
         //    여기서 나는 예외는 전이 앞이라 후보를 건드리지 않는다
         MDC.put(MDC_STAGE, "VERIFY");
         verifier.prepare(candidateId, coordinates, workspace.path(), constraints);
-        CodingInput input = new CodingInput(plan, contexts.build(admission.issue()), constraints);
+        // 🔴 계획이 본 컨텍스트를 그대로 쓴다 — 다시 만들면 GitHub 호출이 두 배다 (#116)
+        CodingInput input = new CodingInput(plan, planned.context(), constraints);
 
         return new Prepared(plan, coordinates, constraints, branch, workspace, input);
+    }
+
+    /**
+     * 🔴 <b>전이 뒤</b>의 구간 — 백그라운드에서 돈다 (#106). {@code ImplementExecutor} 가 부른다.
+     *
+     * <p>{@link #implement} 와 순서가 다르다: 저쪽은 준비 → 전이(동기 경로 · 테스트가 쓴다), 이쪽은
+     * 이미 전이한 후보를 받아 준비 → 루프다. 준비 실패는 이제 「전이 앞」이 아니므로 후보를 건드려야 한다 —
+     * <b>일시 장애·리밋·정책 변경은 미룸(SELECTED)</b>이고(#98), 그 밖은 {@code FAILED} 다.
+     * 계획 상한 소진은 {@code PlanImplementationUseCase} 가 이미 {@code FAILED} 로 닫았다.
+     */
+    public void continueAfterStart(CandidateImplementationWriter.ImplementationStart start) {
+        Long candidateId = start.candidateId();
+        MDC.put(MDC_CANDIDATE_ID, String.valueOf(candidateId));
+        MDC.put(MDC_ATTEMPT, String.valueOf(start.attempt()));
+        try {
+            Prepared prepared;
+            try {
+                prepared = prepare(new CandidateImplementationWriter.Admission(candidateId, start.issue()));
+            } catch (PlanExhaustedException e) {
+                throw e;   // failPlanning 이 이미 IMPLEMENTING → FAILED 로 닫았다
+            } catch (RuntimeException e) {
+                if (isDeferrable(e)) {
+                    String reason = "착수 준비 중 일시 장애 (" + e.getClass().getSimpleName() + ")";
+                    retries.defer(candidateId, start.attempt(), AgentRun.Stage.CODE, reason);
+                    throw new ImplementationDeferredException(candidateId, reason);
+                }
+                retries.fail(candidateId, start.attempt(), AgentRun.Stage.CODE,
+                        "착수 준비 실패 (" + e.getClass().getSimpleName() + ")");
+                throw e;
+            }
+            runOutsideTransaction(start, prepared);
+        } finally {
+            MDC.remove(MDC_CANDIDATE_ID);
+            MDC.remove(MDC_STAGE);
+            MDC.remove(MDC_ATTEMPT);
+        }
+    }
+
+    /**
+     * 준비 단계에서 「준비되면 같은 요청이 성공한다」인 실패 — 미룬다.
+     * {@code RetryPolicy} 의 화이트리스트에 GitHub 쪽(리밋·5xx)을 더한다.
+     *
+     * <p>⚠️ 규약이 그 사이 닫힌 것(S-5 게이트)은 <b>미루지 않는다.</b> 기다리면 풀리는 종류가
+     * 아니라 사람이 해소해야 하는 것이고, 그 예외 타입은 {@code repository} 애그리거트의 것이라
+     * 여기서 볼 수도 없다({@code ApprovalGateArchitectureTest}). {@code FAILED} 로 떨어져 사람에게 간다.
+     */
+    private static boolean isDeferrable(RuntimeException e) {
+        return RetryPolicy.isTransient(e)
+                || e instanceof com.ossagent.support.github.GitHubRateLimitException
+                || e instanceof com.ossagent.support.github.GitHubTransientException;
     }
 
     /** {@link #prepare} 의 산출 — 루프가 바퀴마다 다시 만들지 않는 것들. */
@@ -508,7 +556,7 @@ public class ImplementCandidateUseCase {
      * <p>코딩까지는 검증기 없이도 돌지만, 그러면 <b>LLM 토큰과 clone 비용을 태우고</b>
      * 검증 없이 멈춘다. 사람이 그 버튼을 눌러 얻는 것이 없다.
      */
-    private boolean executorReady() {
+    public boolean executorReady() {
         return workspaces != null && codingAgent != null && verifier != null && reviewer != null;
     }
 

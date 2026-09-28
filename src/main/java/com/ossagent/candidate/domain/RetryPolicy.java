@@ -219,7 +219,7 @@ public final class RetryPolicy {
      * {@code WorkspaceException} 은 자기 javadoc 이 「우리가 작업을 수행하지 못한 경우 —
      * 네트워크·권한·경로. 재시도 루프의 「코드가 깨졌다」로 세지 않는다」고 못 박아 두었다.
      */
-    private static boolean isTransient(RuntimeException failure) {
+    public static boolean isTransient(RuntimeException failure) {
         if (failure instanceof SandboxException sandbox) {
             return sandbox.retryable();
         }

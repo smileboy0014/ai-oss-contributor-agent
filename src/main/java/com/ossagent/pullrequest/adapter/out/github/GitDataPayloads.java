@@ -99,6 +99,17 @@ final class GitDataPayloads {
     }
 
     /** {@code POST /merge-upstream} */
+    /**
+     * {@code POST /repos/{upstream}/forks} 본문 (#107).
+     *
+     * <p>{@code default_branch_only} — 브랜치 전부를 복사하면 비동기 준비 시간이 그만큼 길다. 우리는
+     * 기준 브랜치 하나에 우리 브랜치를 얹을 뿐이다. {@code name} 은 같은 이름의 무관한 저장소가 이미
+     * 있을 때만 준다 — REST API 는 웹 UI 와 달리 {@code {name}-1} 로 알아서 바꿔 주지 않는다.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    record ForkRequest(String name, boolean default_branch_only) {
+    }
+
     record MergeUpstreamRequest(String branch) {
     }
 

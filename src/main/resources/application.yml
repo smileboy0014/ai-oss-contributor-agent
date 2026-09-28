@@ -123,8 +123,10 @@ github:
     #      남의 저장소 히스토리 오염(되돌릴 수 없다)이다
     owner: ${GITHUB_FORK_OWNER:}
     # POST /repos/{o}/{r}/forks 는 202 라 저장소가 아직 없을 수 있다. 무한 대기를 만들지 않는다
-    ready-timeout: 30s
-    ready-poll-interval: 2s
+    # 🔴 GitHub 문서: 「5분 넘게 걸리면 지원에 문의」. 30초는 spring-kafka 첫 fork 에 모자랐다 (#107).
+    #    준비 판정은 저장소 레코드가 아니라 기준 브랜치의 git ref 다 — 레코드가 먼저 200 이 된다
+    ready-timeout: 5m
+    ready-poll-interval: 5s
     # 대상 저장소에 나가는 커밋의 author·committer 이자 DCO sign-off 의 서명자 — S-5.
     # ⚠ GET /user 로 받지 않는다. public_repo 스코프로는 비공개 이메일을 받지 못해
     #   sign-off 가 noreply 주소로 나가고 대상 저장소의 DCO 검사에서 걸린다.

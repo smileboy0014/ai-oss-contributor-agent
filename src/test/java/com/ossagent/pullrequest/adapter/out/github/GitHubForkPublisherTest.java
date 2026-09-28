@@ -99,24 +99,48 @@ class GitHubForkPublisherTest {
     }
 
     @Test
-    @DisplayName("같은 이름이지만 이 upstream 의 fork 가 아니면 재사용하지 않는다")
+    @DisplayName("같은 이름이지만 이 upstream 의 fork 가 아니면 이름을 명시해 새로 만든다")
     void 같은_이름의_무관한_저장소를_재사용하지_않는다() {
         // 🔴 owner 어설션은 통과한다 — owner 가 실제로 우리다. 여기서만 잡힌다.
+        String renamed = REPO + GitHubForkPublisher.CONFLICT_SUFFIX;
         server.expect(once(), requestTo(FORK))
                 .andRespond(withSuccess(forkJson(false, null), MediaType.APPLICATION_JSON));
         server.expect(once(), requestTo(BASE + "/repos/spring-projects/" + REPO + "/forks"))
                 .andExpect(method(HttpMethod.POST))
-                .andRespond(withSuccess("{\"full_name\":\"" + OWNER + "/" + REPO + "-1\"}",
-                        MediaType.APPLICATION_JSON));
-        server.expect(once(), requestTo(BASE + "/repos/" + OWNER + "/" + REPO + "-1"))
-                .andRespond(withSuccess(forkJson(true, "spring-projects/" + REPO),
-                        MediaType.APPLICATION_JSON));
+                // 🔴 REST API 는 웹 UI 와 달리 {name}-1 로 알아서 바꿔 주지 않는다 — 우리가 name 을 준다 (#107)
+                .andExpect(content().string(Matchers.containsString("\"name\":\"" + renamed + "\"")))
+                .andExpect(content().string(Matchers.containsString("\"default_branch_only\":true")))
+                .andRespond(withSuccess("{\"full_name\":\"" + OWNER + "/" + renamed
+                                + "\",\"default_branch\":\"main\"}", MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo(BASE + "/repos/" + OWNER + "/" + renamed + "/git/ref/heads/main"))
+                .andRespond(withSuccess("{\"object\":{\"sha\":\"c0\"}}", MediaType.APPLICATION_JSON));
 
         ForkRef fork = publisher.ensureFork(UPSTREAM);
 
-        assertThat(fork.name())
-                .as("GitHub 은 이름이 충돌하면 {name}-1 을 만든다. 우리가 이름을 조립하면 영원히 못 찾는다")
-                .isEqualTo(REPO + "-1");
+        assertThat(fork.name()).isEqualTo(renamed);
+        server.verify();
+    }
+
+    /**
+     * 🔴 준비 판정은 저장소 레코드가 아니라 <b>git ref</b> 다 (#107). 레코드는 객체 복사보다 먼저 200 이
+     * 되고, 그때 push 하면 409 「Git Repository is empty」로 죽었다.
+     */
+    @Test
+    @DisplayName("Fork 는 기준 브랜치 ref 가 읽힐 때 준비된 것이다 — 저장소 레코드가 아니다")
+    void 준비_판정은_git_ref_다() {
+        server.expect(once(), requestTo(FORK)).andRespond(withStatus(HttpStatus.NOT_FOUND));
+        server.expect(once(), requestTo(BASE + "/repos/spring-projects/" + REPO + "/forks"))
+                .andRespond(withSuccess("{\"full_name\":\"" + OWNER + "/" + REPO
+                                + "\",\"default_branch\":\"main\"}", MediaType.APPLICATION_JSON));
+        // 첫 확인: 레코드는 있는데 객체가 아직이다(409) → 두 번째 확인에 ref 가 읽힌다
+        server.expect(once(), requestTo(FORK + "/git/ref/heads/main"))
+                .andRespond(withStatus(HttpStatus.CONFLICT).body("{\"message\":\"Git Repository is empty.\"}"));
+        server.expect(once(), requestTo(FORK + "/git/ref/heads/main"))
+                .andRespond(withSuccess("{\"object\":{\"sha\":\"c0\"}}", MediaType.APPLICATION_JSON));
+
+        ForkRef fork = publisher.ensureFork(UPSTREAM);
+
+        assertThat(fork.fullName()).isEqualTo(OWNER + "/" + REPO);
         server.verify();
     }
 
@@ -229,9 +253,14 @@ class GitHubForkPublisherTest {
         server.verify();
     }
 
+    /**
+     * 🔴 지난 push 의 응답이 유실되면 GitHub 엔 브랜치가 있는데 우리 DB 엔 commitSha 가 없다 (#110).
+     * 초안은 여기서 영구 422 였고 유일한 탈출이 DB 수정·브랜치 삭제였다. 우리 Fork 안의 우리
+     * 이름공간(oss-agent/*)이라 덮어써도 남의 것이 아니다 — 갱신으로 보고한다.
+     */
     @Test
-    @DisplayName("브랜치가 이미 있으면(422) 조용히 덮지 않는다")
-    void 중복_브랜치를_조용히_덮지_않는다() {
+    @DisplayName("브랜치가 이미 있으면(422) force 로 갱신하고 updated 로 보고한다 — 응답 유실 복구")
+    void 중복_브랜치는_갱신으로_복구한다() {
         expectBaseReads();
         server.expect(once(), requestTo(FORK + "/git/blobs"))
                 .andRespond(withSuccess("{\"sha\":\"blob1\"}", MediaType.APPLICATION_JSON));
@@ -240,12 +269,19 @@ class GitHubForkPublisherTest {
         server.expect(once(), requestTo(FORK + "/git/commits"))
                 .andRespond(withSuccess("{\"sha\":\"commit1\"}", MediaType.APPLICATION_JSON));
         server.expect(once(), requestTo(FORK + "/git/refs"))
+                .andExpect(method(HttpMethod.POST))
                 .andRespond(withStatus(HttpStatus.UNPROCESSABLE_ENTITY).body("{}"));
+        server.expect(once(), requestTo(FORK + "/git/refs/heads/oss-agent/issue-1-x"))
+                .andExpect(method(HttpMethod.PATCH))
+                .andExpect(content().string(Matchers.containsString("\"force\":true")))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        assertThatThrownBy(() -> publisher.publish(
-                request(List.of(FileChange.modified("a.java", "x")), false)))
-                .as("같은 브랜치에 두 번 올리는 것은 재시도라는 뜻이고, 그 판단은 호출자가 명시해야 한다")
-                .isInstanceOf(ForkPublishException.class);
+        PublishedBranch published = publisher.publish(
+                request(List.of(FileChange.modified("a.java", "x")), false));
+
+        assertThat(published.updated()).as("조용히 넘기지 않는다 — 갱신했다고 보고한다").isTrue();
+        assertThat(published.commitSha()).isEqualTo("commit1");
+        server.verify();
     }
 
     @Test

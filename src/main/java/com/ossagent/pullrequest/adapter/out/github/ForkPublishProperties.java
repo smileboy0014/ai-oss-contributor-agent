@@ -37,8 +37,9 @@ public record ForkPublishProperties(
         String authorName,
         String authorEmail) {
 
-    private static final Duration DEFAULT_READY_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration DEFAULT_READY_POLL_INTERVAL = Duration.ofSeconds(2);
+    // 🔴 GitHub 문서는 「5분 넘게 걸리면 지원에 문의하라」고 적는다 — 30초는 spring-kafka 첫 fork 에 모자랐다 (#107)
+    private static final Duration DEFAULT_READY_TIMEOUT = Duration.ofMinutes(5);
+    private static final Duration DEFAULT_READY_POLL_INTERVAL = Duration.ofSeconds(5);
 
     public ForkPublishProperties {
         owner = owner == null ? "" : owner.trim();

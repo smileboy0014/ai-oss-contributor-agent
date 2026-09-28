@@ -2,6 +2,7 @@ package com.ossagent.support.web;
 
 import com.ossagent.candidate.domain.CandidateNotFoundException;
 import com.ossagent.candidate.domain.CandidateTransitionException;
+import com.ossagent.candidate.domain.ImplementationDeferredException;
 import com.ossagent.candidate.domain.ImplementationNotReadyException;
 import com.ossagent.repository.domain.ContributionNotAllowedException;
 import com.ossagent.repository.domain.PolicyResolutionRejectedException;
@@ -188,5 +189,22 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ImplementationNotReadyException.class)
     public ProblemDetail handleImplementationNotReady(ImplementationNotReadyException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+    }
+
+    /**
+     * 🔴 착수가 <b>일시 장애로 미뤄졌다</b> — 503 + {@code Retry-After} (#98 · S-6).
+     *
+     * <p>후보는 {@code SELECTED} 로 되돌아가 있다. 실패가 아니라 <b>지연</b>이라 레이트리밋과 같은
+     * 모양으로 준다 — 4xx 로 주면 호출자가 자기 요청을 고치려 들고, 500 으로 주면 「서버 고장」으로
+     * 읽고 재시도 시점을 모른다.
+     */
+    @ExceptionHandler(ImplementationDeferredException.class)
+    public ResponseEntity<ProblemDetail> handleImplementationDeferred(ImplementationDeferredException e) {
+        ProblemDetail detail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+        detail.setProperty("candidateId", e.candidateId());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(DEFAULT_RETRY_AFTER.toSeconds()))
+                .body(detail);
     }
 }

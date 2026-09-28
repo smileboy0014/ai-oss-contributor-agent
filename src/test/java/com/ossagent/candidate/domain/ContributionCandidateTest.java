@@ -300,6 +300,29 @@ class ContributionCandidateTest {
                 .isEqualTo(1);
     }
 
+    /**
+     * 🔴 일시 장애는 종단이 아니다 (#98). 이미지 없음·데몬 다운은 후보의 코드와 무관하다.
+     * {@code selectedAt} 이 살아 있어야 한다 — 사람이 골랐다는 사실은 그대로이고, 다시 누르는 것이 게이트다.
+     */
+    @Test
+    @DisplayName("일시 장애로 미루면 SELECTED 로 되돌아가고 attempt 는 0 · selectedAt 은 그대로다 — S-6")
+    void 일시_장애는_SELECTED_로_되돌린다_S6() {
+        ContributionCandidate candidate = implementing();
+        candidate.startTesting(clock());
+        Instant selectedAt = candidate.getSelectedAt();
+
+        StatusTransition transition = candidate.deferImplementation(clock());
+
+        assertThat(transition).isEqualTo(
+                new StatusTransition(CandidateStatus.TESTING, CandidateStatus.SELECTED));
+        assertThat(candidate.isTerminal()).isFalse();
+        assertThat(candidate.getAttempt()).as("SELECTED 는 착수 전이라 0 이어야 한다").isZero();
+        assertThat(candidate.getSelectedAt()).as("사람이 골랐다는 증거는 지우지 않는다").isEqualTo(selectedAt);
+        // 다시 누르면 첫 바퀴부터 — 공정한 세 바퀴를 다시 받는다
+        candidate.startImplementing(clearance(), MAX_ATTEMPTS, clock());
+        assertThat(candidate.getAttempt()).isEqualTo(1);
+    }
+
     // ─────────────────────── 불변식 ⑧ 재시도 상한 ───────────────────────
 
     @Test

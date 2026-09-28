@@ -58,12 +58,18 @@ public enum CandidateStatus {
         //    「사람이 안 고른 것」이 아니라 「기계가 못 한 것」이다
         SELECTED.allowedNext = setOf(IMPLEMENTING, REJECTED, FAILED);
 
-        IMPLEMENTING.allowedNext = setOf(TESTING, FAILED);
+        // 🔴 루프 셋 → SELECTED 는 「일시 장애로 미룬다」다 — #98.
+        //    이미지 없음·데몬 다운·LLM 5xx·clone 끊김은 후보의 코드와 무관하고 준비되면 같은
+        //    요청이 성공한다. FAILED 로 보내면 인프라 장애 한 번이 후보를 영구히 지운다 —
+        //    되돌릴 수 없는 쪽으로 실패하는 구조다. 되돌아간 후보는 사람이 implement 를
+        //    다시 누른다 — 그것이 게이트이고 자동 재시도가 아니다 (S-6).
+        //    ⚠ selectedAt 은 건드리지 않는다. 「사람이 골랐다」는 사실은 그대로다
+        IMPLEMENTING.allowedNext = setOf(TESTING, SELECTED, FAILED);
 
         // TESTING·REVIEWING → IMPLEMENTING 이 「구현→검증→리뷰」 루프다.
         // 이 되돌아감 한 번이 attempt 1 을 태운다 — Q-6
-        TESTING.allowedNext = setOf(REVIEWING, IMPLEMENTING, FAILED);
-        REVIEWING.allowedNext = setOf(READY_FOR_PR, IMPLEMENTING, FAILED);
+        TESTING.allowedNext = setOf(REVIEWING, IMPLEMENTING, SELECTED, FAILED);
+        REVIEWING.allowedNext = setOf(READY_FOR_PR, IMPLEMENTING, SELECTED, FAILED);
 
         READY_FOR_PR.allowedNext = setOf(PR_CREATED);
 

@@ -171,7 +171,9 @@ sandbox:
   # 🔴 S-3 의 실행체 설정 (#17). 네트워크는 여기 없다 — 명령 타입이 정한다.
   #    SANDBOX_NETWORK 를 키로 두면 실행 단계 격리가 배포 설정 한 줄로 꺼진다
   docker-api-version: ${SANDBOX_DOCKER_API_VERSION:1.44}
-  default-image: ${SANDBOX_DOCKER_IMAGE:eclipse-temurin:21-jdk}
+  # 🔴 stock eclipse-temurin 이 아니다 — git 이 없어 검증의 DIFF 단계가 컨테이너 기동에서 죽는다 (#97).
+  #    docker/sandbox/build.sh 로 미리 빌드한다. 앱은 pull 도 build 도 하지 않는다
+  default-image: ${SANDBOX_DOCKER_IMAGE:oss-agent-sandbox:21}
   # 워밍 전용 네트워크. host·container:<id>·bridge 는 코드가 거부한다
   warm-network: ${SANDBOX_WARM_NETWORK:oss-agent-warm}
   # 🔴 바인드 허용 루트. 비어 있으면 「모든 경로가 루트 하위」가 되어 경로 제한이 무력해진다.

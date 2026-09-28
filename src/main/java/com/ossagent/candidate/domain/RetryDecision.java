@@ -3,9 +3,12 @@ package com.ossagent.candidate.domain;
 /**
  * 한 바퀴가 끝난 뒤 <b>무엇을 할 것인가</b> — #21.
  *
- * <p>{@code sealed} 인 이유는 {@link RetryPolicy} 의 판정이 <b>세 갈래뿐</b>이라는 것을
+ * <p>{@code sealed} 인 이유는 {@link RetryPolicy} 의 판정이 <b>네 갈래뿐</b>이라는 것을
  * 타입으로 말하기 위해서다. 호출자가 {@code switch} 로 받으면 {@code default} 없이
  * 컴파일되고, 갈래가 늘면 <b>호출부가 깨진다</b> — 그것이 목적이다.
+ *
+ * <p>⚠️ 원래 셋이었다. {@link Defer} 는 #98 이 더했다 — 「멈춘다」가 곧 「종단」이던 시절엔
+ * Docker 데몬이 잠깐 죽은 것도 후보를 영구히 태웠다.
  *
  * <p>⚠️ <b>여기에 「왜」를 담지만 「무엇을」은 담지 않는다.</b> 전이를 부르는 것은
  * {@code application} 이다 — 도메인 값이 {@code candidate.retryImplementation(...)} 을
@@ -64,6 +67,31 @@ public sealed interface RetryDecision {
             if (reason == null || reason.isBlank()) {
                 // 사유 없는 종단은 사람이 볼 것이 없다 — FAILED 가 「신호」인 이유가 사라진다
                 throw new IllegalArgumentException("종단 사유는 필수다 — FAILED 는 되돌릴 수 없다");
+            }
+        }
+    }
+
+    /**
+     * 미룬다 — {@code IMPLEMENTING·TESTING·REVIEWING → SELECTED}. <b>후보를 태우지 않는다</b> (#98).
+     *
+     * <p>🔴 {@link Stop} 과 가르는 축은 <b>「실패의 원인이 우리 쪽인가」</b>다. 이미지가 없다 ·
+     * 데몬이 죽었다 · LLM 이 5xx 를 낸다 · clone 이 끊겼다 — 어느 것도 후보의 코드와 무관하고
+     * <b>준비되면 같은 요청이 성공한다.</b> 그것을 종단 {@code FAILED} 로 보내면 인프라 장애 한 번이
+     * 후보를 영구히 지운다 — 되돌릴 수 없는 쪽으로 실패하는 구조다({@code external-deps.md}).
+     *
+     * <p>사람이 {@code implement} 를 <b>다시 누른다.</b> 그것이 게이트이고, 그래서 자동 재시도가
+     * 아니다 (S-6). 되돌아간 후보는 {@code attempt} 가 0 이 된다 — 공정한 세 바퀴를 받지 못했다.
+     *
+     * @param stage  어느 단계에서 미뤘나 — {@code AgentRun} 행의 라벨
+     * @param reason 🔴 우리 어휘로만. 예외 메시지·빌드 출력을 싣지 않는다 (S-4)
+     */
+    record Defer(AgentRun.Stage stage, String reason) implements RetryDecision {
+        public Defer {
+            if (stage == null) {
+                throw new IllegalArgumentException("어느 단계에서 미뤘는지는 필수다");
+            }
+            if (reason == null || reason.isBlank()) {
+                throw new IllegalArgumentException("미룬 사유는 필수다 — 사람이 다시 누를 근거다");
             }
         }
     }

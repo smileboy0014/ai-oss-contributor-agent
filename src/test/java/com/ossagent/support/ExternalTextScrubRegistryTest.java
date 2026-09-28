@@ -110,7 +110,9 @@ class ExternalTextScrubRegistryTest {
             // 낡은 PENDING 을 그대로 두면 이 표가 알리바이가 된다.
             Map.entry("GeneratedChange.diff", new Decision(Mechanism.FORCED_POINT,
                     "GeneratedChange.record(...) — 이 필드에 대입하는 유일한 지점이고"
-                            + " 거기서 redact 한다. 생성자는 protected 라 다른 경로가 없다."
+                            + " 거기서 redact 한다. 🔴 가릴 것이 있으면 저장하지 않고 거부한다(#96):"
+                            + " 이 컬럼은 정본 패치라 변조해 저장하면 PR 게이트의 재적용이 깨진다."
+                            + " 생성자는 protected 라 다른 경로가 없다."
                             + " 대상 저장소 코드 조각이 그대로 담기므로 저장소가 시크릿을"
                             + " 커밋해 뒀으면 diff 에 실려 온다 (#18)")),
             // 📌 둘은 #19·#20 이 머지된 뒤에도 PENDING 이었다 — 각자 값 타입만 세우고 「컬럼에

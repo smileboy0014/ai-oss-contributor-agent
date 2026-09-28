@@ -92,7 +92,9 @@ class SandboxPropertiesTest {
         assertThat(bound.pidsLimit()).isEqualTo(512L);
         assertThat(bound.maxOutputChars()).isEqualTo(200_000);
         assertThat(bound.dockerApiVersion()).isEqualTo("1.44");
-        assertThat(bound.defaultImage()).isEqualTo("eclipse-temurin:21-jdk");
+        assertThat(bound.defaultImage())
+                .as("stock temurin 에는 git 이 없어 DIFF 단계가 죽는다 — 우리 이미지다 (#97)")
+                .isEqualTo("oss-agent-sandbox:21");
         assertThat(bound.workspaceRoot())
                 .as("기동 시점에 절대경로로 확정된다 — 상대경로는 작업 디렉토리에 따라 달라진다")
                 .isAbsolute();

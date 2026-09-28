@@ -45,9 +45,10 @@ class CandidateStatusTest {
         // 이 전이가 없으면 후보가 거기 박혀 「사람에게 넘기는 신호」가 없다 — S-6.
         // ANALYZING → FAILED 가 같은 이유로 열려 있다
         EXPECTED.put(SELECTED, Set.of(IMPLEMENTING, REJECTED, FAILED));
-        EXPECTED.put(IMPLEMENTING, Set.of(TESTING, FAILED));
-        EXPECTED.put(TESTING, Set.of(REVIEWING, IMPLEMENTING, FAILED));
-        EXPECTED.put(REVIEWING, Set.of(READY_FOR_PR, IMPLEMENTING, FAILED));
+        // 루프 셋 → SELECTED 는 일시 장애로 미룬 것이다 — 후보를 태우지 않는다 (#98)
+        EXPECTED.put(IMPLEMENTING, Set.of(TESTING, SELECTED, FAILED));
+        EXPECTED.put(TESTING, Set.of(REVIEWING, IMPLEMENTING, SELECTED, FAILED));
+        EXPECTED.put(REVIEWING, Set.of(READY_FOR_PR, IMPLEMENTING, SELECTED, FAILED));
         EXPECTED.put(READY_FOR_PR, Set.of(PR_CREATED));
         EXPECTED.put(PR_CREATED, Set.of());
         EXPECTED.put(REJECTED, Set.of());

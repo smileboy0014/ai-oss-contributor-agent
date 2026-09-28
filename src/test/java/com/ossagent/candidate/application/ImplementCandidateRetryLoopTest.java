@@ -1,6 +1,7 @@
 package com.ossagent.candidate.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -11,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ossagent.agent.domain.SandboxTransientException;
 import com.ossagent.agent.domain.SandboxWorkspace;
 import com.ossagent.agent.domain.TargetWorkspaceSource;
 import com.ossagent.agent.domain.WorkspaceDiff;
@@ -23,6 +25,7 @@ import com.ossagent.candidate.domain.DiffReviewer;
 import com.ossagent.candidate.domain.FakeChangeVerifier;
 import com.ossagent.candidate.domain.FakeDiffReviewer;
 import com.ossagent.candidate.domain.GeneratedFile;
+import com.ossagent.candidate.domain.ImplementationDeferredException;
 import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.PlannedFile;
 import com.ossagent.candidate.domain.PlannedFile.ChangeKind;
@@ -145,6 +148,30 @@ class ImplementCandidateRetryLoopTest {
         assertThat(f.verifier().requests())
                 .as("상한(%d)을 넘겨 돌면 비용이 예산을 벗어난다", MAX_ATTEMPTS)
                 .hasSize(MAX_ATTEMPTS);
+        verify(f.retries(), never()).readyForPr(anyLong());
+    }
+
+    // ── 일시 장애는 미룬다 — 태우지 않는다 (#98) ─────────────────────────────
+
+    /**
+     * 🔴 이미지 없음·데몬 다운은 후보의 코드와 무관하다. 초안은 {@code Stop} 으로 보내
+     * 인프라 장애 한 번이 후보를 영구히 {@code FAILED} 로 지웠다.
+     *
+     * <p>「{@code fail} 이 불리지 않았다」만 보면 루프가 아예 안 돌아도 초록이다 —
+     * {@code defer} 가 <b>불렸는지</b>와 예외가 <b>웹 층까지 올라오는지</b>를 함께 본다.
+     */
+    @Test
+    @DisplayName("샌드박스 일시 장애면 FAILED 가 아니라 SELECTED 로 되돌리고 503 으로 올린다 — S-6")
+    void 일시_장애는_미룬다_S6(@TempDir Path root) throws Exception {
+        Fixture f = fixture(root);
+        f.verifier().thenFailWith(new SandboxTransientException("이미지가 로컬에 없다"));
+
+        assertThatThrownBy(() -> f.useCase().implement(CANDIDATE_ID))
+                .isInstanceOf(ImplementationDeferredException.class);
+
+        assertThat(f.verifier().requests()).as("한 바퀴만 돈다 — 재시도가 아니다").hasSize(1);
+        verify(f.retries()).defer(eq(CANDIDATE_ID), anyInt(), eq(AgentRun.Stage.VERIFY), anyString());
+        verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
         verify(f.retries(), never()).readyForPr(anyLong());
     }
 

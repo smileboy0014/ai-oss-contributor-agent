@@ -451,6 +451,27 @@ public class ContributionCandidate {
     }
 
     /**
+     * {@code IMPLEMENTING·TESTING·REVIEWING → SELECTED} — <b>일시 장애로 미룬다</b> (#98).
+     *
+     * <p>🔴 {@link #fail(Clock)} 과 가르는 축은 <b>실패의 원인이 후보의 코드인가</b>다.
+     * 이미지 없음·데몬 다운·LLM 5xx·clone 끊김은 준비되면 같은 요청이 성공한다. 그것을 종단으로
+     * 보내면 인프라 장애 한 번이 후보를 영구히 지운다 — 되돌릴 수 없는 쪽으로 실패하는 구조다.
+     *
+     * <p>🔴 <b>{@code selectedAt} 은 건드리지 않는다.</b> 「사람이 골랐다」는 사실은 그대로이고,
+     * 그 증거를 쓰는 곳은 {@link #selectByHuman} 하나뿐이다({@code ApprovalGateArchitectureTest}).
+     * 사람이 {@code implement} 를 <b>다시 누른다</b> — 자동 재시도가 아니라 게이트다 (S-6).
+     *
+     * <p>{@code attempt} 는 0 으로 돌아간다. 공정한 세 바퀴를 받지 못했고,
+     * {@code SELECTED} 는 「아직 착수 전」이라 그 값이 0 이어야 한다({@link #attempt} javadoc).
+     */
+    public StatusTransition deferImplementation(Clock clock) {
+        guardHumanSelection();
+        StatusTransition transition = transitionTo(CandidateStatus.SELECTED, clock);
+        this.attempt = 0;
+        return transition;
+    }
+
+    /**
      * {@code SELECTED → FAILED} — <b>구현 계획을 세우지 못했다</b> (종단). 이슈 #16.
      *
      * <p>🔴 {@link #fail(Clock)} 과 가른 이유는 <b>부를 수 있는 조건이 다르기</b> 때문이다.

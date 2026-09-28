@@ -90,7 +90,8 @@
 | `TESTING` | `IMPLEMENTING` | 테스트 실패 → 에러 분석 후 재시도 | 시스템 |
 | `REVIEWING` | `READY_FOR_PR` | AI 리뷰 통과 | 시스템 |
 | `REVIEWING` | `IMPLEMENTING` | 리뷰 실패 → 재시도 | 시스템 |
-| `IMPLEMENTING`·`TESTING`·`REVIEWING` | `FAILED` ● | **재시도 상한 소진** | 시스템 |
+| `IMPLEMENTING`·`TESTING`·`REVIEWING` | `FAILED` ● | **재시도 상한 소진** · 복구 불가 오류(계획 밖 경로 · diff 에 시크릿 패턴 #96 · 판정 불가) | 시스템 |
+| `IMPLEMENTING`·`TESTING`·`REVIEWING` | `SELECTED` | 🔴 **일시 장애로 미룬다** (#98) — 이미지 없음 · 데몬 다운 · LLM 5xx · clone 끊김. 후보의 코드와 무관하고 준비되면 같은 요청이 성공하므로 **태우지 않는다**. `attempt` 는 0 으로, `selectedAt` 은 그대로(사람이 골랐다는 사실은 변하지 않는다). 웹은 503 + `Retry-After`. **사람이 `implement` 를 다시 누른다** — 자동 재시도가 아니라 게이트다 | 시스템 |
 | `READY_FOR_PR` | `PR_CREATED` ● | PR 생성 요청 (`POST /candidates/{id}/pull-request`, #23) → 정책 재확인 → Fork 동기화 → **upstream 재clone + 저장 diff 적용 → Fork push**(S-1) → **draft** PR(S-2). push 는 게이트 **뒤**에서만 일어난다 | **사람이 트리거** |
 
 ● = **종단 상태**. `PR_CREATED` · `REJECTED` · `FAILED` 셋이다.

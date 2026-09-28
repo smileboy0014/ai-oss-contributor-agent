@@ -92,7 +92,9 @@ public class GeneratedChange {
      *
      * @param candidateId 다른 애그리거트로의 ID 참조
      * @param branchName  PRD §14 의 {@code oss-agent/issue-{번호}-{설명}}
-     * @param diff        🔴 <b>스크럽 전 원문</b>. 이 메서드가 스크럽한다
+     * @param diff        🔴 <b>스크럽 전 원문</b>. 이 메서드가 스크럽하되, <b>가릴 것이 있으면
+     *                    기록을 거부한다</b> — 정본 패치를 변조해 저장하지 않는다 (#96)
+     * @throws DiffContainsSecretException diff 에 시크릿 패턴이 있다 — 가려서 저장하면 패치가 깨진다
      */
     public static GeneratedChange record(Long candidateId, String branchName, String diff,
             java.time.Clock clock) {
@@ -107,10 +109,18 @@ public class GeneratedChange {
             //    null 은 「못 만들었다」다 — 뭉개면 전자로 읽혀 조용히 지나간다
             throw new IllegalArgumentException("diff 는 필수다 — 변경이 없으면 빈 문자열이다");
         }
+        // 🔴 스크럽은 하되 **바뀌면 거부한다** (#96 · S-4). 이 컬럼은 정본 패치라 PR 게이트가
+        //    upstream 에 다시 입힌다 — 가린 채 저장하면 hunk 가 안 맞거나 구조가 깨져 후보가
+        //    READY_FOR_PR 에 영구 고착된다. 가리지 않고 저장하는 것은 S-4 위반이다.
+        //    그래서 「시크릿 모양이 든 diff」는 기록하지 않는다 — 사람이 볼 일이다
+        String scrubbed = com.ossagent.support.secret.TokenRedactor.redact(diff);
+        if (!scrubbed.equals(diff)) {
+            throw new DiffContainsSecretException(candidateId);
+        }
         GeneratedChange change = new GeneratedChange();
         change.candidateId = candidateId;
         change.branchName = branchName;
-        change.diff = com.ossagent.support.secret.TokenRedactor.redact(diff);
+        change.diff = scrubbed;
         change.createdAt = java.time.Instant.now(clock);
         return change;
     }

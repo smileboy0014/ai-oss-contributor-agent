@@ -35,16 +35,19 @@ public final class SandboxImages {
     /**
      * 아는 Java 버전 → 이미지. <b>이 표 밖의 값은 이미지가 되지 않는다.</b>
      *
-     * <p>{@code eclipse-temurin} 을 쓰는 것은 {@code .env.example} 의 기본값과 같다.
+     * <p>🔴 stock {@code eclipse-temurin} 이 아니라 <b>우리가 빌드한</b> {@code oss-agent-sandbox} 다 (#97).
+     * temurin 에는 {@code git} 이 없어 검증의 DIFF 단계가 컨테이너 기동에서 죽었다. 이미지 정의는
+     * {@code docker/sandbox/Dockerfile}, 빌드는 {@code docker/sandbox/build.sh} — 이 표를 늘리면
+     * 그 스크립트의 목록도 늘린다. 앱은 이미지를 pull 하지도 빌드하지도 않는다.
      * 늘리려면 이 표를 고쳐야 하고, 그것이 리뷰에 보인다.
      */
     private static final Map<String, String> BY_JAVA_VERSION = Map.of(
-            "8", "eclipse-temurin:8-jdk",
-            "11", "eclipse-temurin:11-jdk",
-            "17", "eclipse-temurin:17-jdk",
-            "21", "eclipse-temurin:21-jdk",
-            "24", "eclipse-temurin:24-jdk",
-            "25", "eclipse-temurin:25-jdk");
+            "8", "oss-agent-sandbox:8",
+            "11", "oss-agent-sandbox:11",
+            "17", "oss-agent-sandbox:17",
+            "21", "oss-agent-sandbox:21",
+            "24", "oss-agent-sandbox:24",
+            "25", "oss-agent-sandbox:25");
 
     private SandboxImages() {
     }

@@ -61,7 +61,8 @@ docker compose --profile app up --build     # postgres + redis + app (:8080)
   샌드박스 컨테이너 자체에는 소켓이 들어가지 않습니다(S-3) — 바인드 목록을 코드가 워크스페이스·캐시 볼륨 둘로 고정합니다.
 - `SANDBOX_WORKSPACE_ROOT` 는 **호스트와 컨테이너에서 같은 절대경로**여야 합니다. 앱이 넘기는 바인드 소스를 데몬이 호스트 경로로 해석하기 때문입니다.
   기본값은 `$PWD/build/sandbox-workspaces` 이고 compose 가 같은 경로로 마운트합니다.
-- 샌드박스 이미지(`eclipse-temurin:21-jdk`)는 앱이 pull 하지 않습니다. `docker pull eclipse-temurin:21-jdk` 로 미리 받아 두세요.
+- 샌드박스 이미지(`oss-agent-sandbox:<java>`)는 앱이 pull 도 build 도 하지 않습니다. `docker/sandbox/build.sh` 로 미리 빌드해 두세요.
+  stock `eclipse-temurin` 에는 `git` 이 없어 검증의 DIFF 단계가 컨테이너 기동에서 죽습니다(#97) — 그래서 우리 이미지입니다.
 - 이미지 빌드는 테스트를 돌리지 않습니다(`-x test`). 테스트 게이트는 CI 입니다.
 
 ```bash
@@ -81,6 +82,7 @@ curl -X POST http://localhost:8080/api/repositories \
 ├── gradle/libs.versions.toml  의존성 버전 단일 관리
 ├── docker-compose.yml         postgres · redis · app(`--profile app`, 로컬 전체 기동)
 ├── Dockerfile                 앱 이미지 — 로컬 compose 전용 · 테스트 미실행
+├── docker/sandbox/            샌드박스 이미지(oss-agent-sandbox:<java>) — temurin + git · build.sh 로 미리 빌드 (#97)
 ├── .dockerignore
 ├── .env.example               환경변수 예시 (실제 값은 커밋 금지)
 ├── .githooks/pre-commit       커밋 차단 검사 2종 (core.hooksPath 로 등록)

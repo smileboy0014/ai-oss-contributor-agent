@@ -59,7 +59,8 @@ public record SandboxProperties(
         Integer maxOutputChars,
         String dockerApiVersion) {
 
-    private static final String DEFAULT_IMAGE = "eclipse-temurin:21-jdk";
+    // 🔴 stock temurin 이 아니다 — git 이 없어 DIFF 단계가 죽는다. docker/sandbox/build.sh 가 만든다 (#97)
+    private static final String DEFAULT_IMAGE = "oss-agent-sandbox:21";
     private static final String DEFAULT_WARM_NETWORK = "oss-agent-warm";
     private static final double DEFAULT_CPU_LIMIT = 2.0;
     private static final DataSize DEFAULT_MEMORY = DataSize.ofGigabytes(4);

@@ -17,6 +17,7 @@ import com.ossagent.candidate.domain.FailureFingerprint;
 import com.ossagent.candidate.domain.RetryDecision;
 import com.ossagent.candidate.domain.RetryPolicy;
 import com.ossagent.candidate.domain.GeneratedFile;
+import com.ossagent.candidate.domain.ImplementationDeferredException;
 import com.ossagent.candidate.domain.ImplementationPlan;
 import com.ossagent.candidate.domain.VerificationReport;
 import com.ossagent.candidate.domain.VerificationRequest;
@@ -271,6 +272,8 @@ public class ImplementCandidateUseCase {
             Prepared prepared) {
         Long candidateId = start.candidateId();
         int attempt = start.attempt();
+        // 🔴 미룸은 catch 밖에서 던진다 — try 안에서 던지면 아래 catch 가 잡아 FAILED 로 보낸다 (#98)
+        RetryDecision.Defer deferred = null;
         try {
             ImplementationPlan plan = prepared.plan();
             RepositoryCoordinates coordinates = prepared.coordinates();
@@ -298,6 +301,12 @@ public class ImplementCandidateUseCase {
                     retries.fail(candidateId, attempt, stop.stage(), stop.reason());
                     return;
                 }
+                if (decision instanceof RetryDecision.Defer defer) {
+                    // 🔴 일시 장애 — 후보를 태우지 않고 SELECTED 로 되돌린다. 사람이 다시 누른다 (#98)
+                    retries.defer(candidateId, attempt, defer.stage(), defer.reason());
+                    deferred = defer;
+                    break;
+                }
 
                 RetryDecision.Retry retry = (RetryDecision.Retry) decision;
                 previous = Optional.of(FailureFingerprint.of(retry.feedback()));
@@ -319,6 +328,11 @@ public class ImplementCandidateUseCase {
             log.warn("착수 실패 candidateId={} type={}", candidateId, e.getClass().getSimpleName(), e);
             retries.fail(candidateId, attempt, AgentRun.Stage.CODE,
                     "착수 실패 (" + e.getClass().getSimpleName() + ")");
+            return;
+        }
+        if (deferred != null) {
+            // 웹 층이 503 + Retry-After 로 번역한다 — 레이트리밋과 같은 「지연」이다
+            throw new ImplementationDeferredException(candidateId, deferred.reason());
         }
     }
 

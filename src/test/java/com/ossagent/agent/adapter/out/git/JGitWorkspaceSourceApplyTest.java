@@ -84,22 +84,37 @@ class JGitWorkspaceSourceApplyTest {
     }
 
     /**
-     * 🔴 <b>#95 의 원인을 회귀로 고정한다.</b> 이 단언이 거짓이 되는 날(JGit 이 인덱스를 안 건드리게
-     * 바뀌는 날)이 와도 {@code apply} 의 반환값 계약은 그대로다 — 다만 그때는 이 주석을 지운다.
+     * 🔴 <b>#95 의 원인과 #100 의 방어를 함께 고정한다.</b> JGit 의 {@code apply} 는 인덱스까지
+     * 갱신한다 — 그래서 {@code diff()} 가 인덱스를 HEAD 로 되돌린 뒤 세지 않으면 0건이 된다.
+     * 되돌리므로 지금은 비지 않는다. 그래도 {@code apply} 가 경로를 돌려주는 계약은 그대로다.
      */
     @Test
-    @DisplayName("적용 뒤 인덱스 대 작업 트리 diff 는 비어 있다 — 그래서 apply 가 경로를 돌려준다")
-    void 적용_뒤_diff_는_비어_있다() throws Exception {
+    @DisplayName("diff() 는 인덱스 상태와 무관하게 HEAD 대 작업 트리를 본다 — apply 가 인덱스를 갱신해도")
+    void diff_는_인덱스_상태와_무관하다() throws Exception {
         SandboxWorkspace first = cloneInto("ws1");
         write(first.path(), MODIFIED, "class Mod {\n  int x = 2;\n}\n");
+        write(first.path(), ADDED, "class New {}\n");
         String unifiedDiff = source.diff(first).unifiedDiff();
 
         SandboxWorkspace second = cloneInto("ws2");
         source.apply(second, unifiedDiff);
+        // 샌드박스 DIFF 단계가 하는 것과 같은 스테이징 — 되돌리지 않은 채로 둔다
+        try (Git git = Git.open(second.path().toFile())) {
+            git.add().addFilepattern(".").call();
+        }
 
-        assertThat(source.diff(second).isEmpty())
-                .as("apply 가 인덱스를 갱신하므로 diff() 로 경로를 다시 세면 0건이다")
-                .isTrue();
+        assertThat(source.diff(second).changedPaths())
+                .as("인덱스가 어떤 상태든 upstream(HEAD) 대 작업 트리로 센다 — #95·#100")
+                .containsExactlyInAnyOrder(MODIFIED, ADDED);
+    }
+
+    @Test
+    @DisplayName("diff() 는 새 파일을 본다 — 스테이징하지 않아도")
+    void diff_는_새_파일을_본다() throws Exception {
+        SandboxWorkspace ws = cloneInto("ws1");
+        write(ws.path(), ADDED, "class New {}\n");
+
+        assertThat(source.diff(ws).changedPaths()).containsExactly(ADDED);
     }
 
     @Test

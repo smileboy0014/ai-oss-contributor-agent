@@ -16,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.ResetCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
@@ -193,6 +194,12 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 DiffFormatter formatter = new DiffFormatter(out)) {
 
+            // 🔴 인덱스를 HEAD 로 먼저 되돌린다 (#100). 이 diff 는 「인덱스 대 작업 트리」라
+            //    인덱스에 무엇이 앉아 있느냐에 판정이 좌우된다 — 샌드박스 DIFF 단계가 `git add -A`
+            //    를 하고(#100), apply() 는 인덱스까지 갱신한다(#95). 여기서 되돌리면 어느 쪽이
+            //    먼저 돌았든 결과는 항상 「upstream(HEAD) 대 지금 작업 트리」다. MIXED 는 작업
+            //    트리를 건드리지 않는다
+            git.reset().setMode(ResetCommand.ResetType.MIXED).call();
             formatter.setRepository(git.getRepository());
             // 인덱스 대 작업 트리 — 얕은 clone 에서도 부모 커밋이 필요 없다
             List<DiffEntry> entries = formatter.scan(
@@ -210,7 +217,7 @@ public class JGitWorkspaceSource implements TargetWorkspaceSource {
             }
             return new WorkspaceDiff(out.toString(StandardCharsets.UTF_8), paths);
 
-        } catch (IOException e) {
+        } catch (IOException | GitAPIException e) {
             throw new WorkspaceException("변경분을 읽지 못했다", e);
         }
     }

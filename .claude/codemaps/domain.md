@@ -358,7 +358,11 @@ COMPILE ─▶ TEST ─▶ DIFF ─▶ (AI Review — 검증 밖, REVIEW 단계)
 |---|---|---|
 | `COMPILE` | `RepositoryPolicy.build_command` 종료 코드 | `Retry` → `IMPLEMENTING` 회귀 |
 | `TEST` | `RepositoryPolicy.test_command` 종료 코드. 규약에 명령이 없으면 **`UNDETERMINED`** | `Retry` / `UNDETERMINED` 면 `Stop` |
-| `DIFF` | 의도 외 변경 혼입 검사 — 계획 밖 파일 · 디버그 잔재 · 대량 포맷 노이즈. 출력이 `sandbox.max-output-chars` 에서 잘리면 **`UNDETERMINED`** | 〃 |
+| `DIFF` | 의도 외 변경 혼입 검사 — 계획 밖 파일 · 디버그 잔재 · 대량 포맷 노이즈. 출력이 `sandbox.max-output-chars` 에서 잘리면 **`UNDETERMINED`**. 🔴 `git add -A` → `git diff --cached` → `git reset` 순서다(#100) — 스테이징하지 않으면 **새 파일이 검사에서 빠진다** | 〃 |
+
+⚠️ 워밍·씨딩(Q-4)은 검증 안이 아니라 **코딩 전** `ChangeVerifier.prepare` 에서 원본 clone 으로 돈다(#99).
+검증 안에서 처음 워밍하면 생성 코드가 `testClasses` 컴파일에 섞여, 컴파일 실패가 종료코드(재시도 대상)가
+아니라 예외(종단)로 나와 3바퀴 루프가 첫 바퀴에서 끝났다.
 | AI Review (`REVIEW`) | LLM diff 리뷰 — 판정 셋(`PASS`·`CHANGES_REQUESTED`·`UNDETERMINED`) (#20) | `CHANGES_REQUESTED` → 회귀 · `UNDETERMINED` → `Stop` |
 
 ⚠️ PRD §15 의 「Unit → Integration → Format/Lint」 다섯 칸은 **셋으로 줄였다**(glossary 「Verification」).

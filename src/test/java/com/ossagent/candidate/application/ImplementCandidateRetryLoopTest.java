@@ -12,6 +12,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ossagent.agent.domain.SandboxPermanentException;
 import com.ossagent.agent.domain.SandboxTransientException;
 import com.ossagent.agent.domain.SandboxWorkspace;
 import com.ossagent.agent.domain.TargetWorkspaceSource;
@@ -85,7 +86,28 @@ class ImplementCandidateRetryLoopTest {
 
         assertThat(f.verifier().requests()).hasSize(1);
         assertThat(f.reviewer().calls()).hasSize(1);
+        assertThat(f.verifier().prepared())
+                .as("워밍은 코딩 전에 한 번 — 바퀴마다가 아니다 (#99)")
+                .containsExactly(CANDIDATE_ID);
         verify(f.retries()).readyForPr(CANDIDATE_ID);
+        verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
+    }
+
+    /**
+     * 🔴 워밍 실패는 <b>전이 앞</b>이다 (#99). 후보는 {@code SELECTED} 그대로이고 아무 바퀴도 돌지 않는다.
+     * 초안은 verify 안에서 처음 워밍해 생성 코드의 컴파일 실패가 첫 바퀴 종단이 됐다.
+     */
+    @Test
+    @DisplayName("워밍이 실패하면 전이 전에 올라간다 — 바퀴를 돌지 않고 후보는 SELECTED 그대로다")
+    void 워밍_실패는_전이_앞이다(@TempDir Path root) throws Exception {
+        Fixture f = fixture(root);
+        f.verifier().thenFailPrepareWith(new SandboxPermanentException("워밍이 0 아닌 종료코드로 끝났다"));
+
+        assertThatThrownBy(() -> f.useCase().implement(CANDIDATE_ID))
+                .isInstanceOf(SandboxPermanentException.class);
+
+        assertThat(f.verifier().requests()).as("검증 바퀴가 돌지 않는다").isEmpty();
+        verify(f.writer(), never()).start(anyLong(), org.mockito.ArgumentMatchers.anyBoolean());
         verify(f.retries(), never()).fail(anyLong(), anyInt(), any(), anyString());
     }
 
@@ -275,7 +297,8 @@ class ImplementCandidateRetryLoopTest {
             FakeChangeVerifier verifier,
             FakeDiffReviewer reviewer,
             RecordingCodingAgent coder,
-            CandidateRetryWriter retries) {
+            CandidateRetryWriter retries,
+            CandidateImplementationWriter writer) {
     }
 
     private static Fixture fixture(Path root) throws Exception {
@@ -343,7 +366,7 @@ class ImplementCandidateRetryLoopTest {
                         new io.micrometer.core.instrument.simple.SimpleMeterRegistry()),
                 java.time.Clock.fixed(java.time.Instant.EPOCH, java.time.ZoneOffset.UTC));
 
-        return new Fixture(useCase, verifier, reviewer, coder, retries);
+        return new Fixture(useCase, verifier, reviewer, coder, retries, writer);
     }
 
     private static RepositoryCoordinates coordinates() {

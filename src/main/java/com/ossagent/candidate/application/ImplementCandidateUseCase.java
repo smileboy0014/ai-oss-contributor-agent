@@ -219,6 +219,12 @@ public class ImplementCandidateUseCase {
         //   같은 좌표로 다시 fetch 하면 JGitWorkspaceSource 가 통째로 지우고 새로 만드니
         //   저장소당 1개가 상한이다. 실패한 후보의 트리 수명은 #26 이 본다
         SandboxWorkspace workspace = workspaces.fetch(coordinates, branch);
+        // 🔴 워밍·씨딩을 코딩 **전** 원본 clone 에서 끝낸다 (#99). verify 안에서 처음 워밍하면
+        //    생성 코드가 testClasses 컴파일에 섞여, 컴파일 실패가 종료코드(재시도 대상)가 아니라
+        //    SandboxPermanentException(종단)으로 나와 3바퀴 루프가 첫 바퀴에서 끝났다.
+        //    여기서 나는 예외는 전이 앞이라 후보를 건드리지 않는다
+        MDC.put(MDC_STAGE, "VERIFY");
+        verifier.prepare(candidateId, coordinates, workspace.path(), constraints);
         CodingInput input = new CodingInput(plan, contexts.build(admission.issue()), constraints);
 
         return new Prepared(plan, coordinates, constraints, branch, workspace, input);

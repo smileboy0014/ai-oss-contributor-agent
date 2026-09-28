@@ -16,7 +16,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
  */
 public interface GeneratedChangeRepository extends JpaRepository<GeneratedChange, Long> {
 
-    Optional<GeneratedChange> findFirstByCandidateIdOrderByCreatedAtDesc(Long candidateId);
+    Optional<GeneratedChange> findFirstByCandidateIdOrderByCreatedAtDescIdDesc(Long candidateId);
 
     long countByCandidateId(Long candidateId);
 }

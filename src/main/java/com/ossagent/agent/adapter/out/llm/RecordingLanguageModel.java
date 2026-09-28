@@ -75,7 +75,10 @@ public class RecordingLanguageModel implements LanguageModel {
         String previousStage = MDC.get("stage");
         String previousAttempt = MDC.get("attempt");
 
-        MDC.put("candidateId", String.valueOf(ctx.candidateId()));
+        // ⚠ POLICY 호출은 후보가 없다 — String.valueOf(null) 이면 리터럴 "null" 이 모든 줄에 찍힌다 (#116)
+        if (ctx.candidateId() != null) {
+            MDC.put("candidateId", String.valueOf(ctx.candidateId()));
+        }
         MDC.put("stage", ctx.callSite().name());
         MDC.put("attempt", String.valueOf(ctx.attempt()));
         try {

@@ -84,7 +84,7 @@ public class FindCandidatesUseCase {
                         .toList();
 
         CandidateDetailView.ChangeView latestChange =
-                changes.findFirstByCandidateIdOrderByCreatedAtDesc(id)
+                changes.findFirstByCandidateIdOrderByCreatedAtDescIdDesc(id)
                         .map(FindCandidatesUseCase::toChangeView)
                         .orElse(null);
 
